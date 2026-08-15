@@ -193,6 +193,9 @@ final class HybridBridgeController: NSObject, ObservableObject {
             guard let id = uuid(params["jobID"]) else { throw BridgeError.invalidParameters }
             store.cancelJob(id)
 
+        case "releaseMemory":
+            store.releaseMemory()
+
         case "clearJobs":
             store.clearFinishedJobs()
 
@@ -204,6 +207,18 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
         case "chooseModelRoot":
             chooseModelRoot()
+
+        case "setOutputDirectory":
+            guard let path = params["path"] as? String else {
+                throw BridgeError.invalidParameters
+            }
+            store.setOutputDirectory(path)
+
+        case "chooseOutputDirectory":
+            chooseOutputDirectory()
+
+        case "revealOutputDirectory":
+            store.revealOutputDirectory()
 
         case "installModel":
             guard let model = model(from: params) else { throw BridgeError.invalidParameters }
@@ -320,6 +335,9 @@ final class HybridBridgeController: NSObject, ObservableObject {
                 guard let descriptor = store.loras.first(where: { $0.id == loraID }) else {
                     throw BridgeError.invalidParameters
                 }
+                if let compatibilityError = store.loraCompatibilityError(at: descriptor.localURL) {
+                    throw BridgeError.assetActionFailed("LoRA 相容性檢查失敗：\(compatibilityError)")
+                }
                 let requestedScale = double(params["loraScale"]) ?? store.recipe.lora?.scale ?? 1
                 guard requestedScale.isFinite, (0...1).contains(requestedScale) else {
                     throw BridgeError.invalidParameters
@@ -329,6 +347,7 @@ final class HybridBridgeController: NSObject, ObservableObject {
                     localURL: descriptor.localURL,
                     scale: requestedScale
                 )
+                store.statusMessage = "LoRA 已通過基本相容性檢查。"
             }
         } else if let requestedScale = double(params["loraScale"]), var selection = store.recipe.lora {
             guard requestedScale.isFinite, (0...1).contains(requestedScale) else {
@@ -422,6 +441,20 @@ final class HybridBridgeController: NSObject, ObservableObject {
         store.setModelRoot(url.path)
     }
 
+    private func chooseOutputDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = URL(fileURLWithPath: store.outputDirectoryPath, isDirectory: true)
+        panel.message = "選擇圖片與影片輸出目錄"
+        panel.prompt = "選擇目錄"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        store.setOutputDirectory(url.path)
+    }
+
     private func assetURL(from params: [String: Any]) throws -> URL {
         guard let id = uuid(params["assetID"]),
               let asset = store.assets.first(where: { $0.id == id }),
@@ -447,13 +480,15 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
     private func downloadAsset(_ params: [String: Any]) throws {
         let sourceURL = try assetURL(from: params)
-        let asset = store.assets.first { $0.fileURL == sourceURL }
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.allowedContentTypes = [
             UTType(filenameExtension: sourceURL.pathExtension) ?? .png
         ]
-        panel.nameFieldStringValue = "\((asset?.title ?? sourceURL.deletingPathExtension().lastPathComponent)).\(sourceURL.pathExtension)"
+        // Keep the original filename when exporting an asset. Generated assets
+        // already carry the timestamped Image/video name; imported assets keep
+        // the name they arrived with.
+        panel.nameFieldStringValue = sourceURL.lastPathComponent
         panel.message = "將圖片儲存到"
         guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
         if FileManager.default.fileExists(atPath: destinationURL.path) {

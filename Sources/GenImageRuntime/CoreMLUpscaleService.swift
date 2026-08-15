@@ -5,12 +5,21 @@ import GenImageCore
 import Vision
 
 public actor CoreMLUpscaleService: ImageUpscaling {
-    private let outputDirectory: URL
+    private var outputDirectory: URL
     private let context = CIContext(options: [.cacheIntermediates: false])
     private var models: [String: MLModel] = [:]
 
     public init(outputDirectory: URL) {
         self.outputDirectory = outputDirectory
+    }
+
+    public func setOutputDirectory(_ outputDirectory: URL) {
+        self.outputDirectory = outputDirectory
+    }
+
+    /// 釋放已載入的 Core ML 模型，供記憶體壓力保護使用。
+    public func unload() {
+        models.removeAll(keepingCapacity: false)
     }
 
     public func upscale(
@@ -135,9 +144,7 @@ public actor CoreMLUpscaleService: ImageUpscaling {
             at: outputDirectory,
             withIntermediateDirectories: true
         )
-        let outputURL = outputDirectory.appendingPathComponent(
-            "\(request.asset.id.uuidString)-upscale-\(request.scale)x-\(UUID().uuidString).png"
-        )
+        let outputURL = OutputFileNaming.imageURL(in: outputDirectory, pathExtension: "png")
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         progress(0.94)
         try context.writePNGRepresentation(

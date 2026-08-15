@@ -30,6 +30,10 @@ const jobTimingEstimators = new Map();
 const ETA_SAMPLE_WINDOW_MS = 3 * 60 * 1_000;
 const ETA_MIN_SAMPLE_SPAN_MS = 5_000;
 const ETA_MIN_PROGRESS_DELTA = 0.001;
+const ETA_STEADY_PROGRESS_START = 0.25;
+const ETA_MIN_ESTIMATE_PROGRESS = 0.35;
+const ETA_MIN_ESTIMATE_ELAPSED_MS = 15_000;
+const ETA_MIN_ESTIMATE_DELTA = 0.05;
 const ETA_MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1_000;
 
 export function renderWorkspace(state, ui) {
@@ -456,7 +460,27 @@ function renderPreviewPanel(state, ui) {
               <input class="zoom-range" type="range" min="0.25" max="2.5" step="0.25" value="${ui.zoom}" data-ui-field="zoom" />
               <span class="section-note">${Math.round(ui.zoom * 100)}%</span>
               <button class="icon-button compact" data-action="zoomIn">＋</button>
-              <button class="ghost-button compact" data-action="fitPreview">${t("preview.fit")}</button>
+              <button
+                class="icon-button compact"
+                data-action="fitPreview"
+                title="${t("preview.fit")}"
+                aria-label="${t("preview.fit")}"
+              >
+                <svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="5" y="5" width="14" height="14" rx="2" />
+                  <path d="M9 2v3M15 2v3M9 22v-3M15 22v-3M2 9h3M2 15h3M22 9h-3M22 15h-3" />
+                </svg>
+              </button>
+              <button
+                class="icon-button compact"
+                data-action="revealOutputDirectory"
+                title="${t("preview.openOutputDirectory")}"
+                aria-label="${t("preview.openOutputDirectory")}"
+              >
+                <svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3.5 6.5h6l2 2h9v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
+                </svg>
+              </button>
             `
         }
       </div>
@@ -602,12 +626,12 @@ function assetSelection(asset, state) {
 }
 
 export function isInferenceBusy(state) {
-  return state.jobs.some((job) => ["queued", "running"].includes(job.state));
+  return state.jobs.some((job) => ["queued", "running", "cancelling"].includes(job.state));
 }
 
 function isImageDescriptionBusy(state) {
   return state.jobs.some((job) =>
-    job.action === "describe" && ["queued", "running"].includes(job.state),
+    job.action === "describe" && ["queued", "running", "cancelling"].includes(job.state),
   );
 }
 
@@ -693,7 +717,7 @@ function renderAssetInspector(state) {
 }
 
 function renderJobsPanel(state) {
-  const running = state.jobs.filter((job) => job.state === "queued" || job.state === "running").length;
+  const running = state.jobs.filter((job) => ["queued", "running", "cancelling"].includes(job.state)).length;
   return `
     <section class="inspector-jobs">
       <div class="job-header">
@@ -728,15 +752,18 @@ export function refreshJobsPanel(state, container = document) {
 
 function renderJob(job) {
   const cancellable = job.state === "running" || job.state === "queued";
+  const cancelling = job.state === "cancelling";
   return `
     <div class="job-card inspector-job-card">
       <strong>${actionLabel(job.action)}</strong>
       ${
         cancellable
           ? `<button class="ghost-button compact" data-action="cancelJob" data-job-id="${job.id}">×</button>`
+          : cancelling
+            ? `<span class="job-cancelling-indicator" role="status" aria-label="${t("job.cancelling")}" title="${t("job.cancelling")}"></span>`
           : `<span class="section-note">${jobLabel(job.state)}</span>`
       }
-      <progress value="${job.progress}" max="1"></progress>
+      <progress class="${cancelling ? "is-cancelling" : ""}" value="${job.progress}" max="1"></progress>
       <span class="section-note job-status-line">
         ${jobLabel(job.state)} · ${percent(job.progress)}<span data-job-timing="${escapeHTML(job.id)}">${escapeHTML(jobTimingSuffix(job))}</span>
       </span>
@@ -784,27 +811,61 @@ function estimateRemainingTime(job, progress, startedAt, now) {
       startedAt,
       progress: 0,
       lastProgressAt: startedAt,
-      samples: [{ time: startedAt, progress: 0 }],
+      samples: [],
       rate: null,
       finishAt: null,
     };
     jobTimingEstimators.set(job.id, estimator);
   }
 
-  if (progress - estimator.progress >= ETA_MIN_PROGRESS_DELTA) {
+  if (!estimator.samples.length && progress >= ETA_STEADY_PROGRESS_START) {
+    estimator.progress = progress;
+    estimator.lastProgressAt = now;
+    estimator.samples.push({ time: now, progress });
+  } else if (estimator.samples.length
+      && progress - estimator.progress >= ETA_MIN_PROGRESS_DELTA) {
     recordProgressSample(estimator, progress, now);
   }
-  if (!Number.isFinite(estimator.finishAt)) return null;
+  // Loading the model and encoding the prompt use coarse milestone values
+  // (2%, 12%, 18%, 24%, 25%). Do not extrapolate those milestones as if they
+  // were steady denoising progress; wait for a stable post-initialization
+  // sample window before showing a numeric ETA.
+  if (progress < ETA_MIN_ESTIMATE_PROGRESS
+      || now - startedAt < ETA_MIN_ESTIMATE_ELAPSED_MS) {
+    return null;
+  }
+  const fallbackRemaining = fallbackRemainingTime(progress, startedAt, now);
+  if (!estimator.samples.length
+      || progress - estimator.samples[0].progress < ETA_MIN_ESTIMATE_DELTA
+      || !Number.isFinite(estimator.finishAt)) {
+    return fallbackRemaining;
+  }
 
   const updateIntervals = estimator.samples.slice(1).map((sample, index) =>
     sample.time - estimator.samples[index].time,
   ).filter((duration) => duration > 0);
   const typicalInterval = median(updateIntervals) ?? 15_000;
   const staleLimit = Math.min(3 * 60 * 1_000, Math.max(30_000, typicalInterval * 3));
-  if (now - estimator.lastProgressAt > staleLimit) return null;
+  if (now - estimator.lastProgressAt > staleLimit) return fallbackRemaining;
 
-  const remaining = estimator.finishAt - now;
-  return remaining > 0 && remaining <= ETA_MAX_DURATION_MS ? remaining : null;
+  const countdownRemaining = estimator.finishAt - now;
+  const rateRemaining = Number.isFinite(estimator.rate) && estimator.rate > 0
+    ? (1 - progress) / estimator.rate
+    : null;
+  const remaining = countdownRemaining > 0 ? countdownRemaining : rateRemaining;
+  return Number.isFinite(remaining) && remaining > 0 && remaining <= ETA_MAX_DURATION_MS
+    ? remaining
+    : fallbackRemaining;
+}
+
+function fallbackRemainingTime(progress, startedAt, now) {
+  const elapsed = now - startedAt;
+  if (elapsed <= 0 || progress <= 0 || progress >= 1) return null;
+  const rate = progress / elapsed;
+  const remaining = (1 - progress) / rate;
+  return Number.isFinite(remaining) && remaining > 0 && remaining <= ETA_MAX_DURATION_MS
+    ? remaining
+    : null;
 }
 
 function recordProgressSample(estimator, progress, now) {

@@ -1,0 +1,64 @@
+--- a/Sources/ZImage/Model/Transformer/ZImageTransformer2D.swift
++++ b/Sources/ZImage/Model/Transformer/ZImageTransformer2D.swift
+@@ -182,6 +182,49 @@
+     )
+   }
+
++  public func loadPadTokens(
++    from weights: [String: MLXArray], groupSize: Int = 32, bits: Int = 8,
++    mode: QuantizationMode = .affine
++  ) {
++    setPadTokens(
++      xPad: decodedPadToken(
++        "x_pad_token", weights: weights, groupSize: groupSize, bits: bits, mode: mode
++      ),
++      capPad: decodedPadToken(
++        "cap_pad_token", weights: weights, groupSize: groupSize, bits: bits, mode: mode
++      )
++    )
++  }
++
++  private func decodedPadToken(
++    _ key: String,
++    weights: [String: MLXArray],
++    groupSize: Int,
++    bits: Int,
++    mode: QuantizationMode
++  ) -> MLXArray? {
++    guard let packed = weights[key] else { return nil }
++    let token: MLXArray
++    if let scales = weights["\(key).scales"] {
++      token = MLX.dequantized(
++        packed,
++        scales: scales,
++        biases: weights["\(key).biases"],
++        groupSize: groupSize,
++        bits: bits,
++        mode: mode,
++        dtype: .bfloat16
++      )
++    } else {
++      token = packed
++    }
++
++    guard token.ndim > 0, token.dim(token.ndim - 1) == configuration.dim else {
++      return nil
++    }
++    return token
++  }
++
+   public func setPadTokens(xPad: MLXArray?, capPad: MLXArray?) {
+     if let xPad {
+       let padDim = xPad.dim(xPad.ndim - 1)
+--- a/Sources/ZImage/Weights/WeightsMapping.swift
++++ b/Sources/ZImage/Weights/WeightsMapping.swift
+@@ -100,8 +100,7 @@
+     model.loadCapEmbedderWeights(from: weights, groupSize: groupSize, bits: bits, mode: mode)
+     model.loadXEmbedderWeights(from: weights, groupSize: groupSize, bits: bits, mode: mode)
+     model.loadFinalLayerWeights(from: weights, groupSize: groupSize, bits: bits, mode: mode)
+-
+-    model.setPadTokens(xPad: weights["x_pad_token"], capPad: weights["cap_pad_token"])
++    model.loadPadTokens(from: weights, groupSize: groupSize, bits: bits, mode: mode)
+   }
+
+   public static func applyTextEncoder(

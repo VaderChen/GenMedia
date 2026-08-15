@@ -1,0 +1,25 @@
+--- a/Sources/ZImage/Pipeline/ZImagePipeline.swift
++++ b/Sources/ZImage/Pipeline/ZImagePipeline.swift
+@@ -126,6 +126,11 @@
+     logger.info("Model unloaded from memory")
+   }
+
++  public func trimCache() {
++    Memory.clearCache()
++    logger.info("Released reusable MLX buffers while keeping the model resident")
++  }
++
+   public func unloadLoRA() {
+     guard currentLoRA != nil else { return }
+
+@@ -877,7 +882,9 @@
+       width: request.width
+     )
+     MLX.eval(MLXArray([]))
+-    Memory.clearCache()
++    if residencyPolicy == .oneShot {
++      Memory.clearCache()
++    }
+
+     return decoded
+   }

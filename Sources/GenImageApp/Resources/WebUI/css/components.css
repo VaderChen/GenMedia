@@ -265,6 +265,22 @@ button:disabled {
   width: 100%;
 }
 
+.metric-level-low progress {
+  accent-color: var(--positive);
+}
+
+.metric-level-medium progress {
+  accent-color: var(--warning);
+}
+
+.metric-level-high progress {
+  accent-color: var(--danger);
+}
+
+.metric-level-unavailable progress {
+  accent-color: var(--text-muted);
+}
+
 .creation-toggle {
   flex: 0 0 auto;
 }
@@ -477,6 +493,16 @@ button:disabled {
   stroke-linejoin: round;
   stroke-width: 1.8;
   width: 18px;
+}
+
+.toolbar-icon {
+  fill: none;
+  height: 17px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  width: 17px;
 }
 
 @media (max-width: 1050px) {
@@ -1300,6 +1326,54 @@ button:disabled {
   white-space: nowrap;
 }
 
+.job-cancelling-indicator,
+.button-spinner {
+  animation: genimage-spin 0.9s linear infinite;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  border-top-color: var(--accent);
+  display: inline-block;
+  height: 13px;
+  width: 13px;
+}
+
+.job-cancelling-indicator {
+  align-self: center;
+  justify-self: center;
+}
+
+.job-card progress.is-cancelling {
+  opacity: 0.65;
+}
+
+.memory-release-button {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 30px;
+  height: 30px;
+  justify-content: center;
+  grid-column: 2;
+  grid-row: 1;
+  margin-top: 0;
+  min-height: 30px;
+  padding: 6px;
+  width: 30px;
+}
+
+.memory-release-icon {
+  fill: none;
+  height: 17px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+  width: 17px;
+}
+
+@keyframes genimage-spin {
+  to { transform: rotate(360deg); }
+}
+
 .job-error-message {
   color: var(--danger);
   font-size: 10px;
@@ -1379,6 +1453,14 @@ button:disabled {
   flex-direction: column;
   gap: 11px;
   padding: 16px;
+}
+
+.profile-card.is-available {
+  border-color: color-mix(in srgb, var(--positive) 52%, var(--line));
+}
+
+.profile-card.is-unavailable {
+  border-color: var(--line);
 }
 
 .card-title-row {
@@ -1621,6 +1703,7 @@ button:disabled {
 }
 
 .settings-page {
+  align-content: start;
   display: grid;
   gap: 14px;
   grid-template-columns: minmax(0, 760px);
@@ -1637,6 +1720,30 @@ button:disabled {
   gap: 24px;
   justify-content: space-between;
   padding: 18px;
+}
+
+.settings-card.general-settings-card {
+  box-sizing: border-box;
+  flex: 0 0 140px;
+  height: 140px;
+}
+
+.settings-card.appearance-settings-card {
+  box-sizing: border-box;
+  flex: 0 0 205px;
+  height: 205px;
+}
+
+.settings-card.output-settings-card {
+  box-sizing: border-box;
+  flex: 0 0 160px;
+  height: 160px;
+}
+
+.settings-card.mcp-settings-card {
+  box-sizing: border-box;
+  flex: 0 0 220px;
+  height: 220px;
 }
 
 .settings-card.vertical {
@@ -1666,6 +1773,76 @@ button:disabled {
 
 .settings-control .field {
   flex: 1;
+}
+
+.settings-path-control {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.settings-path-control .field {
+  flex: 1;
+  min-width: 0;
+  user-select: text;
+}
+
+.settings-path-control .icon-button {
+  flex: 0 0 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 6px;
+  width: 32px;
+}
+
+.settings-path-control svg {
+  fill: none;
+  height: 18px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  width: 18px;
+}
+
+.profile-nav-hint {
+  align-items: flex-start;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  color: white;
+  display: flex;
+  font-size: 11px;
+  gap: 7px;
+  line-height: 1.35;
+  margin: 4px 0 5px;
+  padding: 9px 9px 9px 10px;
+}
+
+.profile-nav-hint-icon {
+  flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.profile-nav-hint > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-nav-hint-dismiss {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 16px;
+  line-height: 1;
+  opacity: .8;
+  padding: 0;
+}
+
+.profile-nav-hint-dismiss:hover {
+  opacity: 1;
 }
 
 .theme-grid {

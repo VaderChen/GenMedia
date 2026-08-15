@@ -40,6 +40,7 @@ public enum ModelCapability: String, CaseIterable, Codable, Hashable, Sendable, 
 }
 
 public enum ModelQuantization: String, CaseIterable, Codable, Hashable, Sendable {
+    case twoBit = "2-bit"
     case bf16 = "BF16"
     case fp16 = "FP16"
     case eightBit = "8-bit"
@@ -525,6 +526,7 @@ public struct WorkflowOperation: Identifiable, Codable, Hashable, Sendable {
 public enum JobState: String, Codable, Hashable, Sendable {
     case queued
     case running
+    case cancelling
     case completed
     case cancelled
     case failed

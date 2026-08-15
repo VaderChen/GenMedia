@@ -17,10 +17,22 @@ public actor HuggingFaceModelInstaller {
     public static let int8ModelID = "qwen-image-edit-2511@mlx-int8"
     public static let fp16ModelID = "qwen-image-edit-2511@mlx-fp16"
     public static let zImage8BitModelID = "mzbac/z-image-turbo-8bit"
+    public static let zImageMLX2BitModelID = "andrevp/Z-Image-Turbo-MLX-2bit"
+    public static let zImageMLX4BitModelID = "andrevp/Z-Image-Turbo-MLX-4bit"
+    public static let zImageMLX8BitModelID = "andrevp/Z-Image-Turbo-MLX-8bit"
+    public static let zImageGiniiki4BitModelID = "Giniiki/Z-Image-Turbo-mlx-4bit"
     public static let zImageFP16ModelID = "Tongyi-MAI/Z-Image-Turbo"
     public static let zImagePixelArtLoRAModelID = "tarn59/pixel_art_style_lora_z_image_turbo"
+    public static let zImageRealismLoRAModelID = "suayptalha/Z-Image-Turbo-Realism-LoRA"
+    public static let zImageClassicPaintingLoRAModelID = "renderartist/Classic-Painting-Z-Image-Turbo-LoRA"
+    public static let zImageColoringBookLoRAModelID = "renderartist/Coloring-Book-Z-Image-Turbo-LoRA"
+    public static let civitaiAsianBeautiesLoRAModelID = "civitai/2465401"
+    public static let civitaiLightningLoRAModelID = "civitai/2709343"
+    public static let civitaiFlatAnimeLoRAModelID = "civitai/2449645"
+    public static let civitaiDioramaLoRAModelID = "civitai/2608073"
     public static let ltx23UnionControlLoRAModelID = "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control"
     public static let captionerModelID = "local-captioner-3b@q4"
+    public static let nsfwCaptionerModelID = "qwen3-vl-8b-nsfw-caption-v45@mxfp4"
     public static let ltx23DistilledModelID = "Lightricks/LTX-2.3@distilled-1.1"
     public static let ltx23MLXQ4ModelID = "dgrauet/ltx-2.3-mlx-q4"
     public static let miniMaxH3MLX8BitModelID = "pipenetwork/MiniMax-H3-MLX-8bit"
@@ -34,6 +46,29 @@ public actor HuggingFaceModelInstaller {
         var destinationSubdirectory: String
         var prefixes: [String]
         var exactFiles: Set<String>
+        var directURL: URL?
+        var directFileName: String?
+        var directSize: Int64?
+
+        init(
+            repository: String,
+            revision: String = "main",
+            destinationSubdirectory: String,
+            prefixes: [String],
+            exactFiles: Set<String>,
+            directURL: URL? = nil,
+            directFileName: String? = nil,
+            directSize: Int64? = nil
+        ) {
+            self.repository = repository
+            self.revision = revision
+            self.destinationSubdirectory = destinationSubdirectory
+            self.prefixes = prefixes
+            self.exactFiles = exactFiles
+            self.directURL = directURL
+            self.directFileName = directFileName
+            self.directSize = directSize
+        }
 
         func includes(_ path: String) -> Bool {
             exactFiles.contains(path) || prefixes.contains { path.hasPrefix($0) }
@@ -77,12 +112,65 @@ public actor HuggingFaceModelInstaller {
         var files: [ManifestFile]
     }
 
+    private struct QuantizeConfig: Decodable, Sendable {
+        var quantization: QuantizeSpecification
+    }
+
+    private struct ComponentConfig: Decodable, Sendable {
+        var quantization: QuantizeSpecification?
+    }
+
+    private struct QuantizeSpecification: Decodable, Sendable {
+        var bits: Int
+        var groupSize: Int
+        var mode: String?
+
+        enum CodingKeys: String, CodingKey {
+            case bits
+            case groupSize = "group_size"
+            case mode
+        }
+    }
+
+    private struct GeneratedQuantizationManifest: Encodable, Sendable {
+        var modelId: String?
+        var groupSize: Int
+        var bits: Int
+        var mode: String
+        var layers: [GeneratedQuantizedLayer]
+
+        enum CodingKeys: String, CodingKey {
+            case modelId = "model_id"
+            case groupSize = "group_size"
+            case bits
+            case mode
+            case layers
+        }
+    }
+
+    private struct GeneratedQuantizedLayer: Encodable, Sendable {
+        var name: String
+        var shape: [Int]
+        var inDim: Int
+        var outDim: Int
+        var file: String
+
+        enum CodingKeys: String, CodingKey {
+            case name
+            case shape
+            case inDim = "in_dim"
+            case outDim = "out_dim"
+            case file
+        }
+    }
+
     private struct ResolvedFile: Sendable {
         var repository: String
         var revision: String
         var remotePath: String
         var relativePath: String
         var size: Int64
+        var downloadURL: URL?
     }
 
     public init() {}
@@ -113,18 +201,21 @@ public actor HuggingFaceModelInstaller {
         let files = try await resolveFiles(plan: plan)
         guard !files.isEmpty else { throw ModelInstallerError.emptyRepository(modelID) }
         let totalBytes = files.reduce(Int64(0)) { $0 + $1.size }
-        var completedBytes = files.reduce(Int64(0)) { result, file in
+        let completedBytes = files.reduce(Int64(0)) { result, file in
             let url = destination.appendingPathComponent(file.relativePath)
             return result + (Self.fileSize(at: url) == file.size ? file.size : 0)
         }
-        progress(
-            ModelInstallProgress(
-                fractionCompleted: Self.fraction(completedBytes, totalBytes),
-                downloadedBytes: completedBytes,
-                totalBytes: totalBytes
-            )
+        let progressTracker = DownloadProgressTracker(
+            initialBytes: completedBytes,
+            totalBytes: totalBytes,
+            progress: progress
         )
+        progressTracker.emit()
 
+        // Link already available files first. Network downloads are scheduled below
+        // with a small concurrency limit so multi-shard models can use more of the
+        // available bandwidth without creating an unbounded number of connections.
+        var pendingDownloads: [ResolvedFile] = []
         for file in files {
             try Task.checkCancellation()
             let fileURL = destination.appendingPathComponent(file.relativePath)
@@ -145,14 +236,7 @@ public actor HuggingFaceModelInstaller {
                 }
                 do {
                     try FileManager.default.linkItem(at: reusableURL, to: fileURL)
-                    completedBytes += file.size
-                    progress(
-                        ModelInstallProgress(
-                            fractionCompleted: Self.fraction(completedBytes, totalBytes),
-                            downloadedBytes: completedBytes,
-                            totalBytes: totalBytes
-                        )
-                    )
+                    progressTracker.markCompleted(file.relativePath, bytes: file.size)
                     continue
                 } catch {
                     if FileManager.default.fileExists(atPath: fileURL.path) {
@@ -160,45 +244,45 @@ public actor HuggingFaceModelInstaller {
                     }
                 }
             }
+            pendingDownloads.append(file)
+        }
+        // Start the largest shards first so small metadata files do not occupy
+        // download slots while the multi-gigabyte weights wait in the queue.
+        pendingDownloads.sort { lhs, rhs in
+            if lhs.size != rhs.size { return lhs.size > rhs.size }
+            return lhs.relativePath.localizedStandardCompare(rhs.relativePath) == .orderedAscending
+        }
 
-            let request = try Self.downloadRequest(for: file)
-            let completedBeforeFile = completedBytes
-            let downloader = FileDownloadDelegate(
-                destination: fileURL,
-                expectedBytes: file.size,
-                progress: { received, _ in
-                    let downloaded = min(totalBytes, completedBeforeFile + received)
-                    progress(
-                        ModelInstallProgress(
-                            fractionCompleted: Self.fraction(downloaded, totalBytes),
-                            downloadedBytes: downloaded,
-                            totalBytes: totalBytes
-                        )
+        var iterator = pendingDownloads.makeIterator()
+        let maxConcurrentDownloads = min(4, max(1, pendingDownloads.count))
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<maxConcurrentDownloads {
+                guard let file = iterator.next() else { break }
+                group.addTask {
+                    try await self.download(
+                        file,
+                        destination: destination,
+                        progressTracker: progressTracker
                     )
                 }
-            )
-            do {
-                try await downloader.start(request: request)
-            } catch {
+            }
+
+            while try await group.next() != nil {
                 try Task.checkCancellation()
-                throw error
+                guard let file = iterator.next() else { continue }
+                group.addTask {
+                    try await self.download(
+                        file,
+                        destination: destination,
+                        progressTracker: progressTracker
+                    )
+                }
             }
-            guard Self.fileSize(at: fileURL) == file.size else {
-                throw ModelInstallerError.sizeMismatch(
-                    path: file.relativePath,
-                    expected: file.size,
-                    actual: Self.fileSize(at: fileURL)
-                )
-            }
-            completedBytes += file.size
-            progress(
-                ModelInstallProgress(
-                    fractionCompleted: Self.fraction(completedBytes, totalBytes),
-                    downloadedBytes: completedBytes,
-                    totalBytes: totalBytes
-                )
-            )
         }
+
+        progressTracker.emit()
+
+        try Self.materializeQuantizationManifest(at: destination)
 
         let manifest = InstallManifest(
             schemaVersion: 2,
@@ -222,11 +306,170 @@ public actor HuggingFaceModelInstaller {
         return Self.runtimeURL(for: plan, destination: destination)
     }
 
+    private func download(
+        _ file: ResolvedFile,
+        destination: URL,
+        progressTracker: DownloadProgressTracker
+    ) async throws {
+        try Task.checkCancellation()
+        let fileURL = destination.appendingPathComponent(file.relativePath)
+
+        // A single multi-gigabyte shard can otherwise be limited by the
+        // throughput of one CDN connection. Use HTTP Range requests for large
+        // files, and fall back to the regular resumable download if the source
+        // does not support byte ranges.
+        if file.size >= 256 * 1_048_576 {
+            let segmentKeys = Self.segmentKeys(for: file)
+            do {
+                try await downloadSegmented(
+                    file,
+                    fileURL: fileURL,
+                    progressTracker: progressTracker,
+                    segmentKeys: segmentKeys
+                )
+                progressTracker.finalizeSegmented(
+                    file.relativePath,
+                    segmentKeys: segmentKeys,
+                    bytes: file.size
+                )
+                return
+            } catch {
+                if Task.isCancelled { throw error }
+                progressTracker.discard(segmentKeys)
+                try? FileManager.default.removeItem(at: fileURL.appendingPathExtension("segments"))
+            }
+        }
+
+        let request = try Self.downloadRequest(for: file)
+        let downloader = FileDownloadDelegate(
+            destination: fileURL,
+            expectedBytes: file.size,
+            progress: { received, _ in
+                progressTracker.report(file.relativePath, received: received)
+            }
+        )
+        do {
+            try await downloader.start(request: request)
+        } catch {
+            try Task.checkCancellation()
+            throw error
+        }
+        let actual = Self.fileSize(at: fileURL)
+        guard actual == file.size else {
+            throw ModelInstallerError.sizeMismatch(
+                path: file.relativePath,
+                expected: file.size,
+                actual: actual
+            )
+        }
+        progressTracker.markCompleted(file.relativePath, bytes: file.size)
+    }
+
+    private func downloadSegmented(
+        _ file: ResolvedFile,
+        fileURL: URL,
+        progressTracker: DownloadProgressTracker,
+        segmentKeys: [String]
+    ) async throws {
+        let segmentCount = segmentKeys.count
+        let segmentSize = file.size / Int64(segmentCount)
+        let stagingDirectory = fileURL.appendingPathExtension("segments")
+        try FileManager.default.createDirectory(
+            at: stagingDirectory,
+            withIntermediateDirectories: true
+        )
+
+        var ranges: [(start: Int64, end: Int64)] = []
+        for index in 0..<segmentCount {
+            let start = Int64(index) * segmentSize
+            let end = index == segmentCount - 1
+                ? file.size - 1
+                : start + segmentSize - 1
+            ranges.append((start, end))
+        }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for (index, range) in ranges.enumerated() {
+                let partURL = stagingDirectory.appendingPathComponent(
+                    String(format: "part-%02d", index)
+                )
+                let expectedBytes = range.end - range.start + 1
+                let key = segmentKeys[index]
+                group.addTask {
+                    try Task.checkCancellation()
+                    if Self.fileSize(at: partURL) == expectedBytes {
+                        progressTracker.report(key, received: expectedBytes)
+                        return
+                    }
+                    var request = try Self.downloadRequest(for: file)
+                    request.setValue(
+                        "bytes=\(range.start)-\(range.end)",
+                        forHTTPHeaderField: "Range"
+                    )
+                    request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+                    let downloader = FileDownloadDelegate(
+                        destination: partURL,
+                        expectedBytes: expectedBytes,
+                        progress: { received, _ in
+                            progressTracker.report(key, received: received)
+                        }
+                    )
+                    try await downloader.start(request: request)
+                    guard Self.fileSize(at: partURL) == expectedBytes else {
+                        throw ModelInstallerError.sizeMismatch(
+                            path: file.relativePath,
+                            expected: expectedBytes,
+                            actual: Self.fileSize(at: partURL)
+                        )
+                    }
+                }
+            }
+            while try await group.next() != nil {
+                try Task.checkCancellation()
+            }
+        }
+
+        let stagedURL = fileURL.appendingPathExtension("staged")
+        try? FileManager.default.removeItem(at: stagedURL)
+        FileManager.default.createFile(atPath: stagedURL.path, contents: nil)
+        let output = try FileHandle(forWritingTo: stagedURL)
+        defer { try? output.close() }
+        for index in 0..<segmentCount {
+            let partURL = stagingDirectory.appendingPathComponent(
+                String(format: "part-%02d", index)
+            )
+            let input = try FileHandle(forReadingFrom: partURL)
+            defer { try? input.close() }
+            while let data = try input.read(upToCount: 1_048_576), !data.isEmpty {
+                try output.write(contentsOf: data)
+            }
+        }
+        try output.close()
+        guard Self.fileSize(at: stagedURL) == file.size else {
+            throw ModelInstallerError.sizeMismatch(
+                path: file.relativePath,
+                expected: file.size,
+                actual: Self.fileSize(at: stagedURL)
+            )
+        }
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            try FileManager.default.removeItem(at: fileURL)
+        }
+        try FileManager.default.moveItem(at: stagedURL, to: fileURL)
+        try? FileManager.default.removeItem(at: stagingDirectory)
+    }
+
+    private nonisolated static func segmentKeys(for file: ResolvedFile) -> [String] {
+        let count = min(4, max(2, Int(ceil(Double(file.size) / Double(256 * 1_048_576)))))
+        return (0..<count).map { "\(file.relativePath)#segment-\($0)" }
+    }
+
     public nonisolated static func verify(modelID: String, rootURL: URL) throws -> URL {
         guard let plan = plan(for: modelID) else {
             throw ModelInstallerError.unsupportedModel(modelID)
         }
         let destination = rootURL.appendingPathComponent(plan.directoryName, isDirectory: true)
+        try materializeQuantizationManifest(at: destination)
         let manifestURL = destination.appendingPathComponent("genimage-model.json")
         guard let data = try? Data(contentsOf: manifestURL),
               let manifest = try? JSONDecoder.genImageManifest.decode(InstallManifest.self, from: data),
@@ -263,6 +506,26 @@ public actor HuggingFaceModelInstaller {
     private func resolveFiles(plan: InstallPlan) async throws -> [ResolvedFile] {
         var result: [ResolvedFile] = []
         for source in plan.sources {
+            if let directURL = source.directURL {
+                guard let fileName = source.directFileName,
+                      let size = source.directSize,
+                      size > 0 else {
+                    throw ModelInstallerError.noMatchingFiles(source.repository)
+                }
+                result.append(
+                    ResolvedFile(
+                        repository: source.repository,
+                        revision: source.revision,
+                        remotePath: fileName,
+                        relativePath: source.destinationSubdirectory.isEmpty
+                            ? fileName
+                            : source.destinationSubdirectory + "/" + fileName,
+                        size: size,
+                        downloadURL: directURL
+                    )
+                )
+                continue
+            }
             let tree = try await Self.fetchTree(repository: source.repository, revision: source.revision)
             let selected = tree.filter {
                 $0.type == "file"
@@ -282,7 +545,8 @@ public actor HuggingFaceModelInstaller {
                     revision: source.revision,
                     remotePath: $0.path,
                     relativePath: relativePath,
-                    size: $0.size
+                    size: $0.size,
+                    downloadURL: nil
                 )
             })
         }
@@ -309,6 +573,17 @@ public actor HuggingFaceModelInstaller {
     }
 
     private nonisolated static func downloadRequest(for file: ResolvedFile) throws -> URLRequest {
+        if let downloadURL = file.downloadURL {
+            var request = URLRequest(url: downloadURL)
+            request.timeoutInterval = 60 * 60 * 24
+            request.setValue("GenImage/1.0", forHTTPHeaderField: "User-Agent")
+            if let token = ProcessInfo.processInfo.environment["CIVITAI_TOKEN"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !token.isEmpty {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
+            return request
+        }
         let pathSegments = file.remotePath.split(separator: "/").map(String.init)
         var url = URL(string: "https://huggingface.co/\(file.repository)/resolve/\(file.revision)")!
         for segment in pathSegments { url.appendPathComponent(segment) }
@@ -320,10 +595,26 @@ public actor HuggingFaceModelInstaller {
     }
 
     private nonisolated static func applyAuthorization(to request: inout URLRequest) {
-        guard let token = ProcessInfo.processInfo.environment["HF_TOKEN"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !token.isEmpty else { return }
+        guard let token = huggingFaceToken() else { return }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
+    /// Prefer the explicit environment variable, then reuse the token saved by
+    /// `huggingface-cli login` / `hf auth login` when it is available. This keeps
+    /// public model downloads authenticated so Hugging Face does not apply the
+    /// anonymous throughput limit.
+    private nonisolated static func huggingFaceToken() -> String? {
+        if let environmentToken = ProcessInfo.processInfo.environment["HF_TOKEN"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !environmentToken.isEmpty {
+            return environmentToken
+        }
+        let tokenURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".cache/huggingface/token")
+        guard let token = try? String(contentsOf: tokenURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else { return nil }
+        return token
     }
 
     private nonisolated static func validate(response: URLResponse, data: Data) throws {
@@ -370,6 +661,26 @@ public actor HuggingFaceModelInstaller {
                     )
                 ]
             )
+        case zImageMLX2BitModelID:
+            return zImageMLXPlan(
+                repository: zImageMLX2BitModelID,
+                directoryName: "z-image-turbo-mlx-2bit"
+            )
+        case zImageMLX4BitModelID:
+            return zImageMLXPlan(
+                repository: zImageMLX4BitModelID,
+                directoryName: "z-image-turbo-mlx-4bit"
+            )
+        case zImageMLX8BitModelID:
+            return zImageMLXPlan(
+                repository: zImageMLX8BitModelID,
+                directoryName: "z-image-turbo-mlx-8bit"
+            )
+        case zImageGiniiki4BitModelID:
+            return zImageMLXPlan(
+                repository: zImageGiniiki4BitModelID,
+                directoryName: "z-image-turbo-giniiki-4bit"
+            )
         case zImagePixelArtLoRAModelID:
             return InstallPlan(
                 directoryName: "loras/z-image-pixel-art",
@@ -380,6 +691,109 @@ public actor HuggingFaceModelInstaller {
                         destinationSubdirectory: "",
                         prefixes: [],
                         exactFiles: ["pixel_art_style_z_image_turbo.safetensors"]
+                    )
+                ]
+            )
+        case zImageRealismLoRAModelID:
+            return InstallPlan(
+                directoryName: "loras/z-image-realism",
+                runtimeRelativePath: "pytorch_lora_weights.safetensors",
+                sources: [
+                    SourcePlan(
+                        repository: "suayptalha/Z-Image-Turbo-Realism-LoRA",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: ["pytorch_lora_weights.safetensors"]
+                    )
+                ]
+            )
+        case zImageClassicPaintingLoRAModelID:
+            return InstallPlan(
+                directoryName: "loras/z-image-classic-painting",
+                runtimeRelativePath: "Classic_Painting_Z_Image_Turbo_v1_renderartist_1750.safetensors",
+                sources: [
+                    SourcePlan(
+                        repository: "renderartist/Classic-Painting-Z-Image-Turbo-LoRA",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: ["Classic_Painting_Z_Image_Turbo_v1_renderartist_1750.safetensors"]
+                    )
+                ]
+            )
+        case zImageColoringBookLoRAModelID:
+            return InstallPlan(
+                directoryName: "loras/z-image-coloring-book",
+                runtimeRelativePath: "Coloring_Book_Z_Image_Turbo_v1_renderartist_2000.safetensors",
+                sources: [
+                    SourcePlan(
+                        repository: "renderartist/Coloring-Book-Z-Image-Turbo-LoRA",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: ["Coloring_Book_Z_Image_Turbo_v1_renderartist_2000.safetensors"]
+                    )
+                ]
+            )
+        case civitaiAsianBeautiesLoRAModelID:
+            return InstallPlan(
+                directoryName: "loras/civitai-z-image-asian-beauties",
+                runtimeRelativePath: "asian_woman_zit_v1.safetensors",
+                sources: [
+                    SourcePlan(
+                        repository: "civitai",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [],
+                        directURL: URL(string: "https://civitai.com/api/download/models/2465401?fileId=2353982"),
+                        directFileName: "asian_woman_zit_v1.safetensors",
+                        directSize: 170_128_232
+                    )
+                ]
+            )
+        case civitaiLightningLoRAModelID:
+            return InstallPlan(
+                directoryName: "loras/civitai-z-image-lightning",
+                runtimeRelativePath: "Zed_Turbo_Lightning.safetensors",
+                sources: [
+                    SourcePlan(
+                        repository: "civitai",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [],
+                        directURL: URL(string: "https://civitai.com/api/download/models/2709343?fileId=2595263"),
+                        directFileName: "Zed_Turbo_Lightning.safetensors",
+                        directSize: 35_180_808
+                    )
+                ]
+            )
+        case civitaiFlatAnimeLoRAModelID:
+            return InstallPlan(
+                directoryName: "loras/civitai-z-image-flat-anime",
+                runtimeRelativePath: "UU_000000960.safetensors",
+                sources: [
+                    SourcePlan(
+                        repository: "civitai",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [],
+                        directURL: URL(string: "https://civitai.com/api/download/models/2449645?fileId=2340786"),
+                        directFileName: "UU_000000960.safetensors",
+                        directSize: 170_128_200
+                    )
+                ]
+            )
+        case civitaiDioramaLoRAModelID:
+            return InstallPlan(
+                directoryName: "loras/civitai-z-image-diorama",
+                runtimeRelativePath: "loonalone_diorama.safetensors",
+                sources: [
+                    SourcePlan(
+                        repository: "civitai",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [],
+                        directURL: URL(string: "https://civitai.com/api/download/models/2608073?fileId=2567496"),
+                        directFileName: "loonalone_diorama.safetensors",
+                        directSize: 170_127_768
                     )
                 ]
             )
@@ -418,6 +832,32 @@ public actor HuggingFaceModelInstaller {
                             "model.safetensors",
                             "model.safetensors.index.json",
                             "preprocessor_config.json",
+                            "special_tokens_map.json",
+                            "tokenizer.json",
+                            "tokenizer_config.json",
+                            "video_preprocessor_config.json",
+                            "vocab.json"
+                        ]
+                    )
+                ]
+            )
+        case nsfwCaptionerModelID:
+            return InstallPlan(
+                directoryName: "Qwen3-VL-8B-NSFW-Caption-V4.5-mxfp4",
+                sources: [
+                    SourcePlan(
+                        repository: "mlx-community/Qwen3-VL-8B-NSFW-Caption-V4.5-mxfp4",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "added_tokens.json",
+                            "chat_template.jinja",
+                            "config.json",
+                            "model-00001-of-00002.safetensors",
+                            "model-00002-of-00002.safetensors",
+                            "model.safetensors.index.json",
+                            "preprocessor_config.json",
+                            "processor_config.json",
                             "special_tokens_map.json",
                             "tokenizer.json",
                             "tokenizer_config.json",
@@ -591,6 +1031,29 @@ public actor HuggingFaceModelInstaller {
         )
     }
 
+    private nonisolated static func zImageMLXPlan(
+        repository: String,
+        directoryName: String
+    ) -> InstallPlan {
+        InstallPlan(
+            directoryName: directoryName,
+            sources: [
+                SourcePlan(
+                    repository: repository,
+                    destinationSubdirectory: "",
+                    prefixes: [
+                        "scheduler/",
+                        "text_encoder/",
+                        "tokenizer/",
+                        "transformer/",
+                        "vae/"
+                    ],
+                    exactFiles: ["model_index.json", "quantize_config.json"]
+                )
+            ]
+        )
+    }
+
     private nonisolated static func realESRGANPlan(directoryName: String) -> InstallPlan {
         InstallPlan(
             directoryName: directoryName,
@@ -604,6 +1067,86 @@ public actor HuggingFaceModelInstaller {
                 )
             ]
         )
+    }
+
+    /// 將部分 MLX Diffusers 倉庫使用的 quantize_config.json 轉成
+    /// Z-Image.swift 讀取的 quantization.json。量化權重本身已包含
+    /// weight/scales/biases，空的 layers 讓 Runtime 套用全域 bits/group_size。
+    private nonisolated static func materializeQuantizationManifest(at directory: URL) throws {
+        let fileManager = FileManager.default
+        let configURL = directory.appendingPathComponent("quantize_config.json")
+        let manifestURL = directory.appendingPathComponent("quantization.json")
+        guard !fileManager.fileExists(atPath: manifestURL.path) else { return }
+
+        var specification: QuantizeSpecification?
+        if fileManager.fileExists(atPath: configURL.path) {
+            guard let data = try? Data(contentsOf: configURL),
+                  let config = try? JSONDecoder().decode(QuantizeConfig.self, from: data) else {
+                throw ModelInstallerError.invalidQuantizationConfig(
+                    configURL,
+                    "無法解析 quantize_config.json。"
+                )
+            }
+            specification = config.quantization
+        } else {
+            for component in ["transformer", "text_encoder"] {
+                let componentURL = directory
+                    .appendingPathComponent(component, isDirectory: true)
+                    .appendingPathComponent("config.json")
+                guard let data = try? Data(contentsOf: componentURL),
+                      let config = try? JSONDecoder().decode(ComponentConfig.self, from: data),
+                      let componentSpecification = config.quantization else {
+                    continue
+                }
+                if let existing = specification,
+                   existing.bits != componentSpecification.bits
+                    || existing.groupSize != componentSpecification.groupSize {
+                    throw ModelInstallerError.invalidQuantizationConfig(
+                        componentURL,
+                        "Transformer 與 text encoder 的量化設定不一致。"
+                    )
+                }
+                specification = componentSpecification
+            }
+        }
+
+        guard let specification else { return }
+        guard [2, 4, 8].contains(specification.bits) else {
+            throw ModelInstallerError.invalidQuantizationConfig(
+                configURL,
+                "不支援的量化位元數：\(specification.bits)。"
+            )
+        }
+        guard [32, 64, 128].contains(specification.groupSize) else {
+            throw ModelInstallerError.invalidQuantizationConfig(
+                configURL,
+                "不支援的 group_size：\(specification.groupSize)。"
+            )
+        }
+
+        let mode: String
+        switch specification.mode?.lowercased() {
+        case nil, "affine":
+            mode = "affine"
+        case "mxfp4":
+            mode = "mxfp4"
+        default:
+            throw ModelInstallerError.invalidQuantizationConfig(
+                configURL,
+                "不支援的量化模式：\(specification.mode ?? "")。"
+            )
+        }
+
+        let manifest = GeneratedQuantizationManifest(
+            modelId: nil,
+            groupSize: specification.groupSize,
+            bits: specification.bits,
+            mode: mode,
+            layers: []
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(manifest).write(to: manifestURL, options: .atomic)
     }
 
     private nonisolated static func runtimeURL(
@@ -667,6 +1210,108 @@ public actor HuggingFaceModelInstaller {
     }
 }
 
+/// Aggregates progress from concurrent file downloads without touching the
+/// installer actor or the WebUI for every network callback.
+private final class DownloadProgressTracker: @unchecked Sendable {
+    private let initialBytes: Int64
+    private let totalBytes: Int64
+    private let progress: @Sendable (ModelInstallProgress) -> Void
+    private let lock = NSLock()
+    private var fileBytes: [String: Int64] = [:]
+    private var completedFiles: Set<String> = []
+
+    init(
+        initialBytes: Int64,
+        totalBytes: Int64,
+        progress: @escaping @Sendable (ModelInstallProgress) -> Void
+    ) {
+        self.initialBytes = initialBytes
+        self.totalBytes = totalBytes
+        self.progress = progress
+    }
+
+    func emit() {
+        lock.lock()
+        let downloaded = currentBytesLocked()
+        lock.unlock()
+        progress(
+            ModelInstallProgress(
+                fractionCompleted: fraction(downloaded, totalBytes),
+                downloadedBytes: downloaded,
+                totalBytes: totalBytes
+            )
+        )
+    }
+
+    func report(_ file: String, received: Int64) {
+        lock.lock()
+        guard !completedFiles.contains(file) else {
+            lock.unlock()
+            return
+        }
+        fileBytes[file] = max(fileBytes[file] ?? 0, received)
+        let downloaded = currentBytesLocked()
+        lock.unlock()
+        progress(
+            ModelInstallProgress(
+                fractionCompleted: fraction(downloaded, totalBytes),
+                downloadedBytes: downloaded,
+                totalBytes: totalBytes
+            )
+        )
+    }
+
+    func markCompleted(_ file: String, bytes: Int64) {
+        lock.lock()
+        completedFiles.insert(file)
+        fileBytes[file] = bytes
+        let downloaded = currentBytesLocked()
+        lock.unlock()
+        progress(
+            ModelInstallProgress(
+                fractionCompleted: fraction(downloaded, totalBytes),
+                downloadedBytes: downloaded,
+                totalBytes: totalBytes
+            )
+        )
+    }
+
+    func finalizeSegmented(_ file: String, segmentKeys: [String], bytes: Int64) {
+        lock.lock()
+        for key in segmentKeys {
+            fileBytes.removeValue(forKey: key)
+        }
+        completedFiles.insert(file)
+        fileBytes[file] = bytes
+        let downloaded = currentBytesLocked()
+        lock.unlock()
+        progress(
+            ModelInstallProgress(
+                fractionCompleted: fraction(downloaded, totalBytes),
+                downloadedBytes: downloaded,
+                totalBytes: totalBytes
+            )
+        )
+    }
+
+    func discard(_ keys: [String]) {
+        lock.lock()
+        for key in keys {
+            fileBytes.removeValue(forKey: key)
+        }
+        lock.unlock()
+    }
+
+    private func currentBytesLocked() -> Int64 {
+        min(totalBytes, initialBytes + fileBytes.values.reduce(0, +))
+    }
+
+    private func fraction(_ completed: Int64, _ total: Int64) -> Double {
+        guard total > 0 else { return 0 }
+        return min(1, max(0, Double(completed) / Double(total)))
+    }
+}
+
 private final class FileDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     private let destination: URL
     private let resumeDataURL: URL
@@ -698,6 +1343,12 @@ private final class FileDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
                 let configuration = URLSessionConfiguration.default
                 configuration.timeoutIntervalForRequest = 60 * 60 * 24
                 configuration.timeoutIntervalForResource = 60 * 60 * 24
+                configuration.waitsForConnectivity = false
+                configuration.httpMaximumConnectionsPerHost = 8
+                configuration.httpShouldUsePipelining = true
+                configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+                configuration.allowsExpensiveNetworkAccess = true
+                configuration.allowsConstrainedNetworkAccess = true
                 let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
                 self.session = session
                 let task: URLSessionDownloadTask
@@ -742,6 +1393,18 @@ private final class FileDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
     ) {
         do {
             let fileManager = FileManager.default
+            if let response = downloadTask.response as? HTTPURLResponse,
+               !(200..<300).contains(response.statusCode) {
+                let body = try? Data(contentsOf: location)
+                let message = body
+                    .flatMap { String(data: $0.prefix(2_048), encoding: .utf8) } ?? ""
+                if response.statusCode == 401,
+                   let url = downloadTask.originalRequest?.url,
+                   url.host?.localizedCaseInsensitiveContains("civitai.com") == true {
+                    throw ModelInstallerError.authenticationRequired(url, message)
+                }
+                throw ModelInstallerError.httpStatus(response.statusCode, message)
+            }
             let actual = Int64(
                 (try location.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? -1
             )
@@ -805,9 +1468,11 @@ public enum ModelInstallerError: LocalizedError, Sendable {
     case noMatchingFiles(String)
     case invalidResponse
     case httpStatus(Int, String)
+    case authenticationRequired(URL, String)
     case invalidManifest(URL)
     case runtimeNotFound(URL)
     case sizeMismatch(path: String, expected: Int64, actual: Int64)
+    case invalidQuantizationConfig(URL, String)
 
     public var errorDescription: String? {
         switch self {
@@ -822,13 +1487,19 @@ public enum ModelInstallerError: LocalizedError, Sendable {
         case .invalidResponse:
             "模型伺服器回傳了無效回應。"
         case let .httpStatus(status, message):
-            "模型伺服器回傳 HTTP \(status)：\(message)"
+            status == 401
+                ? "模型下載需要登入或 API Token（HTTP 401）：\(message)"
+                : "模型伺服器回傳 HTTP \(status)：\(message)"
+        case let .authenticationRequired(_, message):
+            "Civitai 下載需要登入或 API Token（HTTP 401）：\(message)"
         case let .invalidManifest(url):
             "模型安裝資訊不存在或已損壞：\(url.path)"
         case let .runtimeNotFound(url):
             "安裝完成但找不到 Runtime 模型：\(url.path)"
         case let .sizeMismatch(path, expected, actual):
             "模型檔案大小不符：\(path)（預期 \(expected)，實際 \(actual) bytes）"
+        case let .invalidQuantizationConfig(url, message):
+            "量化設定無法轉換：\(url.lastPathComponent)；\(message)"
         }
     }
 }

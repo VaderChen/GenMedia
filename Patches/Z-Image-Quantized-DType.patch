@@ -1,0 +1,49 @@
+--- a/Sources/ZImage/Weights/ZImageWeightsMapper.swift
++++ b/Sources/ZImage/Weights/ZImageWeightsMapper.swift
+@@ -32,7 +32,7 @@
+
+   public func loadTextEncoder(dtype: DType? = .bfloat16) throws -> [String: MLXArray] {
+     if hasQuantization() {
+-      return try loadQuantizedComponent("text_encoder")
++      return try loadQuantizedComponent("text_encoder", dtype: dtype)
+     }
+     return try loadStandardComponent(
+       files: ZImageFiles.resolveTextEncoderWeights(at: snapshot, weightsVariant: weightsVariant, logger: logger),
+@@ -42,7 +42,7 @@
+
+   public func loadTransformer(dtype: DType? = .bfloat16) throws -> [String: MLXArray] {
+     if hasQuantization() {
+-      return try loadQuantizedComponent("transformer")
++      return try loadQuantizedComponent("transformer", dtype: dtype)
+     }
+     return try loadStandardComponent(
+       files: ZImageFiles.resolveTransformerWeights(at: snapshot, weightsVariant: weightsVariant, logger: logger),
+@@ -135,7 +135,10 @@
+     return tensors
+   }
+
+-  private func loadQuantizedComponent(_ componentName: String) throws -> [String: MLXArray] {
++  private func loadQuantizedComponent(
++    _ componentName: String,
++    dtype: DType? = nil
++  ) throws -> [String: MLXArray] {
+     let fm = FileManager.default
+     let resolvedSnapshot = snapshot.resolvingSymlinksInPath()
+     var tensors: [String: MLXArray] = [:]
+@@ -152,7 +155,15 @@
+     for file in safetensorFiles {
+       let weights = try MLX.loadArrays(url: file)
+       for (key, value) in weights {
+-        tensors[key] = value
++        let isFloatingPoint = switch value.dtype {
++        case .float16, .bfloat16, .float32, .float64: true
++        default: false
++        }
++        if let dtype, isFloatingPoint, value.dtype != dtype {
++          tensors[key] = value.asType(dtype)
++        } else {
++          tensors[key] = value
++        }
+       }
+     }
+     return tensors

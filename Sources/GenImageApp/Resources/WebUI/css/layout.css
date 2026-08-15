@@ -10,13 +10,9 @@
 
 .boot-logo,
 .brand-mark {
-  align-items: center;
-  background: linear-gradient(145deg, #7560f1, #4133b7);
   border-radius: 12px;
-  color: white;
-  display: inline-flex;
-  font-weight: 800;
-  justify-content: center;
+  display: block;
+  object-fit: cover;
 }
 
 .boot-logo {
@@ -99,9 +95,16 @@
   border-top: 1px solid var(--line);
   color: var(--text-muted);
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 5px;
   margin: 12px 6px 0;
   padding-top: 14px;
+}
+
+.sidebar-project-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
 }
 
 .sidebar-project strong {

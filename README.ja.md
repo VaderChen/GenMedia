@@ -20,20 +20,23 @@ GenImage は **Apple Silicon をネイティブサポート**するローカル 
 ./run.command
 ```
 
-`build.command` は Release 実行ファイル、標準の `GenImage.app`、およびマウント可能な `GenImage-1.0.0-arm64.dmg` を `dist/` に生成します。DMG には Applications ショートカット、WebUI リソース、MLX Metal ランタイム、MCP サーバー、モデル診断ツールが含まれます。
+`build.command` はデフォルトで Release 実行ファイルと標準の `GenImage.app` を生成します。DMG が必要な場合は `--dmg` を明示してください。DMG には Applications ショートカット、WebUI リソース、MLX Metal ランタイム、MCP サーバー、モデル診断ツールが含まれます。
 
 ```bash
-# ビルドして DMG を作成
+# App をビルド（デフォルト、DMG なし）
 ./build.command
 
-# DMG を作成せずに増分 Release ビルドのみ実行
+# Release 実行ファイルのみ（App bundle なし）
 ./build.command --no-dmg
+
+# App をビルドして DMG を作成
+./build.command --dmg
 
 # バージョンと Bundle ID を指定
 GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ```
 
-`run.command` は自動的に `--no-dmg` を使用するため、日常の起動でディスクイメージを繰り返し生成しません。現在の DMG は公証されていないローカルテスト用パッケージです。一般配布には Developer ID 署名と Apple の公証が必要です。
+`run.command` は自動的に `--no-dmg` を使用するため、日常の起動では Release 実行ファイルのみ更新します。DMG は任意の未公証ローカルテスト用パッケージです。一般配布には Developer ID 署名と Apple の公証が必要です。
 
 ### 動画 Runtime
 
@@ -51,6 +54,14 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 ```
 
 `ltx-2-mlx` は既定で Gemma テキストエンコーダー設定を使用します。ローカルの Gemma モデルがある場合は、`GENIMAGE_LTX_GEMMA_MODEL` にモデルディレクトリまたは Hugging Face ID を指定できます。現在のアプリ DMG には Python Runtime、Gemma の重み、FFmpeg は含まれていません。正式配布前に、これらを任意の外部コンポーネントとして扱い、Runtime とモデルのライセンスを個別に確認してください。
+
+### プロファイル、ジョブ、メモリ
+
+- プロファイルは「使用中、利用可能、ダウンロード中、利用不可」の順に並びます。モデルと LoRA の依存関係が揃ったプロファイルは淡い緑色の枠で表示され、ダウンロード完了時に直ちに再整列されます。
+- キャンセル時はまず `cancelling` になり、Runtime Task の終了後に `cancelled` へ移行して生成・メモリ関連の操作を再び有効にします。ETA は進捗 35% かつ開始 15 秒後から数値表示し、安定したサンプルが不足する場合は全体経過時間を使用します。
+- Z-Image MLX 互換レイヤーは `quantize_config.json`、affine／mxfp4、packed pad token、FP16 から BF16 への読み込みを処理します。`build.command` は Swift Package 解決後に `Patches/` の修正を自動適用します。andrevp Z-Image Turbo MLX 4-bit は実際の画像生成で検証済みです。
+- テキストから画像の完了後もモデル重みと暖機 buffer を保持します。5 分間アイドルになると再利用可能な MLX 一時 buffer だけを整理し、モデルはアンロードしません。側面のメモリ解放、モデル切り替え、またはプロファイル切り替え時の RAM 90% 超過保護でのみ不要な Runtime を解放します。
+- ダウンロードでは配布元のファイル名を保持し、生成出力は `Image-MMDD-HHmmss` または `Video-MMDD-HHmmss` を使用します。出力ディレクトリは設定画面で変更できます。
 
 ## 検証
 
@@ -89,6 +100,7 @@ Sources/
 │   ├── DomainModels.swift        # アセット、レシピ、ジョブ、モデル、プロファイル
 │   ├── InferenceServices.swift   # 画像、テキスト、動画の推論インターフェース
 │   ├── ModelCatalog.swift        # 組み込みモデルとプロファイル
+│   ├── OutputFileNaming.swift    # 画像・動画の出力名
 │   └── WorkflowGraph.swift       # アセットの系譜と分岐関係
 ├── GenImageRuntime/
 │   ├── ZImageTextToImageService.swift
@@ -102,6 +114,7 @@ Sources/
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # ローカル画像と動画を安全に WebUI へ提供
     └── Resources/WebUI/          # HTML/CSS/JavaScript フロントエンド
+Patches/                           # ビルド時に適用する Z-Image MLX 互換修正
 ```
 
 ## 現在の状態
@@ -110,6 +123,7 @@ Sources/
 
 詳細情報：
 
+- [更新履歴](UpdateNote.md)
 - [アーキテクチャ](docs/ARCHITECTURE.ja.md)
 - [Web Bridge](docs/WEB_BRIDGE.ja.md)
 - [ロードマップ](docs/ROADMAP.ja.md)

@@ -93,6 +93,7 @@ struct WebAppState: Encodable {
     let schemaVersion: Int
     let projectName: String
     let modelRootPath: String
+    let outputDirectoryPath: String
     let assets: [WebAsset]
     let selectedAssetID: UUID?
     let comparisonAssetID: UUID?
@@ -108,12 +109,14 @@ struct WebAppState: Encodable {
     let statusMessage: String?
     let availableUpdate: AppUpdateInfo?
     let systemMetrics: SystemMetricsSnapshot
+    let isReleasingMemory: Bool
 
     @MainActor
     init(store: AppStore) {
         schemaVersion = 1
         projectName = store.selectedProject?.name ?? "工作區"
         modelRootPath = store.modelRootPath
+        outputDirectoryPath = store.outputDirectoryPath
         assets = store.projectAssets.map(WebAsset.init)
         selectedAssetID = store.selectedAssetID
         comparisonAssetID = store.comparisonAssetID
@@ -144,5 +147,6 @@ struct WebAppState: Encodable {
         statusMessage = store.statusMessage
         availableUpdate = store.availableUpdate
         systemMetrics = store.systemMetrics
+        isReleasingMemory = store.isReleasingMemory
     }
 }

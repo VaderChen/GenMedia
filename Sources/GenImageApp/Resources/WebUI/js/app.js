@@ -1,6 +1,6 @@
 import { invoke, onClipboardImage, onState } from "./bridge.js";
 import { renderDownloads } from "./downloads.js";
-import { escapeHTML } from "./format.js";
+import { escapeHTML, gigabytes, percent, phaseLabel } from "./format.js";
 import { getLocale, setLocale, t } from "./i18n.js";
 import { renderModels } from "./models.js";
 import { appendProfileLoRARow, removeProfileLoRARow, renderProfiles } from "./profiles.js";
@@ -46,6 +46,7 @@ const ui = {
   modelSearch: "",
   language: getLocale(),
   theme: getTheme(),
+  profileHintVisible: localStorage.getItem("genimage.profileHintSeen") !== "true",
 };
 
 onClipboardImage((image) => {
@@ -60,6 +61,16 @@ onState((nextState) => {
   }
   const statusMessageChanged = nextState.statusMessage !== state?.statusMessage;
   const nextContentSignature = contentSignature(nextState);
+  if (state && modelProgressOnlyChanged(state, nextState)) {
+    state = nextState;
+    stateContentSignature = nextContentSignature;
+    refreshModelProgressDOM();
+    updateSystemMetricsDOM();
+    refreshJobsPanel(workspaceStateForActiveTab(state), root);
+    if (statusMessageChanged) scheduleStatusMessageDismiss(nextState.statusMessage);
+    refreshToastDOM();
+    return;
+  }
   if (state && composingRecipeField) {
     const localRecipe = state.recipe;
     const localVideoOutputSettings = state.videoOutputSettings;
@@ -122,6 +133,11 @@ root.addEventListener("click", async (event) => {
     switch (action) {
       case "navigate":
         ui.route = target.dataset.route;
+        if (ui.route === "profiles") dismissProfileHint();
+        render();
+        break;
+      case "dismissProfileHint":
+        dismissProfileHint();
         render();
         break;
       case "openAvailableUpdate":
@@ -280,6 +296,9 @@ root.addEventListener("click", async (event) => {
       case "cancelJob":
         await invoke("cancelJob", { jobID: target.dataset.jobId });
         break;
+      case "releaseMemory":
+        await invoke("releaseMemory");
+        break;
       case "clearJobs":
         await invoke("clearJobs");
         break;
@@ -289,6 +308,10 @@ root.addEventListener("click", async (event) => {
         break;
       case "chooseModelRoot":
         await invoke("chooseModelRoot");
+        break;
+      case "chooseOutputDirectory":
+      case "revealOutputDirectory":
+        await invoke(action);
         break;
       case "installModel":
       case "pauseModel":
@@ -365,6 +388,17 @@ root.addEventListener("change", async (event) => {
     if (!path || path === state.modelRootPath) return;
     try {
       await invoke("setModelRoot", { path });
+    } catch (error) {
+      showBridgeError(error);
+    }
+    return;
+  }
+
+  if (event.target.matches("[data-output-directory]")) {
+    const path = event.target.value.trim();
+    if (!path || path === state.outputDirectoryPath) return;
+    try {
+      await invoke("setOutputDirectory", { path });
     } catch (error) {
       showBridgeError(error);
     }
@@ -1114,13 +1148,20 @@ function renderSidebar() {
   return `
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-mark">G</span>
-        <div class="brand-copy"><strong>GenImage</strong><span>${t("brand.subtitle")}</span></div>
+        <img class="brand-mark" src="./assets/GenImage-AppIcon.png" alt="" aria-hidden="true" />
+        <div class="brand-copy"><strong>${t("brand.name")}</strong><span>${t("brand.subtitle")}</span></div>
       </div>
       <nav class="sidebar-nav">
         ${navButton("workspace", "▦", t("nav.workspace"))}
         ${navButton("models", "⬡", t("nav.models"))}
         ${navButton("profiles", "⇄", t("nav.profiles"))}
+        ${ui.profileHintVisible ? `
+          <div class="profile-nav-hint" role="status">
+            <span class="profile-nav-hint-icon" aria-hidden="true">✦</span>
+            <span>${t("profile.firstUseHint")}</span>
+            <button class="profile-nav-hint-dismiss" data-action="dismissProfileHint" aria-label="${t("profile.dismissHint")}" title="${t("profile.dismissHint")}">×</button>
+          </div>
+        ` : ""}
         ${navButton("downloads", "⇩", t("nav.downloads"))}
         ${navButton("settings", "⚙", t("nav.settings"))}
       </nav>
@@ -1132,9 +1173,25 @@ function renderSidebar() {
       <div class="sidebar-spacer"></div>
       ${renderSystemMetrics()}
       <div class="sidebar-project">
-        <span>${t("sidebar.currentProject")}</span>
-        <strong>${escapeHTML(state.projectName)}</strong>
-        <span>${t("sidebar.assetsJobs", { assets: state.assets.length, jobs: state.jobs.filter((job) => job.state === "running").length })}</span>
+        <div class="sidebar-project-copy">
+          <span>${t("sidebar.currentProject")}</span>
+          <strong>${escapeHTML(state.projectName)}</strong>
+          <span>${t("sidebar.assetsJobs", { assets: state.assets.length, jobs: state.jobs.filter((job) => ["queued", "running", "cancelling"].includes(job.state)).length })}</span>
+        </div>
+        <button
+          class="icon-button compact memory-release-button"
+          data-action="releaseMemory"
+          title="${state.isReleasingMemory ? t("memory.releasing") : t("memory.release")}"
+          aria-label="${state.isReleasingMemory ? t("memory.releasing") : t("memory.release")}"
+          ${isInferenceBusy(state) || state.isReleasingMemory ? "disabled" : ""}
+        >
+          ${state.isReleasingMemory
+            ? `<span class="button-spinner" aria-hidden="true"></span>`
+            : `<svg class="memory-release-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="6" y="6.5" width="12" height="11" rx="2"></rect>
+                <path d="M9 10h6M9 14h6M8 3.5v3M12 3.5v3M16 3.5v3M8 17.5v3M12 17.5v3M16 17.5v3M3 9h3M3 15h3M18 9h3M18 15h3"></path>
+              </svg>`}
+        </button>
       </div>
     </aside>
   `;
@@ -1177,7 +1234,7 @@ function renderSystemMetrics() {
 
 function metricRow(key, label, value) {
   const metric = metricDisplay(value);
-  return `<div class="metric-row" data-metric-key="${key}">
+  return `<div class="metric-row metric-level-${metric.level}" data-metric-key="${key}">
     <div class="metric-label"><span>${label}</span><strong>${metric.label}</strong></div>
     <progress value="${metric.percent}" max="100" aria-label="${label}"></progress>
   </div>`;
@@ -1191,6 +1248,8 @@ function updateSystemMetricsDOM() {
     const metric = metricDisplay(value);
     const label = row.querySelector("strong");
     const progress = row.querySelector("progress");
+    row.classList.remove("metric-level-low", "metric-level-medium", "metric-level-high", "metric-level-unavailable");
+    row.classList.add(`metric-level-${metric.level}`);
     if (label) label.textContent = metric.label;
     if (progress) progress.value = metric.percent;
   });
@@ -1199,16 +1258,50 @@ function updateSystemMetricsDOM() {
 function metricDisplay(value) {
   const valid = Number.isFinite(value);
   const percent = valid ? Math.round(Math.min(1, Math.max(0, value)) * 100) : 0;
-  return { percent, label: valid ? `${percent}%` : t("metrics.unavailable") };
+  const level = !valid ? "unavailable" : percent >= 80 ? "high" : percent >= 60 ? "medium" : "low";
+  return { percent, level, label: valid ? `${percent}%` : t("metrics.unavailable") };
+}
+
+function modelProgressOnlyChanged(previous, next) {
+  if (!previous || !["models", "profiles", "downloads"].includes(ui.route)) return false;
+  if (previous.models.length !== next.models.length) return false;
+  const sameModelContent = previous.models.every(({ descriptor, installation }, index) => {
+    const nextModel = next.models[index];
+    if (!nextModel || descriptor.id !== nextModel.descriptor.id) return false;
+    return JSON.stringify({ descriptor, phase: installation.phase, error: installation.errorMessage })
+      === JSON.stringify({
+        descriptor: nextModel.descriptor,
+        phase: nextModel.installation.phase,
+        error: nextModel.installation.errorMessage,
+      });
+  });
+  if (!sameModelContent) return false;
+  return contentSignature({ ...previous, models: [] })
+    === contentSignature({ ...next, models: [] });
+}
+
+function refreshModelProgressDOM() {
+  state.models.forEach(({ descriptor, installation }) => {
+    const card = root.querySelector(`[data-model-card="${CSS.escape(descriptor.id)}"]`);
+    if (!card) return;
+    const progress = card.querySelector("[data-model-progress]");
+    const phase = card.querySelector("[data-model-phase]");
+    const size = card.querySelector("[data-model-size]");
+    const label = card.querySelector("[data-model-percent]");
+    if (progress) progress.value = installation.progress;
+    if (phase) phase.textContent = phaseLabel(installation.phase);
+    if (size) size.textContent = `${gigabytes(installation.downloadedGB)} / ${gigabytes(descriptor.approximateDownloadGB)}`;
+    if (label) label.textContent = percent(installation.progress);
+  });
 }
 
 function contentSignature(value) {
   const {
     systemMetrics: _systemMetrics,
-    jobs: _jobs,
     statusMessage: _statusMessage,
     ...content
   } = value;
+  content.jobs = value.jobs.map(({ id, action, state }) => ({ id, action, state }));
   if (ui.route === "workspace") {
     content.models = value.models.map(({ descriptor, installation }) => ({
       descriptor,
@@ -1314,6 +1407,12 @@ function hasEnabledImageToTextProfile() {
 
 function navButton(route, icon, title) {
   return `<button class="nav-button ${ui.route === route ? "active" : ""}" data-action="navigate" data-route="${route}"><span>${icon}</span>${title}</button>`;
+}
+
+function dismissProfileHint() {
+  if (!ui.profileHintVisible) return;
+  ui.profileHintVisible = false;
+  localStorage.setItem("genimage.profileHintSeen", "true");
 }
 
 function renderToast() {
@@ -1438,4 +1537,13 @@ function restoreViewState(viewState) {
 
 function showBridgeError(error) {
   console.error(error);
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : error?.message || error?.error || "Native command failed.";
+  if (!state || !message) return;
+  state = { ...state, statusMessage: message };
+  scheduleStatusMessageDismiss(message);
+  refreshToastDOM();
 }

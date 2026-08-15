@@ -11,6 +11,12 @@ public actor QwenVLImageDescriptionService: ImageDescribing {
 
     public init() {}
 
+    /// 釋放目前常駐的 Qwen-VL 容器，供記憶體壓力保護使用。
+    public func unload() {
+        container = nil
+        loadedModelPath = nil
+    }
+
     public func describe(
         request: ImageDescriptionRequest,
         progress: @escaping @Sendable (Double) -> Void

@@ -83,7 +83,7 @@ export function renderModelCard({ descriptor, installation }) {
     .map((capability) => `<span class="badge capability-badge">${capabilityLabel(capability)}</span>`)
     .join("");
   return `
-    <article class="model-card">
+    <article class="model-card" data-model-card="${escapeHTML(descriptor.id)}">
       <div class="card-title-row">
         <div>
           <h2>${escapeHTML(descriptor.displayName)}</h2>
@@ -111,17 +111,16 @@ function renderInstallation(model, installation) {
     : "";
   const progress = `
     <div class="model-progress">
-      <div class="detail-row"><span>${phaseLabel(phase)}</span><span>${gigabytes(installation.downloadedGB)} / ${gigabytes(model.approximateDownloadGB)}</span></div>
-      <progress value="${installation.progress}" max="1"></progress>
-      <span class="section-note">${percent(installation.progress)}</span>
+      <div class="detail-row"><span data-model-phase>${phaseLabel(phase)}</span><span data-model-size>${gigabytes(installation.downloadedGB)} / ${gigabytes(model.approximateDownloadGB)}</span></div>
+      <progress data-model-progress value="${installation.progress}" max="1"></progress>
+      <span class="section-note" data-model-percent>${percent(installation.progress)}</span>
     </div>
   `;
 
   if (phase === "installed") {
-    const isManagedDownload = !isLocalPathModelID(model.id);
     return `${progress}<div class="button-row">
       <button class="secondary-button compact" data-action="repairModel" data-model-id="${escapeHTML(model.id)}">${t("model.verify")}</button>
-      <button class="danger-button compact" data-action="removeModel" data-model-id="${escapeHTML(model.id)}">${model.localURL && !isManagedDownload ? t("model.disconnect") : t("model.remove")}</button>
+      <button class="danger-button compact" data-action="removeModel" data-model-id="${escapeHTML(model.id)}">${t("model.remove")}</button>
     </div>`;
   }
   if (phase === "downloading" || phase === "queued" || phase === "verifying") {
@@ -131,10 +130,6 @@ function renderInstallation(model, installation) {
     return `${progress}<button class="install-button compact" data-action="installModel" data-model-id="${escapeHTML(model.id)}">${t("model.resume")}</button>`;
   }
   return `${error}<button class="install-button compact" data-action="installModel" data-model-id="${escapeHTML(model.id)}">${t("model.install")}</button>`;
-}
-
-function isLocalPathModelID(modelID) {
-  return modelID.startsWith("/") || /^[A-Za-z]:[\\/]/.test(modelID);
 }
 
 function filterChip(value, label, ui) {

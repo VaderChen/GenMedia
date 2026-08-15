@@ -137,6 +137,7 @@ final class AppStore: ObservableObject {
     }
     @Published var jobs: [GenerationJob] = []
     @Published var modelRootPath: String
+    @Published var outputDirectoryPath: String
     @Published var models: [ModelDescriptor]
     @Published var loras: [LoRADescriptor]
     @Published var installations: [String: ModelInstallation]
@@ -151,24 +152,30 @@ final class AppStore: ObservableObject {
     @Published var statusMessage: String?
     @Published var systemMetrics: SystemMetricsSnapshot = .unavailable
     @Published var availableUpdate: AppUpdateInfo?
+    @Published var isReleasingMemory = false
 
     private var jobTasks: [UUID: Task<Void, Never>] = [:]
+    private var cancellationRequestedJobIDs: Set<UUID> = []
+    private var lastJobProgressUpdate: [UUID: Date] = [:]
     private var modelTasks: [String: Task<Void, Never>] = [:]
     private var modelTaskTokens: [String: UUID] = [:]
     private var systemMetricsTask: Task<Void, Never>?
     private var updateCheckTask: Task<Void, Never>?
-    private let textToImageService: any TextToImageGenerating
-    private let imageToTextService: any ImageDescribing
-    private let imageToImageService: any ImageToImageGenerating
-    private let upscaleService: any ImageUpscaling
-    private let videoGenerationService: any VideoGenerating
+    private var textToImageService: ZImageTextToImageService
+    private let imageToTextService: QwenVLImageDescriptionService
+    private var imageToImageService: Qwen2511ImageToImageService
+    private var upscaleService: CoreMLUpscaleService
+    private var videoGenerationService: LTXVideoGenerationService
     private let modelInstaller = HuggingFaceModelInstaller()
 
     private static let recipeSettingsKey = "GenImage.recipeSettings.v1"
     private static let videoOutputSettingsKey = "GenImage.videoOutputSettings.v1"
     private static let modelRootKey = "GenImage.modelRootPath.v1"
+    private static let outputDirectoryKey = "GenImage.outputDirectoryPath.v1"
     private static let disabledProfilesKey = "GenImage.disabledProfiles.v1"
     private static let activeProfilesKey = "GenImage.activeProfiles.v1"
+    private static let jobProgressUpdateInterval: TimeInterval = 1
+    private static let modelProgressUpdateInterval: TimeInterval = 0.5
 
     private struct PersistedRecipeSettings: Codable {
         var prompt: String
@@ -197,9 +204,26 @@ final class AppStore: ObservableObject {
             for: .applicationSupportDirectory,
             in: .userDomainMask
         ).first ?? FileManager.default.temporaryDirectory
-        let generatedDirectory = applicationSupport
+        let defaultGeneratedDirectory = applicationSupport
             .appendingPathComponent("GenImage", isDirectory: true)
             .appendingPathComponent("Generated", isDirectory: true)
+        let configuredOutputDirectory = ProcessInfo.processInfo.environment["GENIMAGE_OUTPUT_DIRECTORY"]
+            ?? UserDefaults.standard.string(forKey: Self.outputDirectoryKey)
+        let generatedDirectory: URL
+        if let configuredOutputDirectory,
+           !configuredOutputDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           NSString(string: configuredOutputDirectory).expandingTildeInPath.hasPrefix("/") {
+            generatedDirectory = URL(
+                fileURLWithPath: (configuredOutputDirectory as NSString).expandingTildeInPath,
+                isDirectory: true
+            ).standardizedFileURL
+        } else {
+            generatedDirectory = defaultGeneratedDirectory
+        }
+        try? FileManager.default.createDirectory(
+            at: generatedDirectory,
+            withIntermediateDirectories: true
+        )
         textToImageService = ZImageTextToImageService(outputDirectory: generatedDirectory)
         imageToTextService = QwenVLImageDescriptionService()
         imageToImageService = Qwen2511ImageToImageService(outputDirectory: generatedDirectory)
@@ -239,6 +263,7 @@ final class AppStore: ObservableObject {
         projects = [project]
         selectedProjectID = project.id
         modelRootPath = modelRootURL.path
+        outputDirectoryPath = generatedDirectory.path
         models = catalog
         loras = discovered.loras
         profiles = profileCatalog
@@ -280,6 +305,7 @@ final class AppStore: ObservableObject {
         videoOutputSettings = initialVideoOutputSettings
         Self.persistRecipeSettings(initialRecipe)
         Self.persistVideoOutputSettings(initialVideoOutputSettings)
+        UserDefaults.standard.set(generatedDirectory.path, forKey: Self.outputDirectoryKey)
 
         assets = []
         selectedAssetID = nil
@@ -330,6 +356,9 @@ final class AppStore: ObservableObject {
             if model.id == "local-captioner-3b@q4" {
                 return !discovered.models.contains { $0.capabilities.contains(.imageToText) }
             }
+            if model.id == "qwen3-vl-8b-nsfw-caption-v45@mxfp4" {
+                return !discovered.models.contains { $0.id == model.id }
+            }
             if model.id == "realesrgan-x4@coreml" {
                 return !discovered.models.contains {
                     $0.capabilities.contains(.upscale) && $0.displayName.contains("Real-ESRGAN 4×")
@@ -354,6 +383,9 @@ final class AppStore: ObservableObject {
             }
             if profile.modelID == "local-captioner-3b@q4" {
                 return !discovered.profiles.contains { $0.capability == .imageToText }
+            }
+            if profile.modelID == "qwen3-vl-8b-nsfw-caption-v45@mxfp4" {
+                return !discovered.profiles.contains { $0.modelID == profile.modelID }
             }
             if profile.modelID == "realesrgan-x4@coreml" {
                 return !discovered.profiles.contains {
@@ -525,6 +557,53 @@ final class AppStore: ObservableObject {
     }
 
     @discardableResult
+    func setOutputDirectory(_ rawPath: String) -> Bool {
+        let trimmedPath = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let expandedPath = (trimmedPath as NSString).expandingTildeInPath
+        guard !expandedPath.isEmpty, NSString(string: expandedPath).isAbsolutePath else {
+            statusMessage = "輸出目錄必須是絕對路徑。"
+            return false
+        }
+
+        let outputURL = URL(fileURLWithPath: expandedPath, isDirectory: true).standardizedFileURL
+        do {
+            try FileManager.default.createDirectory(
+                at: outputURL,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            statusMessage = "無法建立輸出目錄：\(error.localizedDescription)"
+            return false
+        }
+
+        outputDirectoryPath = outputURL.path
+        UserDefaults.standard.set(outputURL.path, forKey: Self.outputDirectoryKey)
+        let textToImageService = textToImageService
+        let imageToImageService = imageToImageService
+        let upscaleService = upscaleService
+        Task {
+            await textToImageService.setOutputDirectory(outputURL)
+            await imageToImageService.setOutputDirectory(outputURL)
+            await upscaleService.setOutputDirectory(outputURL)
+        }
+        videoGenerationService = LTXVideoGenerationService(outputDirectory: outputURL)
+        statusMessage = "輸出目錄已更新：\(outputURL.path)"
+        return true
+    }
+
+    func revealOutputDirectory() {
+        let outputURL = URL(fileURLWithPath: outputDirectoryPath, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
+            guard NSWorkspace.shared.open(outputURL) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+        } catch {
+            statusMessage = "無法開啟輸出目錄：\(error.localizedDescription)"
+        }
+    }
+
+    @discardableResult
     func setModelRoot(_ rawPath: String) -> Bool {
         let trimmedPath = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
         let expandedPath = (trimmedPath as NSString).expandingTildeInPath
@@ -657,7 +736,7 @@ final class AppStore: ObservableObject {
     }
 
     private func ensureInferenceIdle() -> Bool {
-        guard !jobs.contains(where: { [.queued, .running].contains($0.state) }) else {
+        guard !jobs.contains(where: { [.queued, .running, .cancelling].contains($0.state) }) else {
             statusMessage = "已有生成或辨識任務正在執行，請完成或取消後再開始新任務。"
             return false
         }
@@ -673,6 +752,10 @@ final class AppStore: ObservableObject {
             statusMessage = "請先下載並驗證「\(profile.name)」的相關模型：\(missingModels.map(\.displayName).joined(separator: "、"))。"
             return
         }
+        if let compatibilityError = profileCompatibilityError(profile) {
+            statusMessage = compatibilityError
+            return
+        }
         let previousProfileID = activeProfileIDs[capability]
         activeProfileIDs[capability] = nil
         disabledProfileIDs.remove(profileID)
@@ -685,8 +768,150 @@ final class AppStore: ObservableObject {
             recipe.modelID = profile.modelID
         }
         if previousProfileID != profileID {
-            statusMessage = "已啟用「\(profile.name)」；同類型 Profile 維持互斥。"
+            statusMessage = "已啟用「\(profile.name)」；相容性檢查通過，同類型 Profile 維持互斥。"
+            releaseNonFocusedModelsIfNeeded(focusing: capability)
         }
+    }
+
+    /// 切換 Profile 時避免多個大型 Runtime 同時常駐。記憶體讀值超過
+    /// 90% 才執行釋放，而且保留目前切換到的能力所需 Runtime。
+    private func releaseNonFocusedModelsIfNeeded(focusing capability: ModelCapability) {
+        guard let ramUsage = SystemMetricsReader.read().ramUsage,
+              ramUsage > 0.90 else {
+            return
+        }
+
+        let usagePercent = Int((ramUsage * 100).rounded())
+        let textToImage = textToImageService
+        let imageToText = imageToTextService
+        let upscale = upscaleService
+
+        Task { @MainActor [weak self, textToImage, imageToText, upscale] in
+            var released: [String] = []
+            if capability != .textToImage {
+                await textToImage.unload()
+                released.append("文生圖")
+            }
+            if capability != .imageToText {
+                await imageToText.unload()
+                released.append("圖生文")
+            }
+            if capability != .upscale {
+                await upscale.unload()
+                released.append("Upscale")
+            }
+            guard !released.isEmpty, let self else { return }
+            self.statusMessage = "記憶體使用率約 \(usagePercent)%；已釋放非焦點模型：\(released.joined(separator: "、"))。"
+        }
+    }
+
+    private func profileCompatibilityError(
+        _ profile: InferenceProfile,
+        modelOverride: ModelDescriptor? = nil
+    ) -> String? {
+        guard let model = modelOverride ?? models.first(where: { $0.id == profile.modelID }) else {
+            return "Profile「\(profile.name)」找不到指定模型。"
+        }
+        guard let localURL = model.localURL,
+              FileManager.default.fileExists(atPath: localURL.path) else {
+            return "Profile「\(profile.name)」的模型路徑不存在。"
+        }
+        guard model.capabilities.contains(profile.capability) else {
+            return "Profile「\(profile.name)」的模型不支援「\(profile.capability.title)」。"
+        }
+
+        let expectedArchitecture: InferenceArchitecture?
+        switch profile.capability {
+        case .textToImage, .imageToText:
+            expectedArchitecture = .mlxSwift
+        case .upscale:
+            expectedArchitecture = .coreML
+        case .imageToImage, .imageToVideo, .textToVideo:
+            expectedArchitecture = .externalCLI
+        case .controlNet, .lora:
+            expectedArchitecture = nil
+        }
+        if let expectedArchitecture, profile.architecture != expectedArchitecture {
+            return "Profile「\(profile.name)」的架構「\(profile.architecture.title)」與目前 Runtime 不相容；需要「\(expectedArchitecture.title)」。"
+        }
+
+        for configuration in profile.loras {
+            guard let loraModel = models.first(where: { $0.id == configuration.modelID }),
+                  let loraURL = loraModel.localURL else {
+                return "Profile「\(profile.name)」找不到 LoRA「\(configuration.modelID)」。"
+            }
+            if let error = loraCompatibilityError(at: loraURL) {
+                return "Profile「\(profile.name)」的 LoRA 不相容：\(error)"
+            }
+        }
+        return nil
+    }
+
+    func loraCompatibilityError(at url: URL) -> String? {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return "找不到權重路徑：\(url.path)"
+        }
+
+        let candidates: [URL]
+        if isDirectory.boolValue {
+            candidates = (FileManager.default.enumerator(
+                at: url,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )?.compactMap { $0 as? URL }.filter { candidate in
+                (try? candidate.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+            }) ?? []
+        } else {
+            candidates = [url]
+        }
+
+        var sawReadableHeader = false
+        for candidate in candidates {
+            guard let keys = safetensorHeaderKeys(at: candidate) else { continue }
+            sawReadableHeader = true
+            if hasLoRAPairs(keys) { return nil }
+        }
+        return sawReadableHeader
+            ? "找不到可套用的 LoRA 權重配對（A/B 或 LoKr）。"
+            : "無法讀取可辨識的權重標頭。"
+    }
+
+    private func safetensorHeaderKeys(at url: URL) -> [String]? {
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), data.count >= 8 else {
+            return nil
+        }
+        var headerLength: UInt64 = 0
+        for (index, byte) in data.prefix(8).enumerated() {
+            headerLength |= UInt64(byte) << UInt64(index * 8)
+        }
+        guard headerLength <= UInt64(data.count - 8), headerLength <= UInt64(Int.max) else {
+            return nil
+        }
+        let start = data.index(data.startIndex, offsetBy: 8)
+        let end = data.index(start, offsetBy: Int(headerLength))
+        guard let header = try? JSONSerialization.jsonObject(with: data[start..<end]) as? [String: Any] else {
+            return nil
+        }
+        return header.keys.filter { $0 != "__metadata__" }
+    }
+
+    private func hasLoRAPairs(_ keys: [String]) -> Bool {
+        let suffixPairs = [(".lora_down", ".lora_up"), (".lora_A", ".lora_B")]
+        for (downSuffix, upSuffix) in suffixPairs {
+            let downBases = Set(keys.compactMap { loraBase($0, suffix: downSuffix) })
+            let upBases = Set(keys.compactMap { loraBase($0, suffix: upSuffix) })
+            if !downBases.isDisjoint(with: upBases) { return true }
+        }
+        let w1Bases = Set(keys.compactMap { loraBase($0, suffix: ".lokr_w1") })
+        let w2Bases = Set(keys.compactMap { loraBase($0, suffix: ".lokr_w2") })
+        return !w1Bases.isDisjoint(with: w2Bases)
+    }
+
+    private func loraBase(_ key: String, suffix: String) -> String? {
+        let rawKey = key.hasSuffix(".weight") ? String(key.dropLast(".weight".count)) : key
+        guard rawKey.hasSuffix(suffix) else { return nil }
+        return String(rawKey.dropLast(suffix.count))
     }
 
     private func deactivateProfiles(usingModelID modelID: String) {
@@ -902,9 +1127,7 @@ final class AppStore: ObservableObject {
                     request: request,
                     progress: { [weak self] value in
                         Task { @MainActor [weak self] in
-                            self?.updateJob(jobID) {
-                                $0.progress = max($0.progress, min(1, max(0, value)))
-                            }
+                            self?.updateJobProgress(jobID, value: value)
                         }
                     }
                 )
@@ -942,7 +1165,7 @@ final class AppStore: ObservableObject {
             } catch is CancellationError {
                 await MainActor.run { [weak self] in
                     guard let self,
-                          jobs.first(where: { $0.id == jobID })?.state == .running else {
+                          jobs.first(where: { [.running, .cancelling].contains($0.state) }) != nil else {
                         return
                     }
                     updateJob(jobID) { $0.state = .cancelled }
@@ -951,7 +1174,7 @@ final class AppStore: ObservableObject {
                 let message = error.localizedDescription
                 await MainActor.run { [weak self] in
                     guard let self,
-                          jobs.first(where: { $0.id == jobID })?.state == .running else {
+                          jobs.first(where: { [.running, .cancelling].contains($0.state) }) != nil else {
                         return
                     }
                     updateJob(jobID) {
@@ -962,7 +1185,7 @@ final class AppStore: ObservableObject {
                 }
             }
             await MainActor.run { [weak self] in
-                self?.jobTasks[jobID] = nil
+                self?.finishJobTask(jobID)
             }
         }
         jobTasks[jobID] = videoTask
@@ -1095,7 +1318,7 @@ final class AppStore: ObservableObject {
                     request: request,
                     progress: { [weak self] value in
                         Task { @MainActor [weak self] in
-                            self?.updateJob(job.id) { $0.progress = value }
+                            self?.updateJobProgress(job.id, value: value)
                         }
                     }
                 )
@@ -1125,7 +1348,7 @@ final class AppStore: ObservableObject {
                 }
                 statusMessage = "圖生文失敗：\(message)"
             }
-            jobTasks[job.id] = nil
+            finishJobTask(job.id)
         }
     }
 
@@ -1165,7 +1388,7 @@ final class AppStore: ObservableObject {
                     request: request,
                     progress: { [weak self] value in
                         Task { @MainActor [weak self] in
-                            self?.updateJob(job.id) { $0.progress = value }
+                            self?.updateJobProgress(job.id, value: value)
                         }
                     }
                 )
@@ -1205,7 +1428,7 @@ final class AppStore: ObservableObject {
                 }
                 statusMessage = "文生圖失敗：\(message)"
             }
-            jobTasks[job.id] = nil
+            finishJobTask(job.id)
         }
     }
 
@@ -1257,7 +1480,7 @@ final class AppStore: ObservableObject {
                     request: request,
                     progress: { [weak self] value in
                         Task { @MainActor [weak self] in
-                            self?.updateJob(job.id) { $0.progress = value }
+                            self?.updateJobProgress(job.id, value: value)
                         }
                     }
                 )
@@ -1294,7 +1517,7 @@ final class AppStore: ObservableObject {
                 }
                 statusMessage = "圖生圖失敗：\(message)"
             }
-            jobTasks[job.id] = nil
+            finishJobTask(job.id)
         }
     }
 
@@ -1349,7 +1572,7 @@ final class AppStore: ObservableObject {
                     request: request,
                     progress: { [weak self] value in
                         Task { @MainActor [weak self] in
-                            self?.updateJob(job.id) { $0.progress = value }
+                            self?.updateJobProgress(job.id, value: value)
                         }
                     }
                 )
@@ -1387,17 +1610,55 @@ final class AppStore: ObservableObject {
                 }
                 statusMessage = "Upscale 失敗：\(message)"
             }
-            jobTasks[job.id] = nil
+            finishJobTask(job.id)
         }
     }
 
     func cancelJob(_ id: UUID) {
+        guard let job = jobs.first(where: { $0.id == id }) else { return }
+        guard [.queued, .running].contains(job.state) else { return }
         guard let task = jobTasks[id] else {
             updateJob(id) { $0.state = .cancelled }
             return
         }
+        cancellationRequestedJobIDs.insert(id)
+        updateJob(id) { $0.state = .cancelling }
         task.cancel()
+        Task { @MainActor [weak self] in
+            await task.value
+            self?.finishJobTask(id)
+        }
         statusMessage = "正在取消任務，Runtime 停止後即可開始下一個任務。"
+    }
+
+    private func finishJobTask(_ id: UUID) {
+        jobTasks[id] = nil
+        let cancellationRequested = cancellationRequestedJobIDs.remove(id) != nil
+        guard cancellationRequested
+            || jobs.first(where: { $0.id == id })?.state == .cancelling else { return }
+        updateJob(id) { $0.state = .cancelled }
+        statusMessage = "任務已取消，可以繼續操作。"
+    }
+
+    func releaseMemory() {
+        guard !jobs.contains(where: { [.queued, .running, .cancelling].contains($0.state) }) else {
+            statusMessage = "任務執行或取消中，完成後才能釋放記憶體。"
+            return
+        }
+        guard !isReleasingMemory else { return }
+        isReleasingMemory = true
+        statusMessage = "正在釋放已載入的模型記憶體…"
+        let textToImage = textToImageService
+        let imageToText = imageToTextService
+        let upscale = upscaleService
+        Task { @MainActor [weak self] in
+            await textToImage.unload()
+            await imageToText.unload()
+            await upscale.unload()
+            guard let self else { return }
+            isReleasingMemory = false
+            statusMessage = "模型記憶體已釋放。"
+        }
     }
 
     func clearFinishedJobs() {
@@ -1457,6 +1718,7 @@ final class AppStore: ObservableObject {
             progress: startProgress,
             downloadedGB: model.approximateDownloadGB * startProgress
         )
+        let progressGate = ModelProgressGate(interval: Self.modelProgressUpdateInterval)
 
         modelTasks[model.id] = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1472,8 +1734,20 @@ final class AppStore: ObservableObject {
                     modelID: model.id,
                     rootURL: rootURL,
                     progress: { [weak self] update in
+                        guard progressGate.shouldEmit(update) else { return }
                         Task { @MainActor [weak self] in
                             guard let self, modelTaskTokens[model.id] == taskToken else { return }
+                            // The resolved Hugging Face file list is authoritative;
+                            // keep the catalog estimate in sync so repositories that
+                            // add or remove shards do not show e.g. 9.6 GB / 7.6 GB.
+                            let resolvedTotalGB = Double(update.totalBytes) / 1_073_741_824
+                            if resolvedTotalGB > 0,
+                               abs(models.first(where: { $0.id == model.id })?.approximateDownloadGB ?? 0
+                                   - resolvedTotalGB) > 0.01 {
+                                if let index = models.firstIndex(where: { $0.id == model.id }) {
+                                    models[index].approximateDownloadGB = resolvedTotalGB
+                                }
+                            }
                             let downloadedGB = Double(update.downloadedBytes) / 1_073_741_824
                             installations[model.id] = ModelInstallation(
                                 phase: .downloading,
@@ -1485,10 +1759,12 @@ final class AppStore: ObservableObject {
                 )
                 try Task.checkCancellation()
                 guard modelTaskTokens[model.id] == taskToken else { return }
+                let resolvedDownloadGB = models.first(where: { $0.id == model.id })?.approximateDownloadGB
+                    ?? model.approximateDownloadGB
                 installations[model.id] = ModelInstallation(
                     phase: .verifying,
                     progress: 1,
-                    downloadedGB: model.approximateDownloadGB
+                    downloadedGB: resolvedDownloadGB
                 )
                 _ = try HuggingFaceModelInstaller.verify(modelID: model.id, rootURL: rootURL)
                 if let index = models.firstIndex(where: { $0.id == model.id }) {
@@ -1498,7 +1774,7 @@ final class AppStore: ObservableObject {
                 installations[model.id] = ModelInstallation(
                     phase: .installed,
                     progress: 1,
-                    downloadedGB: model.approximateDownloadGB
+                    downloadedGB: resolvedDownloadGB
                 )
                 statusMessage = "「\(model.displayName)」已下載並驗證完成。"
             } catch is CancellationError {
@@ -1512,8 +1788,36 @@ final class AppStore: ObservableObject {
                 installation.phase = .failed
                 installation.errorMessage = error.localizedDescription
                 installations[model.id] = installation
-                statusMessage = "模型下載失敗：\(error.localizedDescription)"
+                if let installerError = error as? ModelInstallerError,
+                   case let .authenticationRequired(downloadURL, _) = installerError {
+                    statusMessage = "Civitai 需要登入；已準備開啟下載網址。"
+                    presentCivitaiAuthenticationDialog(
+                        for: model,
+                        downloadURL: downloadURL
+                    )
+                } else {
+                    statusMessage = "模型下載失敗：\(error.localizedDescription)"
+                }
             }
+        }
+    }
+
+    private func presentCivitaiAuthenticationDialog(
+        for model: ModelDescriptor,
+        downloadURL: URL
+    ) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Civitai 需要登入才能下載 LoRA"
+        alert.informativeText = "「\(model.displayName)」的下載網址需要 Civitai 登入或 API Token。按下「開啟下載網址」後，可在瀏覽器登入並手動下載；若要回到模型中心自動下載，請設定 CIVITAI_TOKEN 後再重試。"
+        alert.addButton(withTitle: "開啟下載網址")
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn {
+            guard NSWorkspace.shared.open(downloadURL) else {
+                statusMessage = "無法開啟 Civitai 下載網址。"
+                return
+            }
+            statusMessage = "已在預設瀏覽器開啟 Civitai 下載網址。"
         }
     }
 
@@ -1527,6 +1831,7 @@ final class AppStore: ObservableObject {
     }
 
     func removeModel(_ model: ModelDescriptor) {
+        guard confirmModelRemoval(model) else { return }
         modelTaskTokens[model.id] = nil
         modelTasks[model.id]?.cancel()
         modelTasks[model.id] = nil
@@ -1534,6 +1839,23 @@ final class AppStore: ObservableObject {
             if HuggingFaceModelInstaller.supports(modelID: model.id) {
                 let rootURL = URL(fileURLWithPath: modelRootPath, isDirectory: true)
                 try HuggingFaceModelInstaller.remove(modelID: model.id, rootURL: rootURL)
+            } else if let localURL = model.localURL {
+                let rootURL = URL(fileURLWithPath: modelRootPath, isDirectory: true)
+                    .resolvingSymlinksInPath()
+                    .standardizedFileURL
+                let targetURL = localURL
+                    .resolvingSymlinksInPath()
+                    .standardizedFileURL
+                let rootPath = rootURL.path.hasSuffix("/") ? rootURL.path : "\(rootURL.path)/"
+                guard targetURL.path != rootURL.path,
+                      targetURL.path.hasPrefix(rootPath) else {
+                    throw NSError(
+                        domain: "GenImage.ModelRemoval",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "模型檔案不在目前的模型目錄內，為避免誤刪除已取消操作。"]
+                    )
+                }
+                try FileManager.default.removeItem(at: targetURL)
             }
             if let index = models.firstIndex(where: { $0.id == model.id }) {
                 models[index].localURL = nil
@@ -1550,6 +1872,17 @@ final class AppStore: ObservableObject {
             )
             statusMessage = "移除模型失敗：\(error.localizedDescription)"
         }
+    }
+
+    private func confirmModelRemoval(_ model: ModelDescriptor) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "確定要移除模型嗎？"
+        let location = model.localURL?.path ?? model.id
+        alert.informativeText = "將移除「\(model.displayName)」及其本機檔案。\n\n路徑：\(location)\n\n此操作無法復原。"
+        alert.addButton(withTitle: "移除")
+        alert.addButton(withTitle: "取消")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func repairModel(_ model: ModelDescriptor) {
@@ -1693,12 +2026,23 @@ final class AppStore: ObservableObject {
             return
         }
 
-        profiles[index].name = name
-        profiles[index].modelID = modelID
-        profiles[index].modelRevision = modelRevision
-        profiles[index].architecture = architecture
-        profiles[index].loras = loras
-        profiles[index].profileRevision += 1
+        var candidate = profiles[index]
+        candidate.name = name
+        candidate.modelID = modelID
+        candidate.modelRevision = modelRevision
+        candidate.architecture = architecture
+        candidate.loras = loras
+        candidate.profileRevision += 1
+
+        // 編輯中的 Profile 尚未寫回陣列，將候選模型明確傳入檢查，避免
+        // 使用中的 Profile 被更新成不存在或不相容的模型／架構。
+        let candidateModel = models.first(where: { $0.id == modelID })
+        if let compatibilityError = profileCompatibilityError(candidate, modelOverride: candidateModel) {
+            statusMessage = compatibilityError
+            return
+        }
+
+        profiles[index] = candidate
         Self.persistDisabledProfiles(disabledProfileIDs, in: profiles)
 
         let capability = profiles[index].capability
@@ -1742,16 +2086,34 @@ final class AppStore: ObservableObject {
         Self.persistActiveProfiles(activeProfileIDs, in: profiles)
     }
 
+    private func updateJobProgress(_ id: UUID, value: Double) {
+        let normalizedValue = min(1, max(0, value))
+        let now = Date()
+        let lastUpdate = lastJobProgressUpdate[id] ?? .distantPast
+        guard normalizedValue >= 1
+            || now.timeIntervalSince(lastUpdate) >= Self.jobProgressUpdateInterval else {
+            return
+        }
+        lastJobProgressUpdate[id] = now
+        updateJob(id) { job in
+            job.progress = max(job.progress, normalizedValue)
+        }
+        if normalizedValue >= 1 {
+            lastJobProgressUpdate[id] = nil
+        }
+    }
+
     private func updateJob(_ id: UUID, change: (inout GenerationJob) -> Void) {
         guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
         change(&jobs[index])
         let now = Date()
         switch jobs[index].state {
-        case .running:
+        case .running, .cancelling:
             if jobs[index].startedAt == nil {
                 jobs[index].startedAt = now
             }
         case .completed, .cancelled, .failed:
+            lastJobProgressUpdate[id] = nil
             if jobs[index].startedAt == nil {
                 jobs[index].startedAt = jobs[index].createdAt
             }
@@ -1822,5 +2184,32 @@ final class AppStore: ObservableObject {
         var executionProfile = profile
         executionProfile.modelID = localURL.path
         return executionProfile
+    }
+}
+
+/// 節流下載回呼，避免大檔案下載時每個網路區塊都排入主執行緒，
+/// 造成整個 WebUI 頻繁重繪而無法操作。
+private final class ModelProgressGate: @unchecked Sendable {
+    private let interval: TimeInterval
+    private let lock = NSLock()
+    private var lastReportedAt = Date.distantPast
+    private var lastFraction = -1.0
+
+    init(interval: TimeInterval) {
+        self.interval = interval
+    }
+
+    func shouldEmit(_ update: ModelInstallProgress) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let now = Date()
+        let shouldEmit = update.fractionCompleted >= 1
+            || update.fractionCompleted - lastFraction >= 0.01
+            || now.timeIntervalSince(lastReportedAt) >= interval
+        guard shouldEmit else { return false }
+        lastReportedAt = now
+        lastFraction = update.fractionCompleted
+        return true
     }
 }

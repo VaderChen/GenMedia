@@ -124,7 +124,7 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
         for index in 0..<request.options.outputCount {
             try Task.checkCancellation()
             let identifier = UUID().uuidString
-            let outputURL = outputDirectory.appendingPathComponent("ltx-video-\(identifier).mp4")
+            let outputURL = OutputFileNaming.videoURL(in: outputDirectory, pathExtension: "mp4")
             generatedOutputURLs.append(outputURL)
             let logURL = outputDirectory.appendingPathComponent("ltx-video-\(identifier).log")
             defer { try? FileManager.default.removeItem(at: logURL) }

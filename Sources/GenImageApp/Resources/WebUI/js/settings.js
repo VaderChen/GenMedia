@@ -1,9 +1,8 @@
-import { escapeHTML } from "./format.js";
 import { languages, t } from "./i18n.js";
 import { themes } from "./themes.js";
+import { escapeHTML } from "./format.js";
 
 export function renderSettings(state, ui) {
-  const localModels = state.models.filter(({ descriptor }) => descriptor.localURL);
   return `
     <section class="page">
       <header class="page-header">
@@ -13,7 +12,7 @@ export function renderSettings(state, ui) {
         </div>
       </header>
       <div class="page-scroll settings-page" data-scroll-id="settings">
-        <section class="settings-card">
+        <section class="settings-card general-settings-card">
           <div>
             <h2>${t("settings.general")}</h2>
             <p>${t("settings.languageNote")}</p>
@@ -26,7 +25,7 @@ export function renderSettings(state, ui) {
           </label>
         </section>
 
-        <section class="settings-card vertical">
+        <section class="settings-card vertical appearance-settings-card">
           <div>
             <h2>${t("settings.appearance")}</h2>
             <p>${t("settings.appearanceNote")}</p>
@@ -41,17 +40,38 @@ export function renderSettings(state, ui) {
           </div>
         </section>
 
-        <section class="settings-card vertical">
+        <section class="settings-card vertical output-settings-card">
           <div>
-            <h2>${t("settings.models")}</h2>
-            <p>${t("settings.detectedModels", { count: localModels.length })}</p>
+            <h2>${t("settings.output")}</h2>
+            <p>${t("settings.outputNote")}</p>
           </div>
-          <div class="settings-list">
-            ${localModels.map(({ descriptor }) => `<div><strong>${escapeHTML(descriptor.displayName)}</strong><code>${escapeHTML(descriptor.localURL)}</code></div>`).join("")}
+          <div class="settings-path-control">
+            <input
+              class="field"
+              type="text"
+              value="${escapeHTML(state.outputDirectoryPath)}"
+              placeholder="${t("settings.outputPlaceholder")}"
+              aria-label="${t("settings.outputPath")}"
+              title="${t("settings.outputPath")}"
+              data-output-directory
+              data-preserve-focus="output-directory"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button
+              class="icon-button"
+              data-action="chooseOutputDirectory"
+              aria-label="${t("settings.chooseOutputDirectory")}"
+              title="${t("settings.chooseOutputDirectory")}"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3.5 6.5h6l2 2h9v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
+              </svg>
+            </button>
           </div>
         </section>
 
-        <section class="settings-card vertical">
+        <section class="settings-card vertical mcp-settings-card">
           <div>
             <h2>${t("settings.mcp")}</h2>
             <p>${t("settings.mcpNote")}</p>

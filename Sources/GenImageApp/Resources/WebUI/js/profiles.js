@@ -27,8 +27,12 @@ export function renderProfiles(state) {
 }
 
 function renderProfileSection(state, capability) {
-  const profiles = state.profiles.filter((profile) => profile.capability === capability);
   const activeID = state.activeProfileIDs[capability];
+  const profiles = sortedProfiles(
+    state.profiles.filter((profile) => profile.capability === capability),
+    activeID,
+    state.models,
+  );
   const disabledProfileIDs = new Set(state.disabledProfileIDs || []);
   return `
     <section style="margin-bottom:28px">
@@ -52,9 +56,36 @@ function renderProfileSection(state, capability) {
   `;
 }
 
+function sortedProfiles(profiles, activeID, models) {
+  return profiles
+    .map((profile, originalIndex) => ({
+      profile,
+      originalIndex,
+      rank: profileSortRank(profile, activeID, models),
+    }))
+    .sort((left, right) => left.rank - right.rank || left.originalIndex - right.originalIndex)
+    .map(({ profile }) => profile);
+}
+
+function profileSortRank(profile, activeID, models) {
+  if (profile.id === activeID) return 0;
+
+  if (isProfileAvailable(profile, models)) return 1;
+
+  const dependencies = profileDependencies(profile)
+    .map((modelID) => models.find(({ descriptor }) => descriptor.id === modelID))
+    .filter(Boolean);
+  if (dependencies.some(({ installation }) =>
+    ["queued", "downloading", "paused", "verifying"].includes(installation.phase))) {
+    return 2;
+  }
+  return 3;
+}
+
 function renderProfileCard(profile, isActive, isDisabled, models) {
+  const availabilityClass = isProfileAvailable(profile, models) ? "is-available" : "is-unavailable";
   return `
-    <article class="profile-card" data-profile-card="${profile.id}">
+    <article class="profile-card ${availabilityClass}" data-profile-card="${profile.id}">
       <div class="card-title-row">
         <div>
           <h2>${escapeHTML(profile.name)}</h2>
@@ -89,9 +120,7 @@ function renderActivationButton(profile, isActive, models = []) {
   if (isActive) {
     return `<button class="danger-button compact" data-action="deactivateProfile" data-profile-id="${profile.id}" data-capability="${profile.capability}">${t("profile.deactivate")}</button>`;
   }
-  const isInstalled = profileDependencies(profile)
-    .every((modelID) => models.some(({ descriptor, installation }) =>
-      descriptor.id === modelID && installation.phase === "installed"));
+  const isInstalled = isProfileAvailable(profile, models);
   return `<button class="primary-button compact" data-action="activateProfile" data-profile-id="${profile.id}" data-capability="${profile.capability}" ${isInstalled ? "" : `disabled title="${escapeHTML(t("profile.installRequired"))}"`}>${t("profile.activate")}</button>`;
 }
 
@@ -156,6 +185,13 @@ function renderProfileInstallButton(profile, models = []) {
 function profileDependencies(profile) {
   return [profile.modelID, ...(profile.loras || []).map(({ modelID }) => modelID)]
     .filter((modelID, index, values) => modelID && values.indexOf(modelID) === index);
+}
+
+function isProfileAvailable(profile, models) {
+  const modelIDs = profileDependencies(profile);
+  return modelIDs.length > 0 && modelIDs.every((modelID) =>
+    models.some(({ descriptor, installation }) =>
+      descriptor.id === modelID && installation.phase === "installed"));
 }
 
 function profileLoRASummary(profile, models) {

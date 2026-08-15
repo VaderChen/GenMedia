@@ -20,20 +20,23 @@ GenImage는 **Apple Silicon을 네이티브로 지원**하는 로컬 AI 미디�
 ./run.command
 ```
 
-`build.command`는 Release 실행 파일, 표준 `GenImage.app`, 마운트 가능한 `GenImage-1.0.0-arm64.dmg`를 `dist/`에 생성합니다. DMG에는 Applications 바로가기, WebUI 리소스, MLX Metal 런타임, MCP 서버, 모델 진단 도구가 포함됩니다.
+`build.command`는 기본적으로 Release 실행 파일과 표준 `GenImage.app`를 생성합니다. DMG가 필요하면 `--dmg`를 명시하세요. DMG에는 Applications 바로가기, WebUI 리소스, MLX Metal 런타임, MCP 서버, 모델 진단 도구가 포함됩니다.
 
 ```bash
-# 빌드하고 DMG 패키징
+# App 빌드 (기본값, DMG 없음)
 ./build.command
 
-# DMG 없이 증분 Release 빌드만 실행
+# Release 실행 파일만 빌드 (App bundle 없음)
 ./build.command --no-dmg
+
+# App 빌드 및 DMG 패키징
+./build.command --dmg
 
 # 버전과 Bundle ID 지정
 GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ```
 
-`run.command`는 자동으로 `--no-dmg`를 사용하므로 일반적인 개발 실행에서 디스크 이미지를 반복 생성하지 않습니다. 현재 DMG는 공증되지 않은 로컬 테스트 패키지입니다. 공개 배포 전에는 Developer ID 서명과 Apple 공증이 필요합니다.
+`run.command`는 자동으로 `--no-dmg`를 사용하므로 일반적인 개발 실행에서는 Release 실행 파일만 갱신합니다. DMG는 선택 사항인 공증되지 않은 로컬 테스트 패키지입니다. 공개 배포 전에는 Developer ID 서명과 Apple 공증이 필요합니다.
 
 ### 비디오 Runtime
 
@@ -51,6 +54,14 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 ```
 
 `ltx-2-mlx`는 기본적으로 Gemma 텍스트 인코더 설정을 사용합니다. 로컬 Gemma 모델이 있다면 `GENIMAGE_LTX_GEMMA_MODEL`에 모델 디렉터리 또는 Hugging Face ID를 지정할 수 있습니다. 현재 앱 DMG에는 Python Runtime, Gemma 가중치, FFmpeg가 포함되지 않습니다. 정식 배포 전에 이를 선택적 외부 구성 요소로 취급하고 Runtime 및 모델 라이선스를 각각 확인해야 합니다.
+
+### 프로필, 작업 및 메모리
+
+- 프로필은 사용 중, 사용 가능, 다운로드 중, 사용 불가 순으로 정렬됩니다. 모델과 LoRA 종속성이 모두 준비된 프로필에는 연한 녹색 테두리가 표시되며 다운로드가 끝나면 즉시 다시 정렬됩니다.
+- 취소 시 먼저 `cancelling` 상태로 전환되고 Runtime Task가 끝나면 `cancelled`로 변경되어 생성 및 메모리 버튼이 다시 활성화됩니다. ETA는 진행률 35% 및 실행 15초 이후 숫자로 표시되며 안정적인 샘플이 부족하면 전체 경과 시간을 사용합니다.
+- Z-Image MLX 호환 계층은 `quantize_config.json`, affine/mxfp4, packed pad token, FP16에서 BF16으로의 로딩을 처리합니다. `build.command`는 Swift Package 해석 후 `Patches/`의 Runtime 수정 사항을 자동 적용합니다. andrevp Z-Image Turbo MLX 4-bit는 실제 이미지 생성으로 검증했습니다.
+- 텍스트→이미지 작업이 끝난 뒤에도 모델 가중치와 워밍업 buffer를 유지합니다. 5분 동안 유휴 상태가 되면 재사용 가능한 MLX 임시 buffer만 정리하고 모델은 언로드하지 않습니다. 사이드바의 메모리 해제, 모델 전환 또는 프로필 전환 시 RAM 90% 초과 보호가 동작할 때만 불필요한 Runtime을 해제합니다.
+- 다운로드는 원본 파일명을 유지합니다. 생성 결과는 `Image-MMDD-HHmmss` 또는 `Video-MMDD-HHmmss`를 사용하며 설정에서 출력 디렉터리를 변경할 수 있습니다.
 
 ## 검증
 
@@ -89,6 +100,7 @@ Sources/
 │   ├── DomainModels.swift        # 에셋, 레시피, 작업, 모델, 프로필
 │   ├── InferenceServices.swift   # 이미지, 텍스트, 비디오 추론 인터페이스
 │   ├── ModelCatalog.swift        # 기본 제공 모델과 프로필
+│   ├── OutputFileNaming.swift    # 이미지 및 비디오 출력 이름
 │   └── WorkflowGraph.swift       # 에셋 계보와 분기 관계
 ├── GenImageRuntime/
 │   ├── ZImageTextToImageService.swift
@@ -102,6 +114,7 @@ Sources/
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # 로컬 이미지와 비디오를 WebUI에 안전하게 제공
     └── Resources/WebUI/          # HTML/CSS/JavaScript 프런트엔드
+Patches/                           # 빌드 시 적용되는 Z-Image MLX 호환성 수정
 ```
 
 ## 현재 상태
@@ -110,6 +123,7 @@ Sources/
 
 추가 정보:
 
+- [업데이트 노트](UpdateNote.md)
 - [아키텍처](docs/ARCHITECTURE.ko.md)
 - [Web Bridge](docs/WEB_BRIDGE.ko.md)
 - [로드맵](docs/ROADMAP.ko.md)

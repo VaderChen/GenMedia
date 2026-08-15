@@ -3,10 +3,14 @@ import GenImageCore
 import ImageIO
 
 public actor Qwen2511ImageToImageService: ImageToImageGenerating {
-    private let outputDirectory: URL
+    private var outputDirectory: URL
     private var runningProcess: Process?
 
     public init(outputDirectory: URL) {
+        self.outputDirectory = outputDirectory
+    }
+
+    public func setOutputDirectory(_ outputDirectory: URL) {
         self.outputDirectory = outputDirectory
     }
 
@@ -35,7 +39,7 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
         )
 
         let identifier = UUID().uuidString
-        let outputURL = outputDirectory.appendingPathComponent("qwen-edit-\(identifier).png")
+        let outputURL = OutputFileNaming.imageURL(in: outputDirectory, pathExtension: "png")
         let requestURL = outputDirectory.appendingPathComponent("qwen-edit-\(identifier).json")
         let logURL = outputDirectory.appendingPathComponent("qwen-edit-\(identifier).log")
         defer {
@@ -128,6 +132,7 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
 
     private nonisolated static func workerQuantization(_ quantization: ModelQuantization) -> String {
         switch quantization {
+        case .twoBit: "int4"
         case .bf16: "fp16"
         case .fourBit: "int4"
         case .eightBit: "int8"

@@ -22,6 +22,7 @@ public enum LocalModelDiscovery {
 
         discoverZImage(root: root, fileManager: fileManager, result: &result)
         discoverCaptioner(root: root, fileManager: fileManager, result: &result)
+        discoverNSFWCaptioner(root: root, fileManager: fileManager, result: &result)
         discoverQwenImageEdit(root: root, fileManager: fileManager, result: &result)
         discoverLTX23(root: root, fileManager: fileManager, result: &result)
         discoverLTX23MLXQ4(root: root, fileManager: fileManager, result: &result)
@@ -66,8 +67,8 @@ public enum LocalModelDiscovery {
         result.models.append(
             ModelDescriptor(
                 id: modelID,
-                displayName: "LTX-2.3 Distilled 1.1（本機）",
-                publisher: "Local / Lightricks",
+                displayName: "LTX-2.3 Distilled 1.1",
+                publisher: "Lightricks",
                 summary: "已安裝 LTX-2.3 Distilled、空間升頻器與 Gemma 3 12B 文字編碼器。",
                 capabilities: [.imageToVideo],
                 quantization: .bf16,
@@ -168,8 +169,8 @@ public enum LocalModelDiscovery {
             result.models.append(
                 ModelDescriptor(
                     id: candidate.id,
-                    displayName: "\(candidate.name)（本機）",
-                    publisher: "Local / PipeNetwork / MiniMaxAI",
+                    displayName: candidate.name,
+                    publisher: "PipeNetwork / MiniMaxAI",
                     summary: "已安裝 MiniMax H3 MLX 量化 Transformer 與完整 FL2VA 文字編碼器、Video/Audio VAE、Tokenizer。",
                     capabilities: [.imageToVideo],
                     quantization: candidate.quantization,
@@ -235,8 +236,8 @@ public enum LocalModelDiscovery {
         result.models.append(
             ModelDescriptor(
                 id: modelID,
-                displayName: "LTX-2.3 MLX Q4（本機）",
-                publisher: "Local / dgrauet / LTX-2 MLX",
+                displayName: "LTX-2.3 MLX Q4",
+                publisher: "dgrauet / LTX-2 MLX",
                 summary: "已安裝原生 MLX INT4 Transformer、Video/Audio VAE、vocoder 與空間升頻器。",
                 capabilities: [.imageToVideo, .textToVideo],
                 quantization: .fourBit,
@@ -313,7 +314,7 @@ public enum LocalModelDiscovery {
             (
                 "qwen-image-edit-2511-int4",
                 "qwen-image-edit-2511@mlx-int4",
-                "Qwen Image Edit 2511 INT4（本機）",
+                "Qwen Image Edit 2511 INT4",
                 "已安裝官方 2511 基礎檔案與 Swift/MLX 預量化 INT4 權重。",
                 .fourBit,
                 32,
@@ -328,7 +329,7 @@ public enum LocalModelDiscovery {
             (
                 "qwen-image-edit-2511-int8",
                 "qwen-image-edit-2511@mlx-int8",
-                "Qwen Image Edit 2511 INT8（本機）",
+                "Qwen Image Edit 2511 INT8",
                 "已安裝官方 2511 權重；Runtime 會在首次使用時建立並保存 MLX INT8。",
                 .eightBit,
                 48,
@@ -342,7 +343,7 @@ public enum LocalModelDiscovery {
             (
                 "qwen-image-edit-2511-fp16",
                 "qwen-image-edit-2511@mlx-fp16",
-                "Qwen Image Edit 2511 FP16（本機）",
+                "Qwen Image Edit 2511 FP16",
                 "已安裝官方 Qwen Image Edit 2511 BF16/FP16 權重。",
                 .fp16,
                 64,
@@ -369,7 +370,7 @@ public enum LocalModelDiscovery {
                 ModelDescriptor(
                     id: candidate.id,
                     displayName: candidate.name,
-                    publisher: "Local / Qwen",
+                    publisher: "Qwen",
                     summary: candidate.summary,
                     capabilities: [.imageToImage],
                     quantization: candidate.quantization,
@@ -413,20 +414,36 @@ public enum LocalModelDiscovery {
                 localURL: normalizedURL,
                 fileSizeMB: Double(values.fileSize ?? 0) / 1_048_576
             )
-
             let manifestURL = normalizedURL.deletingLastPathComponent()
                 .appendingPathComponent("genimage-model.json")
             guard let manifestData = try? Data(contentsOf: manifestURL),
                   let manifest = try? JSONDecoder().decode(
                       ManagedModelManifest.self,
                       from: manifestData
-                  ) else { continue }
+                  ) else {
+                // Keep locally discovered LoRAs visible in Model Center as
+                // installed entries even when they were not downloaded
+                // through GenImage and therefore have no manifest file.
+                managedModels[id] = ModelDescriptor(
+                    id: id,
+                    displayName: normalizedURL.deletingPathExtension().lastPathComponent,
+                    publisher: "Local LoRA",
+                    summary: "從本機 LoRA 目錄偵測的 .safetensors 檔案，可搭配 Z-Image Turbo 文生圖 Profile 使用。",
+                    capabilities: [.lora],
+                    quantization: .lora,
+                    approximateDownloadGB: sizeInGB(of: normalizedURL, fileManager: fileManager),
+                    recommendedMemoryGB: 16,
+                    licenseName: "本機檔案（請自行確認授權）",
+                    localURL: normalizedURL
+                )
+                continue
+            }
             switch manifest.modelID {
             case "tarn59/pixel_art_style_lora_z_image_turbo":
                 managedModels[manifest.modelID] = ModelDescriptor(
                     id: manifest.modelID,
-                    displayName: "Z-Image Turbo Pixel Art LoRA（本機）",
-                    publisher: "Local / tarn59",
+                    displayName: "Z-Image Turbo Pixel Art LoRA",
+                    publisher: "tarn59",
                     summary: "已偵測到可搭配 Z-Image Turbo 使用的像素藝術風格 LoRA。",
                     capabilities: [.lora],
                     quantization: .lora,
@@ -437,12 +454,110 @@ public enum LocalModelDiscovery {
                     localURL: normalizedURL,
                     isRecommended: true
                 )
+            case "suayptalha/Z-Image-Turbo-Realism-LoRA":
+                managedModels[manifest.modelID] = ModelDescriptor(
+                    id: manifest.modelID,
+                    displayName: "Z-Image Turbo Realism LoRA",
+                    publisher: "suayptalha",
+                    summary: "已偵測到可搭配 Z-Image Turbo 使用的寫實風格 LoRA。",
+                    capabilities: [.lora],
+                    quantization: .lora,
+                    approximateDownloadGB: sizeInGB(of: normalizedURL, fileManager: fileManager),
+                    recommendedMemoryGB: 16,
+                    licenseName: "Apache-2.0",
+                    sourceURL: URL(string: "https://huggingface.co/suayptalha/Z-Image-Turbo-Realism-LoRA"),
+                    localURL: normalizedURL
+                )
+            case "renderartist/Classic-Painting-Z-Image-Turbo-LoRA":
+                managedModels[manifest.modelID] = ModelDescriptor(
+                    id: manifest.modelID,
+                    displayName: "Z-Image Turbo Classic Painting LoRA",
+                    publisher: "renderartist",
+                    summary: "已偵測到可搭配 Z-Image Turbo 使用的古典油畫風格 LoRA。",
+                    capabilities: [.lora],
+                    quantization: .lora,
+                    approximateDownloadGB: sizeInGB(of: normalizedURL, fileManager: fileManager),
+                    recommendedMemoryGB: 16,
+                    licenseName: "Apache-2.0",
+                    sourceURL: URL(string: "https://huggingface.co/renderartist/Classic-Painting-Z-Image-Turbo-LoRA"),
+                    localURL: normalizedURL
+                )
+            case "renderartist/Coloring-Book-Z-Image-Turbo-LoRA":
+                managedModels[manifest.modelID] = ModelDescriptor(
+                    id: manifest.modelID,
+                    displayName: "Z-Image Turbo Coloring Book LoRA",
+                    publisher: "renderartist",
+                    summary: "已偵測到可搭配 Z-Image Turbo 使用的著色書線稿風格 LoRA。",
+                    capabilities: [.lora],
+                    quantization: .lora,
+                    approximateDownloadGB: sizeInGB(of: normalizedURL, fileManager: fileManager),
+                    recommendedMemoryGB: 16,
+                    licenseName: "Apache-2.0",
+                    sourceURL: URL(string: "https://huggingface.co/renderartist/Coloring-Book-Z-Image-Turbo-LoRA"),
+                    localURL: normalizedURL
+                )
+            case "civitai/2465401":
+                managedModels[manifest.modelID] = ModelDescriptor(
+                    id: manifest.modelID,
+                    displayName: "Civitai · Z-Image Asian Beauties",
+                    publisher: "DeViLDoNia / Civitai",
+                    summary: "已偵測到 Civitai ZImageTurbo 人像 LoRA。",
+                    capabilities: [.lora],
+                    quantization: .lora,
+                    approximateDownloadGB: sizeInGB(of: normalizedURL, fileManager: fileManager),
+                    recommendedMemoryGB: 16,
+                    licenseName: "Civitai：Image / RentCivit",
+                    sourceURL: URL(string: "https://civitai.com/models/785643"),
+                    localURL: normalizedURL
+                )
+            case "civitai/2709343":
+                managedModels[manifest.modelID] = ModelDescriptor(
+                    id: manifest.modelID,
+                    displayName: "Civitai · Z-Image Turbo Lightning",
+                    publisher: "Felldude / Civitai",
+                    summary: "已偵測到 Civitai ZImageTurbo Lightning LoRA。",
+                    capabilities: [.lora],
+                    quantization: .lora,
+                    approximateDownloadGB: sizeInGB(of: normalizedURL, fileManager: fileManager),
+                    recommendedMemoryGB: 16,
+                    licenseName: "Civitai：Image / RentCivit",
+                    sourceURL: URL(string: "https://civitai.com/models/2409672"),
+                    localURL: normalizedURL
+                )
+            case "civitai/2449645":
+                managedModels[manifest.modelID] = ModelDescriptor(
+                    id: manifest.modelID,
+                    displayName: "Civitai · Z-Image Flat AnimeStyle",
+                    publisher: "MenRiVy1 / Civitai",
+                    summary: "已偵測到 Civitai ZImageTurbo 平面動畫風格 LoRA。",
+                    capabilities: [.lora],
+                    quantization: .lora,
+                    approximateDownloadGB: sizeInGB(of: normalizedURL, fileManager: fileManager),
+                    recommendedMemoryGB: 16,
+                    licenseName: "Civitai：Image / RentCivit / Rent / Sell",
+                    sourceURL: URL(string: "https://civitai.com/models/2175307"),
+                    localURL: normalizedURL
+                )
+            case "civitai/2608073":
+                managedModels[manifest.modelID] = ModelDescriptor(
+                    id: manifest.modelID,
+                    displayName: "Civitai · Z-Image Diorama",
+                    publisher: "loonalone / Civitai",
+                    summary: "已偵測到 Civitai ZImageTurbo Diorama 風格 LoRA。",
+                    capabilities: [.lora],
+                    quantization: .lora,
+                    approximateDownloadGB: sizeInGB(of: normalizedURL, fileManager: fileManager),
+                    recommendedMemoryGB: 16,
+                    licenseName: "Civitai：RentCivit / Rent",
+                    sourceURL: URL(string: "https://civitai.com/models/2318236"),
+                    localURL: normalizedURL
+                )
             case "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control":
                 discovered[id]?.compatibleCapabilities = [.imageToVideo]
                 managedModels[manifest.modelID] = ModelDescriptor(
                     id: manifest.modelID,
-                    displayName: "LTX-2.3 IC-LoRA Union Control（本機）",
-                    publisher: "Local / Lightricks",
+                    displayName: "LTX-2.3 IC-LoRA Union Control",
+                    publisher: "Lightricks",
                     summary: "已安裝 LTX-2.3 Union Control LoRA，可供圖生影 Profile 使用 Canny 逐幀控制。",
                     capabilities: [.lora],
                     quantization: .lora,
@@ -483,21 +598,21 @@ public enum LocalModelDiscovery {
         }) {
             let model = ModelDescriptor(
                 id: directory.path,
-                displayName: "Z-Image Turbo Q4（本機）",
-                publisher: "Local / Tongyi-MAI",
+                displayName: "Z-Image Turbo Q4",
+                publisher: "Tongyi-MAI",
                 summary: "已偵測到完整 Diffusers 格式與 4-bit quantization manifest。",
                 capabilities: [.textToImage],
                 quantization: .fourBit,
                 approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
                 recommendedMemoryGB: 16,
-                licenseName: "本機模型；依來源模型授權",
+                licenseName: "依來源模型授權",
                 localURL: directory,
                 isRecommended: true
             )
             result.models.append(model)
             result.profiles.append(
                 InferenceProfile(
-                    name: "本機文生圖 · Z-Image Q4",
+                    name: "文生圖 · Z-Image Q4",
                     capability: .textToImage,
                     modelID: directory.path,
                     modelRevision: "q4-g32-local",
@@ -521,7 +636,7 @@ public enum LocalModelDiscovery {
             (
                 "z-image-turbo-8bit",
                 "mzbac/z-image-turbo-8bit",
-                "Z-Image Turbo 8-bit（本機）",
+                "Z-Image Turbo 8-bit",
                 "已安裝 mzbac 公開 8-bit Diffusers 模型。",
                 .eightBit,
                 16,
@@ -532,9 +647,61 @@ public enum LocalModelDiscovery {
                 ]
             ),
             (
+                "z-image-turbo-mlx-2bit",
+                "andrevp/Z-Image-Turbo-MLX-2bit",
+                "Z-Image Turbo MLX 2-bit",
+                "已安裝 andrevp 公開 MLX 2-bit Diffusers 模型。",
+                .twoBit,
+                12,
+                [
+                    "genimage-model.json", "model_index.json", "quantize_config.json", "quantization.json",
+                    "scheduler/scheduler_config.json", "text_encoder/config.json",
+                    "tokenizer/tokenizer.json", "transformer/config.json", "vae/config.json"
+                ]
+            ),
+            (
+                "z-image-turbo-mlx-4bit",
+                "andrevp/Z-Image-Turbo-MLX-4bit",
+                "Z-Image Turbo MLX 4-bit",
+                "已安裝 andrevp 公開 MLX 4-bit Diffusers 模型。",
+                .fourBit,
+                16,
+                [
+                    "genimage-model.json", "model_index.json", "quantize_config.json", "quantization.json",
+                    "scheduler/scheduler_config.json", "text_encoder/config.json",
+                    "tokenizer/tokenizer.json", "transformer/config.json", "vae/config.json"
+                ]
+            ),
+            (
+                "z-image-turbo-mlx-8bit",
+                "andrevp/Z-Image-Turbo-MLX-8bit",
+                "Z-Image Turbo MLX 8-bit",
+                "已安裝 andrevp 公開 MLX 8-bit Diffusers 模型。",
+                .eightBit,
+                24,
+                [
+                    "genimage-model.json", "model_index.json", "quantize_config.json", "quantization.json",
+                    "scheduler/scheduler_config.json", "text_encoder/config.json",
+                    "tokenizer/tokenizer.json", "transformer/config.json", "vae/config.json"
+                ]
+            ),
+            (
+                "z-image-turbo-giniiki-4bit",
+                "Giniiki/Z-Image-Turbo-mlx-4bit",
+                "Z-Image Turbo MLX 4-bit · Giniiki",
+                "已安裝 Giniiki 公開 MLX 4-bit Diffusers 模型。",
+                .fourBit,
+                16,
+                [
+                    "genimage-model.json", "model_index.json",
+                    "scheduler/scheduler_config.json", "text_encoder/config.json",
+                    "tokenizer/tokenizer.json", "transformer/config.json", "vae/config.json"
+                ]
+            ),
+            (
                 "z-image-turbo-fp16",
                 "Tongyi-MAI/Z-Image-Turbo",
-                "Z-Image Turbo FP16（本機）",
+                "Z-Image Turbo FP16",
                 "已安裝 Tongyi-MAI 公開 FP16 Diffusers 模型。",
                 .fp16,
                 32,
@@ -560,7 +727,7 @@ public enum LocalModelDiscovery {
                 ModelDescriptor(
                     id: candidate.id,
                     displayName: candidate.name,
-                    publisher: "Local / Z-Image",
+                    publisher: "Z-Image",
                     summary: candidate.summary,
                     capabilities: [.textToImage],
                     quantization: candidate.quantization,
@@ -574,7 +741,7 @@ public enum LocalModelDiscovery {
             )
             result.profiles.append(
                 InferenceProfile(
-                    name: candidate.name.replacingOccurrences(of: "（本機）", with: ""),
+                    name: candidate.name,
                     capability: .textToImage,
                     modelID: candidate.id,
                     modelRevision: "main",
@@ -606,8 +773,8 @@ public enum LocalModelDiscovery {
         let modelID = isManagedInstall ? "local-captioner-3b@q4" : directory.path
         let model = ModelDescriptor(
             id: modelID,
-            displayName: "Qwen3-VL 4B 4-bit（本機）",
-            publisher: isManagedInstall ? "Local / MLX Community" : "Local / Qwen",
+            displayName: "Qwen3-VL 4B 4-bit",
+            publisher: isManagedInstall ? "MLX Community" : "Qwen",
             summary: "已偵測到 Qwen3-VL 圖像理解模型，可供圖生文 Profile 使用。",
             capabilities: [.imageToText],
             quantization: .fourBit,
@@ -621,13 +788,71 @@ public enum LocalModelDiscovery {
         result.models.append(model)
         result.profiles.append(
             InferenceProfile(
-                name: "本機圖生文 · Qwen3-VL 4-bit",
+                name: "圖生文 · Qwen3-VL 4-bit",
                 capability: .imageToText,
                 modelID: modelID,
                 modelRevision: "4bit-local",
                 architecture: .mlxSwift,
                 defaults: ProfileDefaults(maxTokens: 512, languageCode: "zh-Hant"),
                 notes: "從 \(directory.path) 自動偵測。",
+                isBuiltIn: true
+            )
+        )
+    }
+
+    private static func discoverNSFWCaptioner(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let modelID = "qwen3-vl-8b-nsfw-caption-v45@mxfp4"
+        let directory = root.appendingPathComponent(
+            "Qwen3-VL-8B-NSFW-Caption-V4.5-mxfp4",
+            isDirectory: true
+        )
+        let requiredFiles = [
+            "config.json",
+            "model-00001-of-00002.safetensors",
+            "model-00002-of-00002.safetensors",
+            "model.safetensors.index.json",
+            "tokenizer.json",
+            "preprocessor_config.json",
+            "processor_config.json"
+        ]
+        guard requiredFiles.allSatisfy({
+            fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }) else { return }
+
+        let manifestURL = directory.appendingPathComponent("genimage-model.json")
+        let managedModelID: String? = (try? Data(contentsOf: manifestURL))
+            .flatMap { try? JSONDecoder().decode(ManagedModelManifest.self, from: $0).modelID }
+        let isManagedInstall = managedModelID == modelID
+        let discoveredModelID = isManagedInstall ? modelID : directory.path
+        result.models.append(
+            ModelDescriptor(
+                id: discoveredModelID,
+                displayName: "Qwen3-VL 8B NSFW Caption V4.5 mxfp4",
+                publisher: isManagedInstall ? "MLX Community" : "Qwen",
+                summary: "已偵測到 Qwen3-VL NSFW Caption MLX 模型，可供圖生文 Profile 使用。",
+                capabilities: [.imageToText],
+                quantization: .fourBit,
+                approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                recommendedMemoryGB: 24,
+                licenseName: "Apache-2.0",
+                sourceURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-VL-8B-NSFW-Caption-V4.5-mxfp4"),
+                localURL: directory,
+                isRecommended: false
+            )
+        )
+        result.profiles.append(
+            InferenceProfile(
+                name: "NSFW 圖生文 · Qwen3-VL 8B mxfp4",
+                capability: .imageToText,
+                modelID: discoveredModelID,
+                modelRevision: "V4.5-mxfp4-local",
+                architecture: .mlxSwift,
+                defaults: ProfileDefaults(maxTokens: 512, languageCode: "zh-Hant"),
+                notes: "從 (directory.path) 自動偵測；內容標記為 Not-For-All-Audiences。",
                 isBuiltIn: true
             )
         )
@@ -650,14 +875,14 @@ public enum LocalModelDiscovery {
 
             let model = ModelDescriptor(
                 id: modelURL.path,
-                displayName: "\(candidate.name)（本機）",
-                publisher: "Local / Real-ESRGAN",
+                displayName: candidate.name,
+                publisher: "Real-ESRGAN",
                 summary: "已偵測到可由 Core ML 編譯的 Upscale 模型。",
                 capabilities: [.upscale],
                 quantization: .coreML,
                 approximateDownloadGB: sizeInGB(of: modelURL, fileManager: fileManager),
                 recommendedMemoryGB: 8,
-                licenseName: "本機模型；依來源模型授權",
+                licenseName: "依來源模型授權",
                 localURL: modelURL,
                 isRecommended: candidate.file == "realesrgan512.mlmodel"
             )
@@ -680,14 +905,14 @@ public enum LocalModelDiscovery {
                 result.models.append(
                     ModelDescriptor(
                         id: twoXID,
-                        displayName: "照片放大 · Real-ESRGAN 2×（本機）",
-                        publisher: "Local / Real-ESRGAN",
+                        displayName: "照片放大 · Real-ESRGAN 2×",
+                        publisher: "Real-ESRGAN",
                         summary: "使用本機 4× 模型修復後縮放為 2×。",
                         capabilities: [.upscale],
                         quantization: .coreML,
                         approximateDownloadGB: sizeInGB(of: modelURL, fileManager: fileManager),
                         recommendedMemoryGB: 8,
-                        licenseName: "本機模型；依來源模型授權",
+                        licenseName: "依來源模型授權",
                         localURL: modelURL,
                         isRecommended: false
                     )
@@ -725,8 +950,8 @@ public enum LocalModelDiscovery {
             result.models.append(
                 ModelDescriptor(
                     id: candidate.id,
-                    displayName: "\(candidate.name)（本機）",
-                    publisher: "Local / Real-ESRGAN",
+                    displayName: candidate.name,
+                    publisher: "Real-ESRGAN",
                     summary: candidate.scale == 4
                         ? "已安裝可由 Core ML 編譯的 Real-ESRGAN 模型。"
                         : "使用 4× Core ML 模型修復後縮放為 2×。",

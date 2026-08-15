@@ -20,20 +20,23 @@ Requirements: macOS 14+, Apple Silicon, and Xcode 16+.
 ./run.command
 ```
 
-`build.command` creates the release executables, a standard `GenImage.app`, and a mountable `GenImage-1.0.0-arm64.dmg` in `dist/`. The DMG contains an Applications shortcut, WebUI resources, the MLX Metal runtime, the MCP server, and model diagnostic tools.
+`build.command` creates the release executables and a standard `GenImage.app` by default. Use `--dmg` explicitly when a disk image is needed. The DMG contains an Applications shortcut, WebUI resources, the MLX Metal runtime, the MCP server, and model diagnostic tools.
 
 ```bash
-# Build and package the DMG
+# Build the App (default; no DMG)
 ./build.command
 
-# Incremental release build without packaging a DMG
+# Release executables only, without an App bundle
 ./build.command --no-dmg
+
+# Build the App and package a DMG
+./build.command --dmg
 
 # Set the version and bundle identifier
 GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ```
 
-`run.command` automatically uses `--no-dmg`, so normal development runs do not repeatedly create disk images. The current DMG is an unnotarized local test package. Public distribution still requires Developer ID signing and Apple notarization.
+`run.command` automatically uses `--no-dmg`, so normal development runs only update the Release executables. The DMG is an optional, unnotarized local test package. Public distribution still requires Developer ID signing and Apple notarization.
 
 ### Video Runtime
 
@@ -51,6 +54,14 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 ```
 
 `ltx-2-mlx` uses its Gemma text encoder configuration by default. If a local Gemma model is available, set `GENIMAGE_LTX_GEMMA_MODEL` to its directory or Hugging Face ID. The app DMG currently does not bundle the Python runtime, Gemma weights, or FFmpeg. Treat these as optional external components and review their runtime and model licenses separately before distribution.
+
+### Profiles, Jobs, and Memory
+
+- Profiles are ordered as active, ready, downloading, and unavailable. A subtle green outline marks profiles whose model and LoRA dependencies are complete, and the list is reordered as soon as a download finishes.
+- Cancellation enters `cancelling` first, then changes to `cancelled` and unlocks all generation and memory controls when the runtime task exits. A numeric ETA appears after 35% progress and 15 seconds; overall elapsed time is used as a fallback when stable samples are not yet available.
+- The Z-Image MLX compatibility layer handles `quantize_config.json`, affine/mxfp4 modes, packed pad tokens, and FP16-to-BF16 loading. `build.command` reapplies the patches under `Patches/` after Swift Package resolution. The andrevp Z-Image Turbo MLX 4-bit profile has been validated with a real generation run.
+- Text-to-image completion keeps model weights and warm buffers resident. Reusable MLX buffers are trimmed after five idle minutes without unloading the model. Models are unloaded only by the sidebar Release Memory action, a model switch, or the over-90% RAM protection applied while switching profiles.
+- Downloads retain their upstream filenames. Generated outputs use `Image-MMDD-HHmmss` or `Video-MMDD-HHmmss`, and the output directory is configurable in Settings.
 
 ## Validation
 
@@ -89,6 +100,7 @@ Sources/
 │   ├── DomainModels.swift        # Assets, recipes, jobs, models, and profiles
 │   ├── InferenceServices.swift   # Image, text, and video inference interfaces
 │   ├── ModelCatalog.swift        # Built-in models and profiles
+│   ├── OutputFileNaming.swift    # Image and video output names
 │   └── WorkflowGraph.swift       # Asset lineage and branch relationships
 ├── GenImageRuntime/
 │   ├── ZImageTextToImageService.swift
@@ -102,6 +114,7 @@ Sources/
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # Secure local image and video delivery to WebUI
     └── Resources/WebUI/          # HTML/CSS/JavaScript frontend
+Patches/                           # Z-Image MLX compatibility patches applied during builds
 ```
 
 ## Current Status
@@ -110,6 +123,7 @@ The app is connected to local inference for Z-Image Turbo text-to-image, Qwen3-V
 
 More information:
 
+- [Update Notes](UpdateNote.md)
 - [Architecture](docs/ARCHITECTURE.en.md)
 - [Web Bridge](docs/WEB_BRIDGE.en.md)
 - [Roadmap](docs/ROADMAP.en.md)

@@ -1,0 +1,116 @@
+diff --git a/Sources/ZImage/Model/Transformer/ZImageTransformer2D.swift b/Sources/ZImage/Model/Transformer/ZImageTransformer2D.swift
+index e76a01a..d90881e 100644
+--- a/Sources/ZImage/Model/Transformer/ZImageTransformer2D.swift
++++ b/Sources/ZImage/Model/Transformer/ZImageTransformer2D.swift
+@@ -101,11 +101,16 @@ public final class ZImageTransformer2DModel: Module {
+     super.init()
+   }
+
+-  public func loadCapEmbedderWeights(from weights: [String: MLXArray]) {
++  public func loadCapEmbedderWeights(
++    from weights: [String: MLXArray], groupSize: Int = 32, bits: Int = 8,
++    mode: QuantizationMode = .affine
++  ) {
+     if let normWeight = weights["cap_embedder.0.weight"] {
+       capEmbedNorm.weight._updateInternal(normWeight)
+     }
+-    if let linearWeight = weights["cap_embedder.1.weight"] {
++    if let linearWeight = denseWeight(
++      prefix: "cap_embedder.1", weights: weights, groupSize: groupSize, bits: bits, mode: mode
++    ) {
+       capEmbedLinear.weight._updateInternal(linearWeight)
+     }
+     if let linearBias = weights["cap_embedder.1.bias"] {
+@@ -113,12 +118,17 @@ public final class ZImageTransformer2DModel: Module {
+     }
+   }
+
+-  public func loadXEmbedderWeights(from weights: [String: MLXArray], groupSize: Int = 32, bits: Int = 8) {
++  public func loadXEmbedderWeights(
++    from weights: [String: MLXArray], groupSize: Int = 32, bits: Int = 8,
++    mode: QuantizationMode = .affine
++  ) {
+     let key = "2-1"
+     let prefix = "all_x_embedder.\(key)"
+     guard let linear = allXEmbedder[key] else { return }
+
+-    if let w = weights["\(prefix).weight"] {
++    if let w = denseWeight(
++      prefix: prefix, weights: weights, groupSize: groupSize, bits: bits, mode: mode
++    ) {
+       linear.weight._updateInternal(w)
+     }
+     if let b = weights["\(prefix).bias"] {
+@@ -126,22 +136,52 @@ public final class ZImageTransformer2DModel: Module {
+     }
+   }
+
+-  public func loadFinalLayerWeights(from weights: [String: MLXArray], groupSize: Int = 32, bits: Int = 8) {
++  public func loadFinalLayerWeights(
++    from weights: [String: MLXArray], groupSize: Int = 32, bits: Int = 8,
++    mode: QuantizationMode = .affine
++  ) {
+     let key = "2-1"
+     let prefix = "all_final_layer.\(key)"
+     guard let finalLayer = allFinalLayer[key] else { return }
+
+     if let lin = finalLayer.linear as? Linear {
+-      if let w = weights["\(prefix).linear.weight"] { lin.weight._updateInternal(w) }
++      if let w = denseWeight(
++        prefix: "\(prefix).linear", weights: weights, groupSize: groupSize, bits: bits, mode: mode
++      ) { lin.weight._updateInternal(w) }
+       if let b = weights["\(prefix).linear.bias"] { lin.bias?._updateInternal(b) }
+     }
+
+     if let lin = finalLayer.adaLN.linear as? Linear {
+-      if let w = weights["\(prefix).adaLN_modulation.1.weight"] { lin.weight._updateInternal(w) }
++      if let w = denseWeight(
++        prefix: "\(prefix).adaLN_modulation.1", weights: weights,
++        groupSize: groupSize, bits: bits, mode: mode
++      ) { lin.weight._updateInternal(w) }
+       if let b = weights["\(prefix).adaLN_modulation.1.bias"] { lin.bias?._updateInternal(b) }
+     }
+   }
+
++  private func denseWeight(
++    prefix: String,
++    weights: [String: MLXArray],
++    groupSize: Int,
++    bits: Int,
++    mode: QuantizationMode
++  ) -> MLXArray? {
++    guard let weight = weights["\(prefix).weight"] else { return nil }
++    guard let scales = weights["\(prefix).scales"] else {
++      return weight
++    }
++    return MLX.dequantized(
++      weight,
++      scales: scales,
++      biases: weights["\(prefix).biases"],
++      groupSize: groupSize,
++      bits: bits,
++      mode: mode,
++      dtype: .bfloat16
++    )
++  }
++
+   public func setPadTokens(xPad: MLXArray?, capPad: MLXArray?) {
+     if let xPad {
+       let padDim = xPad.dim(xPad.ndim - 1)
+diff --git a/Sources/ZImage/Weights/WeightsMapping.swift b/Sources/ZImage/Weights/WeightsMapping.swift
+index ed40fc0..84c8246 100644
+--- a/Sources/ZImage/Weights/WeightsMapping.swift
++++ b/Sources/ZImage/Weights/WeightsMapping.swift
+@@ -96,9 +96,10 @@ public enum ZImageWeightsMapping {
+
+     let groupSize = manifest?.groupSize ?? 32
+     let bits = manifest?.bits ?? 8
+-    model.loadCapEmbedderWeights(from: weights)
+-    model.loadXEmbedderWeights(from: weights, groupSize: groupSize, bits: bits)
+-    model.loadFinalLayerWeights(from: weights, groupSize: groupSize, bits: bits)
++    let mode: QuantizationMode = manifest?.mode == "mxfp4" ? .mxfp4 : .affine
++    model.loadCapEmbedderWeights(from: weights, groupSize: groupSize, bits: bits, mode: mode)
++    model.loadXEmbedderWeights(from: weights, groupSize: groupSize, bits: bits, mode: mode)
++    model.loadFinalLayerWeights(from: weights, groupSize: groupSize, bits: bits, mode: mode)
+
+     model.setPadTokens(xPad: weights["x_pad_token"], capPad: weights["cap_pad_token"])
