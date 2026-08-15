@@ -2,10 +2,14 @@
 
 本文件採「最新內容在上」的方式維護。開發期間先更新 `Unreleased`；建立 GitHub Release 時，將標題改為正式版本與日期，再新增下一個空白的 `Unreleased` 區段。
 
-## Unreleased — 預計 1.26.0815
+## Unreleased
+
+目前沒有尚未發佈的變更。
+
+## 1.26.0815 — 2026-08-15
 
 更新日期：2026-08-15
-Release 狀態：程式碼更新中；DMG 尚未打包，因此暫不建立 GitHub Release。
+Release 狀態：已完成 Developer ID 簽章、Apple Notarization、Staple 與 Gatekeeper 驗證。
 
 ### 重點更新
 
@@ -52,12 +56,12 @@ Release 狀態：程式碼更新中；DMG 尚未打包，因此暫不建立 GitH
 - Metal Toolchain 缺少時提供明確安裝提示。
 - Swift 正式建置、13 項測試、JavaScript 語法、Shell 語法及 Git diff 格式檢查均已通過。
 
-### 發佈待辦
+### 發佈驗證
 
-- [ ] 完成 Release DMG 打包與本機安裝驗證。
-- [ ] 確認 Developer ID 簽章與 Apple Notarization 狀態。
-- [ ] 建立 GitHub Release、附上 DMG、SHA-256 與安裝說明。
-- [ ] 將本節標題由 `Unreleased` 改為正式版本號與發佈日期。
+- [x] 完成 Release DMG 打包與磁碟映像驗證。
+- [x] 確認 Developer ID 簽章、Apple Notarization、Staple 與 Gatekeeper 狀態。
+- [x] 建立 GitHub Release，附上 DMG、SHA-256 與安裝說明。
+- [x] 將本節標題改為正式版本號與發佈日期。
 
 ## 1.26.0814
 
