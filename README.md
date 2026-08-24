@@ -1,8 +1,8 @@
-# GenImage
+# GenMedia
 
 繁體中文 | [English](README.en.md) | [日本語](README.ja.md) | [한국어](README.ko.md)
 
-GenImage 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App。目前專案已建立可編譯的混合式應用程式：
+GenMedia 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App。目前專案已建立可編譯的混合式應用程式：
 
 - Swift 負責模型、Profile、工作佇列、檔案與 MLX／Core ML 推論。
 - `WKWebView` 內嵌 HTML、CSS 與 JavaScript UI，不需要網路或 npm runtime。
