@@ -741,15 +741,19 @@ function renderArtwork(asset, controls = false, showKind = true) {
   const isVideo = asset.kind === "generatedVideo";
   const isAudio = asset.kind === "generatedAudio";
   const media = hasMedia
-    ? isAudio
-      ? controls
-        ? `<audio
-            src="${escapeHTML(asset.previewURL)}"
-            data-asset-id="${escapeHTML(asset.id)}"
-            aria-label="${escapeHTML(asset.title)}"
-            preload="metadata"
-            controls
-          ></audio>`
+      ? isAudio
+        ? controls
+        ? `<div class="audio-player" data-audio-visualizer data-asset-id="${escapeHTML(asset.id)}">
+            <canvas class="audio-visualizer" data-audio-visualizer-canvas aria-hidden="true"></canvas>
+            <audio
+              src="${escapeHTML(asset.previewURL)}"
+              data-asset-id="${escapeHTML(asset.id)}"
+              data-audio-visualizer-audio
+              aria-label="${escapeHTML(asset.title)}"
+              preload="metadata"
+              controls
+            ></audio>
+          </div>`
         : `<span class="audio-placeholder" data-asset-id="${escapeHTML(asset.id)}" aria-label="${escapeHTML(asset.title)}">♫</span>`
       : isVideo
       ? `<video
