@@ -17,7 +17,7 @@ const messages = {
     "update.openRelease": "查看 Release",
     "update.dismiss": "稍後提醒",
     "brand.name": "剪影重生",
-    "brand.subtitle": "影像重構與生成",
+    "brand.subtitle": "媒體智能生成",
     "sidebar.import": "匯入圖片",
     "sidebar.currentProject": "目前專案",
     "sidebar.assetsJobs": "{assets} 個資產 · {jobs} 執行中",

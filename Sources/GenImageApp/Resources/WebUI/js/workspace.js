@@ -320,7 +320,6 @@ function renderMusicOutputSettings(settings) {
     <section class="output-setting-group music-output-setting-card">
       <div class="output-setting-heading">
         <strong>${t("workspace.musicParameters")}</strong>
-        <span class="music-runtime-badge">MiniMax-Music3</span>
       </div>
       <div class="music-output-fields">
         <div class="field-group">

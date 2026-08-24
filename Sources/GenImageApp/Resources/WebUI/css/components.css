@@ -719,14 +719,6 @@ button:disabled {
   height: 28px;
 }
 
-.music-runtime-badge {
-  background: var(--accent-soft);
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
-  border-radius: 999px;
-  color: var(--accent);
-  padding: 3px 8px;
-}
-
 .music-output-note {
   margin: 7px 0 0;
 }
