@@ -298,6 +298,19 @@ public enum ModelCatalog {
             isRecommended: true
         ),
         ModelDescriptor(
+            id: "vanch007/MiniMax-Music3-MLX-8bit",
+            displayName: "MiniMax Music 3 MLX 8-bit",
+            publisher: "vanch007 / MiniMaxAI",
+            summary: "Apple Silicon 原生 MLX 8-bit 文生音樂模型，可依音樂風格與歌詞生成 44.1 kHz 立體聲音訊。",
+            capabilities: [.textToMusic],
+            quantization: .eightBit,
+            approximateDownloadGB: 13.2,
+            recommendedMemoryGB: 64,
+            licenseName: "MiniMax-Music3 Community License",
+            sourceURL: URL(string: "https://huggingface.co/vanch007/MiniMax-Music3-MLX-8bit"),
+            isRecommended: true
+        ),
+        ModelDescriptor(
             id: "realesrgan-x4@coreml",
             displayName: "Real-ESRGAN 4×",
             publisher: "mlboydaisuke / xinntao",
@@ -525,6 +538,16 @@ public enum ModelCatalog {
                 frameRate: 24
             ),
             notes: "PipeNetwork MiniMax H3 原生 MLX 4-bit Profile；預設約 5 秒、24 FPS、768p，支援首幀或首尾幀圖生影與同步音訊。推論需 pipenetwork/minimax-h3-mlx Python Runtime。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "文生音樂 · MiniMax Music 3 MLX 8-bit",
+            capability: .textToMusic,
+            modelID: "vanch007/MiniMax-Music3-MLX-8bit",
+            modelRevision: "57d87a63181336634a9557fd31aacc2ad6762935",
+            architecture: .externalCLI,
+            defaults: ProfileDefaults(steps: 30, outputCount: 1, durationSeconds: 10),
+            notes: "MiniMax Music 3 原生 MLX 8-bit Profile；依音樂風格 Prompt 與歌詞生成 44.1 kHz 立體聲音訊，建議 64GB 記憶體。推論需外部 mlx-minimax-music3 Runtime 與 FFmpeg。",
             isBuiltIn: true
         ),
         InferenceProfile(

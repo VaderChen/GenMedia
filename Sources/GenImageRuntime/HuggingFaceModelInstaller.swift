@@ -37,6 +37,7 @@ public actor HuggingFaceModelInstaller {
     public static let ltx23MLXQ4ModelID = "dgrauet/ltx-2.3-mlx-q4"
     public static let miniMaxH3MLX8BitModelID = "pipenetwork/MiniMax-H3-MLX-8bit"
     public static let miniMaxH3MLX4BitModelID = "pipenetwork/MiniMax-H3-MLX-4bit"
+    public static let miniMaxMusic3MLX8BitModelID = "vanch007/MiniMax-Music3-MLX-8bit"
     public static let realESRGAN4xModelID = "realesrgan-x4@coreml"
     public static let realESRGAN2xModelID = "realesrgan-x2@coreml"
 
@@ -945,6 +946,31 @@ public actor HuggingFaceModelInstaller {
             return miniMaxH3MLXPlan(
                 repository: "pipenetwork/MiniMax-H3-MLX-4bit",
                 directoryName: "minimax-h3-mlx-4bit"
+            )
+        case miniMaxMusic3MLX8BitModelID:
+            return InstallPlan(
+                directoryName: "minimax-music3-mlx-8bit",
+                sources: [
+                    SourcePlan(
+                        repository: "vanch007/MiniMax-Music3-MLX-8bit",
+                        revision: "57d87a63181336634a9557fd31aacc2ad6762935",
+                        destinationSubdirectory: "",
+                        prefixes: [
+                            "language_model/",
+                            "rvq_depth_decoder/",
+                            "condition_encoder/",
+                            "transformer/",
+                            "vocoder/",
+                            "tokenizer/"
+                        ],
+                        exactFiles: [
+                            "LICENSE",
+                            "README.md",
+                            "config.json",
+                            "source_manifest.json"
+                        ]
+                    )
+                ]
             )
         case int4ModelID:
             return InstallPlan(

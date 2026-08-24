@@ -4,8 +4,8 @@
 
 ## 설계 목표
 
-1. 텍스트→이미지, 이미지→텍스트, 이미지→이미지, 비디오 생성, 업스케일은 서로 의존하지 않는 독립 기능입니다.
-2. 이미지와 비디오 출력으로 작업 흐름과 분기를 구성할 수 있습니다.
+1. 텍스트→이미지, 이미지→텍스트, 이미지→이미지, 비디오 생성, 음악 생성, 업스케일은 서로 의존하지 않는 독립 기능입니다.
+2. 이미지, 비디오, 오디오 출력으로 작업 흐름과 분기를 구성할 수 있습니다.
 3. UI는 MLX, Core ML 또는 특정 모델에 직접 의존하지 않습니다.
 4. 모델 업데이트 시 프로필을 통해 모델 버전과 추론 아키텍처를 전환합니다.
 5. 기존 작업은 프로필 스냅샷을 보존하므로 이후 프로필 변경의 영향을 받지 않습니다.
@@ -33,6 +33,7 @@ AppStore / Workflow coordination
         ├── ImageDescribing
         ├── ImageToImageGenerating
         ├── VideoGenerating
+        ├── MusicGenerating
         └── ImageUpscaling
                     │
                     ▼
@@ -66,6 +67,7 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 - 연결 생성: 생성 결과는 선택한 이미지를 parent로 사용합니다.
 - 독립 텍스트→비디오: MP4 에셋에 parent가 없습니다.
 - 이미지→비디오: MP4 에셋은 원본 이미지를 parent로 사용합니다.
+- 독립 텍스트→음악: MP3, M4A, AAC 또는 FLAC 에셋에 parent가 없으며 실제 길이, 샘플링 레이트, 채널 수를 기록합니다.
 
 `WorkflowGraph`가 lineage와 children 조회를 제공하므로 UI에서 에셋 관계를 추측할 필요가 없습니다.
 
@@ -95,5 +97,14 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 - 외부 Process는 Task 취소, 로그 기반 오류 보고, 백분율 진행률 추출을 지원합니다.
 - MP4 출력은 `generatedVideo` 에셋으로 작업 공간에 추가되며 Web UI의 네이티브 `<video>`로 재생됩니다.
 - Python 구현을 UI나 `AppStore`에 결합하지 않고 `GENIMAGE_LTX_RUNTIME` 또는 표준 설치 위치로 Runtime을 교체할 수 있습니다.
+
+음악은 `MiniMaxMusic3GenerationService`가 `mlx-minimax-music3 generate`를 호출하여 생성합니다.
+
+- 텍스트→음악은 `MusicGenerating`, `MusicGenerationRequest`, `MusicGenerationOptions`를 사용합니다.
+- Swift가 프로필, 모델 완전성, 스타일 프롬프트, 5~300초 길이(최대 5분), 스텝, 출력 형식을 검증합니다. 가사는 선택 사항이며 비어 있으면 연주곡 마커와 보컬 없음 프롬프트로 변환합니다.
+- Runtime은 임시 WAV를 생성하고 FFmpeg가 MP3 320 kbps, M4A AAC 256 kbps, ADTS AAC 256 kbps 또는 무손실 FLAC으로 변환합니다.
+- 성공, 실패, 취소 시 모두 WAV, 프롬프트, 가사, 로그를 정리하며 완료된 압축 오디오만 `generatedAudio` 에셋으로 보존합니다.
+- Web UI는 네이티브 `<audio controls>`로 재생하고 Inspector에 실제 길이, 형식, 44.1 kHz 샘플링 레이트, 채널 수를 표시합니다.
+- Runtime은 `GENIMAGE_MINIMAX_MUSIC3_RUNTIME` 또는 표준 Application Support 위치로 교체할 수 있으며, 모델은 고정 revision에서 설치되고 별도의 Community License를 유지합니다.
 
 MLX metallib은 `RuntimeSupport/mlx.metallib`에서 `build.command`를 통해 Release 실행 디렉터리로 복사됩니다. 배포 전에는 모델 라이선스 검토, 16/24/32 GB 부하 테스트, App bundle, 서명, 공증을 완료해야 합니다.

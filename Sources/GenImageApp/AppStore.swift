@@ -58,6 +58,7 @@ enum ModelFilter: String, CaseIterable, Identifiable {
     case imageToText
     case imageToVideo
     case textToVideo
+    case textToMusic
     case upscale
     case lora
 
@@ -70,6 +71,7 @@ enum ModelFilter: String, CaseIterable, Identifiable {
         case .imageToText: "圖生文"
         case .imageToVideo: "圖生影"
         case .textToVideo: "文生影"
+        case .textToMusic: "文生音樂"
         case .upscale: "Upscale"
         case .lora: "LoRA"
         }
@@ -82,6 +84,7 @@ enum ModelFilter: String, CaseIterable, Identifiable {
         case .imageToText: .imageToText
         case .imageToVideo: .imageToVideo
         case .textToVideo: .textToVideo
+        case .textToMusic: .textToMusic
         case .upscale: .upscale
         case .lora: .lora
         }
@@ -116,6 +119,57 @@ struct VideoOutputSettings: Codable, Hashable, Sendable {
     }
 }
 
+struct MusicOutputSettings: Codable, Hashable, Sendable {
+    var prompt: String
+    var lyrics: String
+    var style: MusicStyle
+    var durationSeconds: Int
+    var steps: Int
+    var seed: UInt64
+    var format: AudioOutputFormat
+
+    private enum CodingKeys: String, CodingKey {
+        case prompt
+        case lyrics
+        case style
+        case durationSeconds
+        case steps
+        case seed
+        case format
+    }
+
+    init(
+        prompt: String = "",
+        lyrics: String = "",
+        style: MusicStyle = .pop,
+        durationSeconds: Int = 10,
+        steps: Int = 30,
+        seed: UInt64 = 42,
+        format: AudioOutputFormat = .mp3
+    ) {
+        self.prompt = prompt
+        self.lyrics = lyrics
+        self.style = style
+        self.durationSeconds = durationSeconds
+        self.steps = steps
+        self.seed = seed
+        self.format = format
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            prompt: try container.decodeIfPresent(String.self, forKey: .prompt) ?? "",
+            lyrics: try container.decodeIfPresent(String.self, forKey: .lyrics) ?? "",
+            style: try container.decodeIfPresent(MusicStyle.self, forKey: .style) ?? .pop,
+            durationSeconds: try container.decodeIfPresent(Int.self, forKey: .durationSeconds) ?? 10,
+            steps: try container.decodeIfPresent(Int.self, forKey: .steps) ?? 30,
+            seed: try container.decodeIfPresent(UInt64.self, forKey: .seed) ?? 42,
+            format: try container.decodeIfPresent(AudioOutputFormat.self, forKey: .format) ?? .mp3
+        )
+    }
+}
+
 @MainActor
 final class AppStore: ObservableObject {
     @Published var selectedSection: AppSection = .workspace
@@ -133,6 +187,11 @@ final class AppStore: ObservableObject {
     @Published var videoOutputSettings: VideoOutputSettings {
         didSet {
             Self.persistVideoOutputSettings(videoOutputSettings)
+        }
+    }
+    @Published var musicOutputSettings: MusicOutputSettings {
+        didSet {
+            Self.persistMusicOutputSettings(musicOutputSettings)
         }
     }
     @Published var jobs: [GenerationJob] = []
@@ -166,10 +225,12 @@ final class AppStore: ObservableObject {
     private var imageToImageService: Qwen2511ImageToImageService
     private var upscaleService: CoreMLUpscaleService
     private var videoGenerationService: LTXVideoGenerationService
+    private var musicGenerationService: MiniMaxMusic3GenerationService
     private let modelInstaller = HuggingFaceModelInstaller()
 
     private static let recipeSettingsKey = "GenImage.recipeSettings.v1"
     private static let videoOutputSettingsKey = "GenImage.videoOutputSettings.v1"
+    private static let musicOutputSettingsKey = "GenImage.musicOutputSettings.v1"
     private static let modelRootKey = "GenImage.modelRootPath.v1"
     private static let outputDirectoryKey = "GenImage.outputDirectoryPath.v1"
     private static let disabledProfilesKey = "GenImage.disabledProfiles.v1"
@@ -231,6 +292,7 @@ final class AppStore: ObservableObject {
             outputDirectory: generatedDirectory
         )
         videoGenerationService = LTXVideoGenerationService(outputDirectory: generatedDirectory)
+        musicGenerationService = MiniMaxMusic3GenerationService(outputDirectory: generatedDirectory)
         let project = Project(name: "示範專案")
         let configuredModelRoot = ProcessInfo.processInfo.environment["GENIMAGE_MODEL_ROOT"]
             ?? UserDefaults.standard.string(forKey: Self.modelRootKey)
@@ -242,6 +304,7 @@ final class AppStore: ObservableObject {
         let profileCatalog = Self.mergedProfiles(discovered: discovered)
         let savedRecipeSettings = Self.loadRecipeSettings()
         let savedVideoOutputSettings = Self.loadVideoOutputSettings()
+        let savedMusicOutputSettings = Self.loadMusicOutputSettings()
         let disabledProfileIDs = Self.disabledProfileIDs(in: profileCatalog)
         let initialActiveProfileIDs = Self.persistedActiveProfileIDs(
             in: profileCatalog,
@@ -259,6 +322,9 @@ final class AppStore: ObservableObject {
             .first
             ?? profileCatalog.first { $0.capability == .textToVideo }
             ?? profileCatalog.first { $0.capability == .imageToVideo }
+        let musicProfile = initialActiveProfileIDs[.textToMusic]
+            .flatMap { activeID in profileCatalog.first { $0.id == activeID } }
+            ?? profileCatalog.first { $0.capability == .textToMusic }
 
         projects = [project]
         selectedProjectID = project.id
@@ -303,8 +369,14 @@ final class AppStore: ObservableObject {
             defaults: videoProfile?.defaults ?? ProfileDefaults()
         )
         videoOutputSettings = initialVideoOutputSettings
+        let initialMusicOutputSettings = Self.validatedMusicOutputSettings(
+            savedMusicOutputSettings,
+            defaults: musicProfile?.defaults ?? ProfileDefaults()
+        )
+        musicOutputSettings = initialMusicOutputSettings
         Self.persistRecipeSettings(initialRecipe)
         Self.persistVideoOutputSettings(initialVideoOutputSettings)
+        Self.persistMusicOutputSettings(initialMusicOutputSettings)
         UserDefaults.standard.set(generatedDirectory.path, forKey: Self.outputDirectoryKey)
 
         assets = []
@@ -346,6 +418,16 @@ final class AppStore: ObservableObject {
     private static func persistVideoOutputSettings(_ settings: VideoOutputSettings) {
         guard let data = try? JSONEncoder().encode(settings) else { return }
         UserDefaults.standard.set(data, forKey: videoOutputSettingsKey)
+    }
+
+    private static func loadMusicOutputSettings() -> MusicOutputSettings? {
+        guard let data = UserDefaults.standard.data(forKey: musicOutputSettingsKey) else { return nil }
+        return try? JSONDecoder().decode(MusicOutputSettings.self, from: data)
+    }
+
+    private static func persistMusicOutputSettings(_ settings: MusicOutputSettings) {
+        guard let data = try? JSONEncoder().encode(settings) else { return }
+        UserDefaults.standard.set(data, forKey: musicOutputSettingsKey)
     }
 
     private static func mergedModels(discovered: DiscoveredModelCatalog) -> [ModelDescriptor] {
@@ -530,6 +612,29 @@ final class AppStore: ObservableObject {
         )
     }
 
+    private static func validatedMusicOutputSettings(
+        _ saved: MusicOutputSettings?,
+        defaults: ProfileDefaults
+    ) -> MusicOutputSettings {
+        MusicOutputSettings(
+            prompt: saved?.prompt ?? "",
+            lyrics: saved?.lyrics ?? "",
+            style: saved?.style ?? .pop,
+            durationSeconds: persistedValue(
+                saved?.durationSeconds,
+                range: MusicGenerationOptions.supportedDurationSeconds,
+                fallback: defaults.durationSeconds ?? 10
+            ),
+            steps: persistedValue(
+                saved?.steps,
+                range: 1...100,
+                fallback: defaults.steps ?? 30
+            ),
+            seed: saved?.seed ?? UInt64.random(in: 0...UInt64.max),
+            format: saved?.format ?? .mp3
+        )
+    }
+
     private static func validatedPersistedLoRA(
         _ selection: LoRASelection?,
         available: [LoRADescriptor]
@@ -587,6 +692,7 @@ final class AppStore: ObservableObject {
             await upscaleService.setOutputDirectory(outputURL)
         }
         videoGenerationService = LTXVideoGenerationService(outputDirectory: outputURL)
+        musicGenerationService = MiniMaxMusic3GenerationService(outputDirectory: outputURL)
         statusMessage = "輸出目錄已更新：\(outputURL.path)"
         return true
     }
@@ -681,7 +787,7 @@ final class AppStore: ObservableObject {
 
     var selectedSourceImage: ImageAsset? {
         guard let asset = selectedAsset,
-              asset.kind != .generatedVideo,
+              asset.kind.isImage,
               let fileURL = asset.fileURL,
               FileManager.default.fileExists(atPath: fileURL.path) else {
             return nil
@@ -694,7 +800,7 @@ final class AppStore: ObservableObject {
         return assetIDs.compactMap { assetID in
             guard seen.insert(assetID).inserted,
                   let asset = assets.first(where: { $0.id == assetID }),
-                  asset.kind != .generatedVideo,
+                  asset.kind.isImage,
                   let fileURL = asset.fileURL,
                   FileManager.default.fileExists(atPath: fileURL.path) else {
                 return nil
@@ -826,7 +932,7 @@ final class AppStore: ObservableObject {
             expectedArchitecture = .mlxSwift
         case .upscale:
             expectedArchitecture = .coreML
-        case .imageToImage, .imageToVideo, .textToVideo:
+        case .imageToImage, .imageToVideo, .textToVideo, .textToMusic:
             expectedArchitecture = .externalCLI
         case .controlNet, .lora:
             expectedArchitecture = nil
@@ -980,6 +1086,43 @@ final class AppStore: ObservableObject {
 
     func randomizeVideoSeed() {
         videoOutputSettings.seed = UInt64.random(in: 0...UInt64.max)
+    }
+
+    func applyActiveMusicProfileDefaults() {
+        guard let profile = activeProfile(for: .textToMusic) else { return }
+        var updated = musicOutputSettings
+        updated.durationSeconds = profile.defaults.durationSeconds ?? updated.durationSeconds
+        updated.steps = profile.defaults.steps ?? updated.steps
+        musicOutputSettings = updated
+    }
+
+    func randomizeMusicSeed() {
+        musicOutputSettings.seed = UInt64.random(in: 0...UInt64.max)
+    }
+
+    func updateMusicOutputSettings(
+        prompt: String?,
+        lyrics: String?,
+        style: MusicStyle?,
+        durationSeconds: Int?,
+        steps: Int?,
+        seed: UInt64?,
+        format: AudioOutputFormat?
+    ) {
+        var updated = musicOutputSettings
+        if let prompt { updated.prompt = prompt }
+        if let lyrics { updated.lyrics = lyrics }
+        if let style { updated.style = style }
+        if let durationSeconds {
+            updated.durationSeconds = min(
+                max(durationSeconds, MusicGenerationOptions.supportedDurationSeconds.lowerBound),
+                MusicGenerationOptions.supportedDurationSeconds.upperBound
+            )
+        }
+        if let steps { updated.steps = min(max(steps, 1), 100) }
+        if let seed { updated.seed = seed }
+        if let format { updated.format = format }
+        musicOutputSettings = updated
     }
 
     func updateVideoOutputSettings(
@@ -1211,6 +1354,120 @@ final class AppStore: ObservableObject {
             $0.errorMessage = message
         }
         statusMessage = message
+    }
+
+    func requestMusicGeneration() {
+        guard ensureInferenceIdle() else { return }
+        guard let profile = activeProfile(for: .textToMusic) else {
+            statusMessage = "請先啟用文生音樂 Profile。"
+            return
+        }
+        guard isProfileReady(profile) else { return }
+        guard let model = models.first(where: { $0.id == profile.modelID }),
+              let modelURL = model.localURL else {
+            statusMessage = "找不到音樂模型的本機安裝路徑。"
+            return
+        }
+        let musicPrompt = musicOutputSettings.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let options = MusicGenerationOptions(
+            prompt: musicPrompt.isEmpty ? musicOutputSettings.style.prompt : musicPrompt,
+            lyrics: musicOutputSettings.lyrics,
+            durationSeconds: musicOutputSettings.durationSeconds,
+            steps: musicOutputSettings.steps,
+            seed: musicOutputSettings.seed,
+            format: musicOutputSettings.format
+        )
+        do {
+            try options.validate()
+        } catch {
+            statusMessage = error.localizedDescription
+            return
+        }
+
+        let projectID = selectedProjectID
+        let recipeID = recipe.id
+        let job = GenerationJob(
+            action: .generateMusic,
+            title: "生成 \(options.durationSeconds) 秒 \(options.format.displayName) 音樂"
+        )
+        jobs.append(job)
+        updateJob(job.id) {
+            $0.state = .running
+            $0.progress = 0.001
+        }
+        let service = musicGenerationService
+        let request = MusicGenerationRequest(
+            projectID: projectID,
+            recipeID: recipeID,
+            options: options,
+            profile: profile,
+            modelURL: modelURL
+        )
+        let jobID = job.id
+        let musicTask = Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                var asset = try await service.generate(
+                    request: request,
+                    progress: { [weak self] value in
+                        Task { @MainActor [weak self] in
+                            self?.updateJob(jobID) {
+                                $0.progress = max($0.progress, min(1, max(0, value)))
+                            }
+                        }
+                    }
+                )
+                try Task.checkCancellation()
+                let operationID = UUID()
+                asset.operationID = operationID
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    assets.append(asset)
+                    operations.append(
+                        WorkflowOperation(
+                            id: operationID,
+                            projectID: projectID,
+                            action: .generateMusic,
+                            outputAssetIDs: [asset.id],
+                            recipeID: recipeID,
+                            profileSnapshot: profile
+                        )
+                    )
+                    comparisonAssetID = nil
+                    selectedAssetID = asset.id
+                    previewMode = .single
+                    updateJob(jobID) {
+                        $0.progress = 1
+                        $0.state = .completed
+                    }
+                    statusMessage = "文生音樂完成，已輸出 \(options.format.displayName)。"
+                }
+            } catch is CancellationError {
+                await MainActor.run { [weak self] in
+                    guard let self,
+                          jobs.first(where: { $0.id == jobID })?.state == .running else {
+                        return
+                    }
+                    updateJob(jobID) { $0.state = .cancelled }
+                }
+            } catch {
+                let message = error.localizedDescription
+                await MainActor.run { [weak self] in
+                    guard let self,
+                          jobs.first(where: { $0.id == jobID })?.state == .running else {
+                        return
+                    }
+                    updateJob(jobID) {
+                        $0.state = .failed
+                        $0.errorMessage = message
+                    }
+                    statusMessage = "音樂生成失敗：\(message)"
+                }
+            }
+            await MainActor.run { [weak self] in
+                self?.jobTasks[jobID] = nil
+            }
+        }
+        jobTasks[jobID] = musicTask
     }
 
     func chooseSize(width: Int, height: Int) {
@@ -1957,6 +2214,7 @@ final class AppStore: ObservableObject {
 
     func createProfile(for capability: ModelCapability) {
         let isVideoCapability = capability == .imageToVideo || capability == .textToVideo
+        let isMusicCapability = capability == .textToMusic
         let model = models.first(where: { $0.capabilities.contains(capability) })
             ?? (capability == .imageToImage
                 ? models.first(where: { $0.capabilities.contains(.textToImage) })
@@ -1974,13 +2232,13 @@ final class AppStore: ObservableObject {
                 steps: recipe.steps,
                 outputCount: recipe.outputCount
             )
-        } else if isVideoCapability, let templateProfile {
+        } else if (isVideoCapability || isMusicCapability), let templateProfile {
             defaults = templateProfile.defaults
         } else {
             defaults = ProfileDefaults()
         }
         let architecture: InferenceArchitecture
-        if isVideoCapability, let templateProfile {
+        if (isVideoCapability || isMusicCapability), let templateProfile {
             architecture = templateProfile.architecture
         } else if capability == .imageToImage {
             architecture = .externalCLI
@@ -1994,7 +2252,7 @@ final class AppStore: ObservableObject {
             architecture: architecture,
             defaults: defaults,
             loras: isVideoCapability ? (templateProfile?.loras ?? []) : [],
-            notes: capability == .imageToImage || isVideoCapability
+            notes: capability == .imageToImage || isVideoCapability || isMusicCapability
                 ? "請設定支援此生成能力的模型版本與推論架構。"
                 : "",
             isBuiltIn: false

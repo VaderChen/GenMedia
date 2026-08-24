@@ -90,25 +90,15 @@ ensure_zimage_runtime_patch() {
 }
 
 PACKAGE_APP=true
-CREATE_DMG=false
 case "${1:-}" in
-  --dmg)
-    CREATE_DMG=true
-    shift
-    ;;
-  --no-dmg)
+  --no-app)
     PACKAGE_APP=false
-    CREATE_DMG=false
-    shift
-    ;;
-  --app-only)
-    CREATE_DMG=false
     shift
     ;;
 esac
 
 if (( $# > 0 )); then
-  print -u2 "用法：$0 [--app-only|--dmg|--no-dmg]"
+  print -u2 "用法：$0 [--no-app]"
   exit 2
 fi
 
@@ -124,11 +114,6 @@ fi
 
 if ! command -v swift >/dev/null 2>&1; then
   print -u2 "錯誤：找不到 Swift。請先安裝 Xcode，並完成 Command Line Tools 設定。"
-  exit 1
-fi
-
-if [[ "$CREATE_DMG" == true && ! -x /usr/bin/hdiutil ]]; then
-  print -u2 "錯誤：找不到 macOS hdiutil，無法製作 DMG。"
   exit 1
 fi
 
@@ -183,15 +168,14 @@ fi
 cp "$METALLIB_SOURCE" "$METALLIB_TARGET"
 
 if [[ "$PACKAGE_APP" == true ]]; then
-  APP_NAME="GenImage"
-  APP_DISPLAY_NAME="${GENIMAGE_DISPLAY_NAME:-剪影重生}"
+  APP_NAME="GenMedia"
+  APP_DISPLAY_NAME="${GENIMAGE_DISPLAY_NAME:-GenMedia}"
   APP_VERSION="${GENIMAGE_VERSION:-$(date '+1.%y.%m%d')}"
   BUNDLE_ID="${GENIMAGE_BUNDLE_ID:-com.vader.genimage}"
   BUILD_NUMBER="${GENIMAGE_BUILD_NUMBER:-$(date '+%H%M')}"
   CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
   DIST_DIR="$SCRIPT_DIR/dist"
   FINAL_APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
-  DMG_PATH="$DIST_DIR/${APP_NAME}-${APP_VERSION}-arm64.dmg"
 
   if [[ ! "$APP_VERSION" =~ '^[0-9]+([.][0-9]+)*$' ]]; then
     print -u2 "錯誤：GENIMAGE_VERSION 必須是數字與句點組成的版本號：$APP_VERSION"
@@ -251,8 +235,7 @@ if [[ "$PACKAGE_APP" == true ]]; then
 
   print "正在建立 $APP_NAME.app…"
   mkdir -p "$DIST_DIR"
-  rm -rf -- "$DIST_DIR/.dmg-root"
-  rm -f -- "$DMG_PATH"
+  rm -rf -- "$STAGED_APP_BUNDLE"
   mkdir -p \
     "$MACOS_DIR" \
     "$HELPERS_DIR" \
@@ -410,39 +393,6 @@ if [[ "$PACKAGE_APP" == true ]]; then
   cleanup_staged_app
   trap - EXIT INT TERM
   APP_BUNDLE="$FINAL_APP_BUNDLE"
-
-  if [[ "$CREATE_DMG" == true ]]; then
-    TEMP_ROOT="${TMPDIR:-/tmp}"
-    DMG_WORK_DIR="$(mktemp -d "${TEMP_ROOT%/}/genimage-dmg.XXXXXX")"
-    DMG_ROOT="$DMG_WORK_DIR/root"
-    TEMP_DMG_PATH="$DMG_WORK_DIR/${DMG_PATH:t}"
-
-    cleanup_dmg_work_dir() {
-      rm -rf -- "$DMG_WORK_DIR"
-    }
-    trap cleanup_dmg_work_dir EXIT INT TERM
-
-    print "正在製作 $DMG_PATH…"
-    mkdir -p "$DMG_ROOT"
-    /usr/bin/ditto --extattr --noqtn "$APP_BUNDLE" "$DMG_ROOT/$APP_NAME.app"
-    ln -s /Applications "$DMG_ROOT/Applications"
-    find "$DMG_ROOT" -name '._*' -delete
-
-    /usr/bin/hdiutil create \
-      -volname "$APP_NAME $APP_VERSION" \
-      -srcfolder "$DMG_ROOT" \
-      -format UDZO \
-      -ov \
-      "$TEMP_DMG_PATH"
-    /usr/bin/hdiutil verify "$TEMP_DMG_PATH"
-    mv -- "$TEMP_DMG_PATH" "$DMG_PATH"
-    if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
-      /usr/bin/codesign --force --sign "$CODESIGN_IDENTITY" --timestamp "$DMG_PATH"
-      /usr/bin/codesign --verify --strict --verbose=2 "$DMG_PATH"
-    fi
-    cleanup_dmg_work_dir
-    trap - EXIT INT TERM
-  fi
 fi
 
 print ""
@@ -454,7 +404,4 @@ print "Qwen 2511 Runtime：$QWEN_WORKER"
 print "MLX Metal Runtime：$METALLIB_TARGET"
 if [[ "$PACKAGE_APP" == true ]]; then
   print "App Bundle：$APP_BUNDLE"
-fi
-if [[ "$CREATE_DMG" == true ]]; then
-  print "DMG：$DMG_PATH"
 fi

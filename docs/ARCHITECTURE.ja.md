@@ -4,8 +4,8 @@
 
 ## 設計目標
 
-1. テキストから画像、画像からテキスト、画像から画像、動画生成、アップスケールは相互に依存しない独立した機能です。
-2. 画像と動画の出力からワークフローや分岐を構成できます。
+1. テキストから画像、画像からテキスト、画像から画像、動画生成、音楽生成、アップスケールは相互に依存しない独立した機能です。
+2. 画像、動画、音声の出力からワークフローや分岐を構成できます。
 3. UI は MLX、Core ML、特定のモデルに直接依存しません。
 4. モデル更新時はプロファイルによってモデル版と推論アーキテクチャを切り替えます。
 5. 過去の作品はプロファイルのスナップショットを保持し、その後のプロファイル変更による影響を受けません。
@@ -33,6 +33,7 @@ AppStore / Workflow coordination
         ├── ImageDescribing
         ├── ImageToImageGenerating
         ├── VideoGenerating
+        ├── MusicGenerating
         └── ImageUpscaling
                     │
                     ▼
@@ -66,6 +67,7 @@ Web UI は Bridge を通じてのみローカル機能を利用できます。�
 - 連携生成：生成結果は選択画像を parent とします。
 - 単独のテキストから動画：MP4 アセットに parent はありません。
 - 画像から動画：MP4 アセットは入力画像を parent とします。
+- 単独のテキストから音楽：MP3、M4A、AAC、FLAC アセットに parent はなく、実際の長さ、サンプルレート、チャンネル数を記録します。
 
 `WorkflowGraph` が lineage と children の問い合わせを提供するため、UI がアセット関係を推測する必要はありません。
 
@@ -95,5 +97,14 @@ Web UI は Bridge を通じてのみローカル機能を利用できます。�
 - 外部 Process は Task のキャンセル、ログによるエラー報告、パーセント進捗の抽出をサポートします。
 - MP4 出力は `generatedVideo` アセットとしてワークスペースに追加され、Web UI のネイティブ `<video>` で再生されます。
 - Python 実装を UI や `AppStore` に結合せず、`GENIMAGE_LTX_RUNTIME` または標準インストール場所によって Runtime を置き換えられます。
+
+音楽は `MiniMaxMusic3GenerationService` が `mlx-minimax-music3 generate` を呼び出して生成します。
+
+- テキストから音楽は `MusicGenerating`、`MusicGenerationRequest`、`MusicGenerationOptions` を使用します。
+- Swift がプロファイル、モデルの完全性、スタイルプロンプト、5～300 秒の長さ（最長 5 分）、ステップ、出力形式を検証します。歌詞は任意で、空欄の場合はインストゥルメンタル用のマーカーとボーカルなしのプロンプトへ変換します。
+- Runtime は一時 WAV を生成し、FFmpeg が MP3 320 kbps、M4A AAC 256 kbps、ADTS AAC 256 kbps、または可逆圧縮 FLAC に変換します。
+- 成功、失敗、キャンセルのいずれでも WAV、プロンプト、歌詞、ログを削除し、完成した圧縮音声だけを `generatedAudio` アセットとして保持します。
+- Web UI はネイティブ `<audio controls>` で再生し、Inspector に実際の長さ、形式、44.1 kHz サンプルレート、チャンネル数を表示します。
+- Runtime は `GENIMAGE_MINIMAX_MUSIC3_RUNTIME` または標準の Application Support 配置で交換でき、モデルは固定 revision から導入して独立した Community License を維持します。
 
 MLX metallib は `RuntimeSupport/mlx.metallib` から `build.command` によって Release 実行ディレクトリへコピーされます。配布前にはモデルライセンスの確認、16／24／32 GB の負荷試験、App bundle、署名、公証を完了する必要があります。

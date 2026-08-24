@@ -42,6 +42,7 @@ export function renderModels(state, ui) {
             ${filterChip("imageToImage", capabilityLabel("imageToImage"), ui)}
             ${filterChip("textToVideo", capabilityLabel("textToVideo"), ui)}
             ${filterChip("imageToVideo", capabilityLabel("imageToVideo"), ui)}
+            ${filterChip("textToMusic", capabilityLabel("textToMusic"), ui)}
             ${filterChip("upscale", capabilityLabel("upscale"), ui)}
             ${filterChip("lora", capabilityLabel("lora"), ui)}
           </div>

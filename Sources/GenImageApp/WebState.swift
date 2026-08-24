@@ -8,6 +8,10 @@ struct WebAsset: Encodable {
     let title: String
     let pixelWidth: Int
     let pixelHeight: Int
+    let mediaDurationSeconds: Double?
+    let sampleRate: Int?
+    let channelCount: Int?
+    let audioFormat: AudioOutputFormat?
     let createdAt: Date
     let previewURL: String?
 
@@ -18,6 +22,10 @@ struct WebAsset: Encodable {
         title = asset.title
         pixelWidth = asset.pixelWidth
         pixelHeight = asset.pixelHeight
+        mediaDurationSeconds = asset.mediaDurationSeconds
+        sampleRate = asset.sampleRate
+        channelCount = asset.channelCount
+        audioFormat = asset.audioFormat
         createdAt = asset.createdAt
         previewURL = asset.fileURL == nil ? nil : "genimage-asset://\(asset.id.uuidString)"
     }
@@ -89,6 +97,26 @@ struct WebVideoOutputSettings: Encodable {
     }
 }
 
+struct WebMusicOutputSettings: Encodable {
+    let prompt: String
+    let lyrics: String
+    let style: MusicStyle
+    let durationSeconds: Int
+    let steps: Int
+    let seed: String
+    let format: AudioOutputFormat
+
+    init(settings: MusicOutputSettings) {
+        prompt = settings.prompt
+        lyrics = settings.lyrics
+        style = settings.style
+        durationSeconds = settings.durationSeconds
+        steps = settings.steps
+        seed = String(settings.seed)
+        format = settings.format
+    }
+}
+
 struct WebAppState: Encodable {
     let schemaVersion: Int
     let projectName: String
@@ -99,6 +127,7 @@ struct WebAppState: Encodable {
     let comparisonAssetID: UUID?
     let recipe: WebRecipe
     let videoOutputSettings: WebVideoOutputSettings
+    let musicOutputSettings: WebMusicOutputSettings
     let jobs: [GenerationJob]
     let models: [WebModel]
     let loras: [LoRADescriptor]
@@ -122,6 +151,7 @@ struct WebAppState: Encodable {
         comparisonAssetID = store.comparisonAssetID
         recipe = WebRecipe(recipe: store.recipe)
         videoOutputSettings = WebVideoOutputSettings(settings: store.videoOutputSettings)
+        musicOutputSettings = WebMusicOutputSettings(settings: store.musicOutputSettings)
         jobs = store.jobs
         models = store.models.map {
             WebModel(descriptor: $0, installation: store.installation(for: $0.id))

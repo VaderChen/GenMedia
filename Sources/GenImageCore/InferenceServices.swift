@@ -149,6 +149,81 @@ public enum VideoGenerationValidationError: LocalizedError, Sendable {
     }
 }
 
+public struct MusicGenerationOptions: Sendable, Hashable {
+    public static let supportedDurationSeconds = 5...300
+
+    public var prompt: String
+    public var lyrics: String
+    public var durationSeconds: Int
+    public var steps: Int
+    public var seed: UInt64
+    public var format: AudioOutputFormat
+
+    public init(
+        prompt: String,
+        lyrics: String,
+        durationSeconds: Int,
+        steps: Int,
+        seed: UInt64,
+        format: AudioOutputFormat
+    ) {
+        self.prompt = prompt
+        self.lyrics = lyrics
+        self.durationSeconds = durationSeconds
+        self.steps = steps
+        self.seed = seed
+        self.format = format
+    }
+
+    public func validate() throws {
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw MusicGenerationValidationError.emptyPrompt
+        }
+        guard Self.supportedDurationSeconds.contains(durationSeconds) else {
+            throw MusicGenerationValidationError.invalidDuration
+        }
+        guard (1...100).contains(steps) else {
+            throw MusicGenerationValidationError.invalidSteps
+        }
+    }
+}
+
+public enum MusicGenerationValidationError: LocalizedError, Sendable {
+    case emptyPrompt
+    case invalidDuration
+    case invalidSteps
+
+    public var errorDescription: String? {
+        switch self {
+        case .emptyPrompt: "音樂風格 Prompt 不可為空白。"
+        case .invalidDuration: "音樂長度必須介於 5 到 300 秒。"
+        case .invalidSteps: "音樂生成步數必須介於 1 到 100。"
+        }
+    }
+}
+
+public struct MusicGenerationRequest: Sendable, Hashable {
+    public var projectID: UUID
+    public var recipeID: UUID
+    public var options: MusicGenerationOptions
+    public var profile: InferenceProfile
+    public var modelURL: URL
+
+    public init(
+        projectID: UUID,
+        recipeID: UUID,
+        options: MusicGenerationOptions,
+        profile: InferenceProfile,
+        modelURL: URL
+    ) {
+        self.projectID = projectID
+        self.recipeID = recipeID
+        self.options = options
+        self.profile = profile
+        self.modelURL = modelURL
+    }
+}
+
 public struct VideoGenerationRequest: Sendable, Hashable {
     public var projectID: UUID
     public var recipeID: UUID
@@ -230,24 +305,34 @@ public protocol VideoGenerating: Sendable {
     ) async throws -> [ImageAsset]
 }
 
+public protocol MusicGenerating: Sendable {
+    func generate(
+        request: MusicGenerationRequest,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> ImageAsset
+}
+
 public struct InferenceServices: Sendable {
     public var textToImage: any TextToImageGenerating
     public var imageToText: any ImageDescribing
     public var imageToImage: any ImageToImageGenerating
     public var upscale: any ImageUpscaling
     public var video: (any VideoGenerating)?
+    public var music: (any MusicGenerating)?
 
     public init(
         textToImage: any TextToImageGenerating,
         imageToText: any ImageDescribing,
         imageToImage: any ImageToImageGenerating,
         upscale: any ImageUpscaling,
-        video: (any VideoGenerating)? = nil
+        video: (any VideoGenerating)? = nil,
+        music: (any MusicGenerating)? = nil
     ) {
         self.textToImage = textToImage
         self.imageToText = imageToText
         self.imageToImage = imageToImage
         self.upscale = upscale
         self.video = video
+        self.music = music
     }
 }

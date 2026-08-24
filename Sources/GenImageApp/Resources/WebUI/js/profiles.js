@@ -1,7 +1,7 @@
 import { architectureLabel, capabilityLabel, escapeHTML } from "./format.js";
 import { t } from "./i18n.js";
 
-const primaryCapabilities = ["imageToText", "textToImage", "imageToImage", "textToVideo", "imageToVideo", "upscale"];
+const primaryCapabilities = ["imageToText", "textToImage", "imageToImage", "textToVideo", "imageToVideo", "textToMusic", "upscale"];
 
 export function renderProfiles(state) {
   return `
@@ -242,6 +242,9 @@ export function removeProfileLoRARow(button) {
 }
 
 function defaultsSummary(defaults) {
+  if (defaults.durationSeconds) {
+    return `${defaults.durationSeconds} sec · ${defaults.steps || "–"} steps`;
+  }
   if (defaults.frameCount) {
     const resolution = defaults.width && defaults.height ? `${defaults.width}×${defaults.height} · ` : "";
     return `${resolution}${defaults.frameRate || "–"} FPS · ${defaults.frameCount} frames · ${defaults.steps || "–"} steps`;

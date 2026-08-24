@@ -27,6 +27,7 @@ public enum LocalModelDiscovery {
         discoverLTX23(root: root, fileManager: fileManager, result: &result)
         discoverLTX23MLXQ4(root: root, fileManager: fileManager, result: &result)
         discoverMiniMaxH3MLX(root: root, fileManager: fileManager, result: &result)
+        discoverMiniMaxMusic3MLX(root: root, fileManager: fileManager, result: &result)
         discoverUpscalers(root: root, fileManager: fileManager, result: &result)
         discoverLoRAs(root: root, fileManager: fileManager, result: &result)
 
@@ -35,6 +36,80 @@ public enum LocalModelDiscovery {
 
     private struct ManagedModelManifest: Decodable {
         var modelID: String
+    }
+
+    private static func discoverMiniMaxMusic3MLX(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let modelID = "vanch007/MiniMax-Music3-MLX-8bit"
+        let directory = root.appendingPathComponent("minimax-music3-mlx-8bit", isDirectory: true)
+        let requiredPaths = [
+            "config.json",
+            "source_manifest.json",
+            "tokenizer/tokenizer.json",
+            "language_model/conversion_manifest.json",
+            "language_model/model.safetensors.index.json",
+            "language_model/model-00001.safetensors",
+            "language_model/model-00002.safetensors",
+            "language_model/model-00003.safetensors",
+            "language_model/model-00004.safetensors",
+            "language_model/model-00005.safetensors",
+            "language_model/model-00006.safetensors",
+            "language_model/model-00007.safetensors",
+            "rvq_depth_decoder/conversion_manifest.json",
+            "rvq_depth_decoder/model.safetensors.index.json",
+            "rvq_depth_decoder/model-00001.safetensors",
+            "condition_encoder/conversion_manifest.json",
+            "condition_encoder/model.safetensors.index.json",
+            "condition_encoder/model-00001.safetensors",
+            "transformer/conversion_manifest.json",
+            "transformer/model.safetensors.index.json",
+            "transformer/model-00001.safetensors",
+            "transformer/model-00002.safetensors",
+            "vocoder/conversion_manifest.json",
+            "vocoder/model.safetensors.index.json",
+            "vocoder/model-00001.safetensors"
+        ]
+        guard requiredPaths.allSatisfy({
+            fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }) else { return }
+        let manifestURL = directory.appendingPathComponent("genimage-model.json")
+        if fileManager.fileExists(atPath: manifestURL.path) {
+            guard let data = try? Data(contentsOf: manifestURL),
+                  let manifest = try? JSONDecoder().decode(ManagedModelManifest.self, from: data),
+                  manifest.modelID == modelID else { return }
+        }
+
+        result.models.append(
+            ModelDescriptor(
+                id: modelID,
+                displayName: "MiniMax Music 3 MLX 8-bit（本機）",
+                publisher: "Local / vanch007 / MiniMaxAI",
+                summary: "已安裝 MiniMax Music 3 原生 MLX 8-bit 語言模型、條件編碼器、Flow Transformer、RVQ 解碼器與立體聲 Vocoder。",
+                capabilities: [.textToMusic],
+                quantization: .eightBit,
+                approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                recommendedMemoryGB: 64,
+                licenseName: "MiniMax-Music3 Community License",
+                sourceURL: URL(string: "https://huggingface.co/\(modelID)"),
+                localURL: directory,
+                isRecommended: true
+            )
+        )
+        result.profiles.append(
+            InferenceProfile(
+                name: "文生音樂 · MiniMax Music 3 MLX 8-bit",
+                capability: .textToMusic,
+                modelID: modelID,
+                modelRevision: "57d87a63181336634a9557fd31aacc2ad6762935",
+                architecture: .externalCLI,
+                defaults: ProfileDefaults(steps: 30, outputCount: 1, durationSeconds: 10),
+                notes: "從 \(directory.path) 自動偵測；透過 mlx-minimax-music3 與 Apple Silicon Metal 執行，輸出由 FFmpeg 轉為 MP3、M4A、AAC 或 FLAC。",
+                isBuiltIn: true
+            )
+        )
     }
 
     private static func discoverLTX23(
