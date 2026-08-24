@@ -23,6 +23,7 @@ export function actionLabel(value) {
   if (value === "describe") return t("cap.imageToText");
   if (value === "generate") return t("cap.textToImage");
   if (value === "generateVideo") return t("workspace.generateVideo");
+  if (value === "generateMusic") return t("workspace.generateMusic");
   if (value === "imageToImage") return t("cap.imageToImage");
   if (value === "upscale") return t("cap.upscale");
   return value;
@@ -32,6 +33,7 @@ export function kindLabel(value) {
   if (value === "imported") return t("asset.original");
   if (value === "generated") return t("asset.generated");
   if (value === "generatedVideo") return t("asset.video");
+  if (value === "generatedAudio") return t("asset.audio");
   if (value === "edited") return t("cap.imageToImage");
   if (value === "upscaled") return t("asset.upscaled");
   return value;

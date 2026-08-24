@@ -13,6 +13,7 @@ const toolMeta = {
   imageToImage: { titleKey: "cap.imageToImage" },
   textToVideo: { titleKey: "cap.textToVideo" },
   imageToVideo: { titleKey: "cap.imageToVideo" },
+  textToMusic: { titleKey: "cap.textToMusic" },
   upscale: { titleKey: "cap.upscale" },
 };
 
@@ -25,6 +26,45 @@ const aspectRatios = [
   { label: "4:3", width: 4, height: 3 },
   { label: "16:9", width: 16, height: 9 },
 ];
+
+const creationTabsByGenerationType = {
+  image: [
+    { id: "prompt", labelKey: "workspace.prompt" },
+    { id: "negative", labelKey: "workspace.negative" },
+    { id: "imageOutput", labelKey: "workspace.imageOutput" },
+  ],
+  video: [
+    { id: "prompt", labelKey: "workspace.prompt" },
+    { id: "negative", labelKey: "workspace.negative" },
+    { id: "videoOutput", labelKey: "workspace.videoOutput" },
+  ],
+  music: [
+    { id: "prompt", labelKey: "workspace.prompt" },
+    { id: "lyrics", labelKey: "workspace.lyrics" },
+    { id: "musicOutput", labelKey: "workspace.musicOutput" },
+  ],
+};
+
+const musicStyles = [
+  ["pop", "workspace.musicStyle.pop"],
+  ["rock", "workspace.musicStyle.rock"],
+  ["hipHop", "workspace.musicStyle.hipHop"],
+  ["rnb", "workspace.musicStyle.rnb"],
+  ["electronic", "workspace.musicStyle.electronic"],
+  ["jazz", "workspace.musicStyle.jazz"],
+  ["classical", "workspace.musicStyle.classical"],
+  ["folk", "workspace.musicStyle.folk"],
+  ["country", "workspace.musicStyle.country"],
+  ["blues", "workspace.musicStyle.blues"],
+  ["reggae", "workspace.musicStyle.reggae"],
+  ["metal", "workspace.musicStyle.metal"],
+  ["ambient", "workspace.musicStyle.ambient"],
+  ["cinematic", "workspace.musicStyle.cinematic"],
+  ["lofi", "workspace.musicStyle.lofi"],
+];
+
+const MUSIC_DURATION_MIN_SECONDS = 5;
+const MUSIC_DURATION_MAX_SECONDS = 300;
 
 const jobTimingEstimators = new Map();
 const ETA_SAMPLE_WINDOW_MS = 3 * 60 * 1_000;
@@ -84,7 +124,7 @@ function renderWorkspaceTabs(ui) {
 }
 
 export function renderQuickTools(state) {
-  return ["imageToText", "textToImage", "imageToImage", "textToVideo", "imageToVideo", "upscale"]
+  return ["imageToText", "textToImage", "imageToImage", "textToVideo", "imageToVideo", "textToMusic", "upscale"]
     .filter((capability) => hasActiveProfile(state, capability))
     .map((capability) => renderQuickTool(state, capability))
     .join("");
@@ -101,18 +141,29 @@ function renderCreationPanel(state, ui) {
     frameRate: 24,
     seed: "42",
   };
+  const musicOutputSettings = state.musicOutputSettings || {
+    prompt: "",
+    lyrics: "",
+    style: "pop",
+    durationSeconds: 10,
+    steps: 30,
+    seed: "42",
+    format: "mp3",
+  };
   const collapsed = ui.creationCollapsed;
   const descriptionBusy = isImageDescriptionBusy(state);
   const inferenceBusy = isInferenceBusy(state);
   const inferenceDisabledAttribute = inferenceBusy ? "disabled aria-busy=\"true\"" : "";
-  const promptTab = ["negative", "imageOutput", "videoOutput"].includes(ui.promptTab)
+  const generationType = creationTabsByGenerationType[ui.generationType] ? ui.generationType : "image";
+  const creationTabs = creationTabsByGenerationType[generationType];
+  const promptTab = creationTabs.some((tab) => tab.id === ui.promptTab)
     ? ui.promptTab
-    : "prompt";
+    : creationTabs[0].id;
   const toggleLabel = collapsed ? t("workspace.expandCreation") : t("workspace.collapseCreation");
   const showGenerateText = hasActiveProfile(state, "imageToText");
-  const showGenerateImage = hasActiveProfile(state, "textToImage");
-  const showGenerateVideo = hasActiveProfile(state, "textToVideo")
-    || hasActiveProfile(state, "imageToVideo");
+  const showGenerateImage = generationType === "image";
+  const showGenerateVideo = generationType === "video";
+  const showGenerateMusic = generationType === "music";
   return `
     <aside class="creation-panel ${collapsed ? "collapsed" : ""}">
       <div class="creation-header">
@@ -150,6 +201,15 @@ function renderCreationPanel(state, ui) {
               >▶ ${t("workspace.generateVideo")}</button>`
             : ""
         }
+        ${
+          showGenerateMusic
+            ? `<button
+                class="secondary-button creation-generate-button creation-generate-music"
+                data-action="generateMusic"
+                ${inferenceDisabledAttribute}
+              >♫ ${t("workspace.generateMusic")}</button>`
+            : ""
+        }
       </div>
 
       ${
@@ -159,11 +219,14 @@ function renderCreationPanel(state, ui) {
       <div class="creation-scroll" data-scroll-id="creation">
         <div class="prompt-tab-header">
           <div class="creation-tab-controls">
-            <div class="prompt-tabs" role="tablist" aria-label="${t("workspace.creationTabsLabel")}">
-              ${promptTabButton("prompt", t("workspace.prompt"), promptTab)}
-              ${promptTabButton("negative", t("workspace.negative"), promptTab)}
-              ${promptTabButton("imageOutput", t("workspace.imageOutput"), promptTab)}
-              ${promptTabButton("videoOutput", t("workspace.videoOutput"), promptTab)}
+            ${renderGenerationTypeSelect(generationType)}
+            <div
+              class="prompt-tabs"
+              role="tablist"
+              aria-label="${t("workspace.creationTabsLabel")}"
+              style="--creation-tab-count: ${creationTabs.length}"
+            >
+              ${creationTabs.map((tab) => promptTabButton(tab.id, t(tab.labelKey), promptTab)).join("")}
             </div>
             ${promptTab === "imageOutput" ? renderInlineAspectRatios(recipe, "image") : ""}
             ${promptTab === "videoOutput" ? renderInlineAspectRatios(videoOutputSettings, "video") : ""}
@@ -171,7 +234,7 @@ function renderCreationPanel(state, ui) {
           <button class="ghost-button compact" data-action="applyProfileDefaults">${t("workspace.applyDefaults")}</button>
         </div>
         <div class="prompt-tab-panel" role="tabpanel">
-          ${renderCreationTab(state, promptTab, descriptionBusy)}
+          ${renderCreationTab(state, generationType, promptTab, descriptionBusy)}
         </div>
       </div>
       `
@@ -192,6 +255,22 @@ function hasActiveProfile(state, capability) {
   );
 }
 
+function renderGenerationTypeSelect(activeGenerationType) {
+  const options = [
+    ["image", "workspace.imageGeneration"],
+    ["video", "workspace.videoGeneration"],
+    ["music", "workspace.musicGeneration"],
+  ];
+  return `<select
+    class="field generation-type-select"
+    data-ui-field="generationType"
+    aria-label="${t("workspace.generationType")}"
+    title="${t("workspace.generationType")}"
+  >${options.map(([value, labelKey]) =>
+    `<option value="${value}" ${value === activeGenerationType ? "selected" : ""}>${t(labelKey)}</option>`,
+  ).join("")}</select>`;
+}
+
 function promptTabButton(tab, label, activeTab) {
   const active = tab === activeTab;
   return `<button
@@ -203,12 +282,113 @@ function promptTabButton(tab, label, activeTab) {
   >${label}</button>`;
 }
 
-function renderCreationTab(state, promptTab, descriptionBusy) {
+function renderCreationTab(state, generationType, promptTab, descriptionBusy) {
   if (promptTab === "imageOutput") return renderOutputSettings(state.recipe, "image");
   if (promptTab === "videoOutput") {
     return renderOutputSettings(state.videoOutputSettings, "video");
   }
+  if (promptTab === "lyrics") return renderLyricsEditor(state.musicOutputSettings, descriptionBusy);
+  if (promptTab === "musicOutput") return renderMusicOutputSettings(state.musicOutputSettings);
+  if (generationType === "music") return renderMusicPromptEditor(state.musicOutputSettings);
   return renderPromptEditor(state.recipe, promptTab, descriptionBusy);
+}
+
+function renderMusicPromptEditor(settings) {
+  return `<textarea
+    id="music-prompt"
+    class="prompt-area"
+    data-music-field="prompt"
+    data-preserve-focus="music-prompt"
+    placeholder="${t("workspace.musicPromptPlaceholder")}"
+  >${escapeHTML(settings.prompt)}</textarea>`;
+}
+
+function renderLyricsEditor(settings, disabled) {
+  const disabledAttribute = disabled ? "disabled aria-busy=\"true\"" : "";
+  return `<textarea
+    id="music-lyrics"
+    class="prompt-area"
+    data-music-field="lyrics"
+    data-preserve-focus="music-lyrics"
+    placeholder="${t("workspace.lyricsPlaceholder")}"
+    ${disabledAttribute}
+  >${escapeHTML(settings.lyrics)}</textarea>`;
+}
+
+function renderMusicOutputSettings(settings) {
+  return `<div class="music-output-panel">
+    <section class="output-setting-group music-output-setting-card">
+      <div class="output-setting-heading">
+        <strong>${t("workspace.musicParameters")}</strong>
+        <span class="music-runtime-badge">MiniMax-Music3</span>
+      </div>
+      <div class="music-output-fields">
+        <div class="field-group">
+          <label for="music-style">${t("workspace.musicStyle")}</label>
+          <select id="music-style" class="field" data-music-field="style" data-preserve-focus="music-style">
+            ${musicStyles.map(([style, labelKey]) =>
+              `<option value="${style}" ${settings.style === style ? "selected" : ""}>${t(labelKey)}</option>`,
+            ).join("")}
+          </select>
+        </div>
+        ${musicNumberField(
+          t("workspace.duration"),
+          "durationSeconds",
+          settings.durationSeconds,
+          MUSIC_DURATION_MIN_SECONDS,
+          MUSIC_DURATION_MAX_SECONDS,
+        )}
+        ${musicNumberField(t("workspace.steps"), "steps", settings.steps, 1, 100)}
+        <div class="field-group">
+          <label for="music-format">${t("workspace.audioFormat")}</label>
+          <select id="music-format" class="field" data-music-field="format" data-preserve-focus="music-format">
+            ${["mp3", "m4a", "aac", "flac"].map((format) =>
+              `<option value="${format}" ${settings.format === format ? "selected" : ""}>${format.toUpperCase()}</option>`,
+            ).join("")}
+          </select>
+        </div>
+        <div class="field-group seed-field">
+          <label for="music-seed">${t("workspace.seed")}</label>
+          <div class="seed-input-row">
+            <input
+              id="music-seed"
+              class="field"
+              type="text"
+              inputmode="numeric"
+              data-music-field="seed"
+              data-preserve-focus="music-seed"
+              value="${escapeHTML(settings.seed)}"
+            />
+            <button
+              class="icon-button compact seed-random-button"
+              data-action="randomizeSeed"
+              data-output-kind="music"
+              title="${t("workspace.randomSeed")}"
+              aria-label="${t("workspace.randomSeed")}"
+            >↻</button>
+          </div>
+        </div>
+      </div>
+      <p class="section-note music-output-note">${t("workspace.musicRuntimeNote")}</p>
+    </section>
+  </div>`;
+}
+
+function musicNumberField(label, field, value, min, max) {
+  return `<div class="field-group">
+    <label for="music-${field}">${label}</label>
+    <input
+      id="music-${field}"
+      class="field"
+      type="number"
+      min="${min}"
+      max="${max}"
+      step="1"
+      data-music-field="${field}"
+      data-preserve-focus="music-${field}"
+      value="${value}"
+    />
+  </div>`;
 }
 
 function renderInlineAspectRatios(settings, outputKind) {
@@ -514,7 +694,7 @@ function renderAssetCard(asset, state) {
       <div class="asset-caption">
         <div class="asset-caption-copy">
           <strong>${escapeHTML(asset.title)}</strong>
-          <span>${asset.pixelWidth} × ${asset.pixelHeight}</span>
+          <span>${assetSummary(asset)}</span>
         </div>
         <span class="muted">›</span>
       </div>
@@ -551,7 +731,7 @@ function renderCompare(state, ui) {
 function comparisonPane(title, asset, width) {
   return `
     <div class="compare-pane" style="width:${width}px">
-      <h3><span>${title}</span><span class="muted">${asset.pixelWidth} × ${asset.pixelHeight}</span></h3>
+      <h3><span>${title}</span><span class="muted">${assetSummary(asset)}</span></h3>
       ${renderArtwork(asset, true)}
     </div>
   `;
@@ -560,8 +740,19 @@ function comparisonPane(title, asset, width) {
 function renderArtwork(asset, controls = false, showKind = true) {
   const hasMedia = Boolean(asset.previewURL);
   const isVideo = asset.kind === "generatedVideo";
+  const isAudio = asset.kind === "generatedAudio";
   const media = hasMedia
-    ? isVideo
+    ? isAudio
+      ? controls
+        ? `<audio
+            src="${escapeHTML(asset.previewURL)}"
+            data-asset-id="${escapeHTML(asset.id)}"
+            aria-label="${escapeHTML(asset.title)}"
+            preload="metadata"
+            controls
+          ></audio>`
+        : `<span class="audio-placeholder" data-asset-id="${escapeHTML(asset.id)}" aria-label="${escapeHTML(asset.title)}">♫</span>`
+      : isVideo
       ? `<video
           src="${escapeHTML(asset.previewURL)}"
           data-asset-id="${escapeHTML(asset.id)}"
@@ -571,9 +762,9 @@ function renderArtwork(asset, controls = false, showKind = true) {
           ${controls ? "controls" : "muted"}
         ></video>`
       : `<img src="${escapeHTML(asset.previewURL)}" data-asset-id="${escapeHTML(asset.id)}" alt="${escapeHTML(asset.title)}" draggable="false" />`
-    : `<span class="placeholder-icon">${asset.kind === "upscaled" ? "↗" : asset.kind === "generated" ? "✦" : "▧"}</span>`;
+    : `<span class="placeholder-icon">${asset.kind === "upscaled" ? "↗" : asset.kind === "generated" ? "✦" : asset.kind === "generatedAudio" ? "♫" : "▧"}</span>`;
   return `
-    <div class="asset-artwork ${asset.kind} ${hasMedia ? "has-image" : ""}">
+    <div class="asset-artwork ${asset.kind} ${hasMedia ? "has-media" : ""}">
       ${media}
       ${showKind ? `<span class="asset-kind">${kindLabel(asset.kind)}</span>` : ""}
     </div>
@@ -671,7 +862,8 @@ function renderAssetInspector(state) {
   const operation = [...state.operations].reverse().find((item) => item.outputAssetIDs.includes(asset.id));
   const lineage = buildLineage(state.assets, asset);
   const isVideo = asset.kind === "generatedVideo";
-  const canEdit = !isVideo && hasActiveProfile(state, "imageToImage");
+  const isAudio = asset.kind === "generatedAudio";
+  const canEdit = !isVideo && !isAudio && hasActiveProfile(state, "imageToImage");
   const inferenceDisabledAttribute = isInferenceBusy(state)
     ? "disabled aria-busy=\"true\""
     : "";
@@ -680,7 +872,7 @@ function renderAssetInspector(state) {
       <div class="section-heading"><h2>${escapeHTML(asset.title)}</h2></div>
       <div class="inspector-preview">${renderArtwork(asset, true)}</div>
       ${
-        isVideo
+        isVideo || isAudio
           ? ""
           : `<div class="inspector-actions">
               <button class="secondary-button compact" data-action="describe" ${inferenceDisabledAttribute}>⌕ ${t("inspector.caption")}</button>
@@ -689,8 +881,12 @@ function renderAssetInspector(state) {
             </div>`
       }
       <div class="inspector-group">
-        <h3>${t(isVideo ? "inspector.videoInfo" : "inspector.imageInfo")}</h3>
-        ${detailRow(t("inspector.dimensions"), `${asset.pixelWidth} × ${asset.pixelHeight}`)}
+        <h3>${t(isAudio ? "inspector.audioInfo" : isVideo ? "inspector.videoInfo" : "inspector.imageInfo")}</h3>
+        ${isAudio ? "" : detailRow(t("inspector.dimensions"), `${asset.pixelWidth} × ${asset.pixelHeight}`)}
+        ${isAudio ? detailRow(t("inspector.duration"), formatDuration((asset.mediaDurationSeconds || 0) * 1_000)) : ""}
+        ${isAudio ? detailRow(t("inspector.audioFormat"), String(asset.audioFormat || "").toUpperCase()) : ""}
+        ${isAudio ? detailRow(t("inspector.sampleRate"), `${Number(asset.sampleRate || 0).toLocaleString()} Hz`) : ""}
+        ${isAudio ? detailRow(t("inspector.channels"), String(asset.channelCount || "–")) : ""}
         ${detailRow(t("inspector.kind"), kindLabel(asset.kind))}
       </div>
       ${
@@ -965,6 +1161,15 @@ function previewModeButton(mode, title, ui) {
 
 function detailRow(label, value) {
   return `<div class="detail-row"><span>${escapeHTML(label)}</span><span>${escapeHTML(value)}</span></div>`;
+}
+
+function assetSummary(asset) {
+  if (asset.kind === "generatedAudio") {
+    const format = String(asset.audioFormat || "").toUpperCase();
+    const duration = formatDuration((asset.mediaDurationSeconds || 0) * 1_000);
+    return [format, duration].filter(Boolean).join(" · ");
+  }
+  return `${asset.pixelWidth} × ${asset.pixelHeight}`;
 }
 
 function selectedAsset(state) {

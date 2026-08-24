@@ -6,10 +6,14 @@ GenImage is a local AI media generation app with **native Apple Silicon support*
 
 - Swift handles models, profiles, job queues, files, and MLX/Core ML inference.
 - `WKWebView` embeds the HTML, CSS, and JavaScript UI without requiring a network connection or npm runtime.
-- Text-to-image, image-to-text, image-to-image, text-to-video, image-to-video, and upscaling can run independently or be chained through asset lineage.
+- Text-to-image, image-to-text, image-to-image, text-to-video, image-to-video, text-to-music, and upscaling can run independently or be chained through asset lineage.
 - Every operation preserves a profile snapshot, making the model and architecture revision traceable after updates.
 - A dedicated settings page supports Traditional Chinese, English, Japanese, Korean, and six persistent color themes.
 - A standard JSON-RPC 2.0 stdio MCP server is available to agents and automation tools.
+
+## Preview
+
+![GenMedia intelligent media generation interface](images/cap001.jpg)
 
 ## Run
 
@@ -20,23 +24,20 @@ Requirements: macOS 14+, Apple Silicon, and Xcode 16+.
 ./run.command
 ```
 
-`build.command` creates the release executables and a standard `GenImage.app` by default. Use `--dmg` explicitly when a disk image is needed. The DMG contains an Applications shortcut, WebUI resources, the MLX Metal runtime, the MCP server, and model diagnostic tools.
+`build.command` creates the release executables and a standard `GenMedia.app` in `dist/`. The app contains WebUI resources, the MLX Metal runtime, the MCP server, and model diagnostic tools.
 
 ```bash
-# Build the App (default; no DMG)
+# Build the release executables and app
 ./build.command
 
-# Release executables only, without an App bundle
-./build.command --no-dmg
-
-# Build the App and package a DMG
-./build.command --dmg
+# Incremental release build without creating the app bundle
+./build.command --no-app
 
 # Set the version and bundle identifier
 GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ```
 
-`run.command` automatically uses `--no-dmg`, so normal development runs only update the Release executables. The DMG is an optional, unnotarized local test package. Public distribution still requires Developer ID signing and Apple notarization.
+`run.command` automatically uses `--no-app`, so normal development runs do not repeatedly create the app bundle. Release DMGs are handled by a separate local workflow with Developer ID Application signing, Apple notarization, stapling, and Gatekeeper verification.
 
 ### Video Runtime
 
@@ -62,6 +63,12 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 - The Z-Image MLX compatibility layer handles `quantize_config.json`, affine/mxfp4 modes, packed pad tokens, and FP16-to-BF16 loading. `build.command` reapplies the patches under `Patches/` after Swift Package resolution. The andrevp Z-Image Turbo MLX 4-bit profile has been validated with a real generation run.
 - Text-to-image completion keeps model weights and warm buffers resident. Reusable MLX buffers are trimmed after five idle minutes without unloading the model. Models are unloaded only by the sidebar Release Memory action, a model switch, or the over-90% RAM protection applied while switching profiles.
 - Downloads retain their upstream filenames. Generated outputs use `Image-MMDD-HHmmss` or `Video-MMDD-HHmmss`, and the output directory is configurable in Settings.
+
+### Music Runtime
+
+Text-to-music uses the external `mlx-minimax-music3` runtime with the MiniMax Music 3 MLX 8-bit profile from Model Center. The Swift app manages music style, an optional prompt, optional lyrics, a 5–300 second duration (up to five minutes), steps, seed, cancellation, time estimation, and audio asset metadata. When the prompt is blank, the selected music style is used; when lyrics are blank, instrumental music is generated. The runtime's temporary WAV is converted by FFmpeg to the selected MP3, M4A, AAC, or FLAC format, after which all WAV, text, and log temporary files are removed.
+
+The app checks `GENIMAGE_MINIMAX_MUSIC3_RUNTIME` first, followed by app helpers, `~/Library/Application Support/GenImage/Runtime/minimax-music3/.venv/bin/mlx-minimax-music3`, common installation paths, and `PATH`. The runtime, model, and FFmpeg remain optional external components and are not bundled in the app or DMG. The MiniMax Music 3 model remains subject to its Community License.
 
 ## Validation
 
@@ -98,7 +105,7 @@ End-to-end MCP validation has been completed: `genimage_generate_image` outputs 
 Sources/
 ├── GenImageCore/
 │   ├── DomainModels.swift        # Assets, recipes, jobs, models, and profiles
-│   ├── InferenceServices.swift   # Image, text, and video inference interfaces
+│   ├── InferenceServices.swift   # Image, text, video, and music inference interfaces
 │   ├── ModelCatalog.swift        # Built-in models and profiles
 │   ├── OutputFileNaming.swift    # Image and video output names
 │   └── WorkflowGraph.swift       # Asset lineage and branch relationships
@@ -107,19 +114,20 @@ Sources/
 │   ├── QwenVLImageDescriptionService.swift
 │   ├── Qwen2511ImageToImageService.swift
 │   ├── LTXVideoGenerationService.swift
+│   ├── MiniMaxMusic3GenerationService.swift
 │   └── CoreMLUpscaleService.swift
 └── GenImageApp/
     ├── AppStore.swift            # Application state and job coordination
     ├── HybridBridgeController.swift
     ├── HybridWebView.swift
-    ├── AssetSchemeHandler.swift  # Secure local image and video delivery to WebUI
+    ├── AssetSchemeHandler.swift  # Secure local image, video, and audio delivery to WebUI
     └── Resources/WebUI/          # HTML/CSS/JavaScript frontend
 Patches/                           # Z-Image MLX compatibility patches applied during builds
 ```
 
 ## Current Status
 
-The app is connected to local inference for Z-Image Turbo text-to-image, Qwen3-VL image-to-text, Qwen 2511 image-to-image, LTX-2.3 MLX text-to-video and image-to-video, and Core ML Real-ESRGAN upscaling. The video runtime runs through the external `ltx-2-mlx` CLI; completed MP4 files are added to the workspace as assets with profile snapshots and lineage preserved.
+The app is connected to local inference for Z-Image Turbo text-to-image, Qwen3-VL image-to-text, Qwen 2511 image-to-image, LTX-2.3 MLX text-to-video and image-to-video, MiniMax Music 3 MLX 8-bit text-to-music, and Core ML Real-ESRGAN upscaling. Videos are added as MP4 assets; music can be exported as MP3, M4A, AAC, or FLAC with actual duration, sample rate, channel count, profile snapshots, and lineage preserved.
 
 More information:
 

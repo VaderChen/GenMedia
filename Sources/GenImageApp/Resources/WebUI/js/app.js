@@ -18,7 +18,13 @@ const root = document.querySelector("#app");
 const WORKSPACE_TABS_KEY = "genimage.workspaceTabs";
 const STATUS_MESSAGE_DURATION_MS = 5_000;
 const JOB_TIMING_REFRESH_MS = 1_000;
-const PROMPT_TABS = new Set(["prompt", "negative", "imageOutput", "videoOutput"]);
+const PROMPT_TABS = new Set(["prompt", "negative", "lyrics", "imageOutput", "videoOutput", "musicOutput"]);
+const GENERATION_TYPES = new Set(["image", "video", "music"]);
+const PROMPT_TABS_BY_GENERATION_TYPE = {
+  image: new Set(["prompt", "negative", "imageOutput"]),
+  video: new Set(["prompt", "negative", "videoOutput"]),
+  music: new Set(["prompt", "lyrics", "musicOutput"]),
+};
 
 let state = null;
 let recipeTimer = null;
@@ -30,12 +36,18 @@ let stateContentSignature = null;
 const pendingOutputs = [];
 const pasteState = { image: null };
 const savedWorkspaceTabs = loadWorkspaceTabs();
+const savedPromptTab = normalizeLegacyPromptTab(localStorage.getItem("genimage.promptTab"));
+const savedGenerationType = normalizeGenerationType(
+  localStorage.getItem("genimage.generationType"),
+  savedPromptTab,
+);
 const ui = {
   route: "workspace",
   previewMode: "single",
   zoom: 1,
   creationCollapsed: localStorage.getItem("genimage.creationCollapsed") === "true",
-  promptTab: normalizePromptTab(localStorage.getItem("genimage.promptTab")),
+  generationType: savedGenerationType,
+  promptTab: normalizePromptTab(savedPromptTab, savedGenerationType),
   inspectorTab: localStorage.getItem("genimage.inspectorTab") === "jobs" ? "jobs" : "info",
   workspaceTabs: savedWorkspaceTabs.tabs,
   activeWorkspaceTabID: savedWorkspaceTabs.activeTabID,
@@ -74,11 +86,13 @@ onState((nextState) => {
   if (state && composingRecipeField) {
     const localRecipe = state.recipe;
     const localVideoOutputSettings = state.videoOutputSettings;
+    const localMusicOutputSettings = state.musicOutputSettings;
     reconcileWorkspaceTabs(nextState);
     state = {
       ...nextState,
       recipe: localRecipe,
       videoOutputSettings: localVideoOutputSettings,
+      musicOutputSettings: localMusicOutputSettings,
     };
     stateContentSignature = nextContentSignature;
     renderDeferredDuringComposition = true;
@@ -91,10 +105,12 @@ onState((nextState) => {
   if (state && nextContentSignature === stateContentSignature) {
     const localRecipe = state.recipe;
     const localVideoOutputSettings = state.videoOutputSettings;
+    const localMusicOutputSettings = state.musicOutputSettings;
     state = {
       ...nextState,
       recipe: localRecipe,
       videoOutputSettings: localVideoOutputSettings,
+      musicOutputSettings: localMusicOutputSettings,
     };
     if (statusMessageChanged) scheduleStatusMessageDismiss(nextState.statusMessage);
     updateSystemMetricsDOM();
@@ -106,9 +122,8 @@ onState((nextState) => {
     && nextState.recipe.prompt !== state.recipe.prompt
     && nextState.operations.slice(state.operations.length).some((operation) => operation.action === "describe");
   if (descriptionUpdated) {
-    ui.promptTab = "prompt";
+    setGenerationType("image", "prompt");
     ui.creationCollapsed = false;
-    localStorage.setItem("genimage.promptTab", "prompt");
     localStorage.setItem("genimage.creationCollapsed", "false");
   }
   reconcileWorkspaceTabs(nextState);
@@ -163,6 +178,13 @@ root.addEventListener("click", async (event) => {
           { sourceAssetIDs: selectedVideoSourceAssetIDs() },
           "generateVideo",
         );
+        break;
+      case "generateMusic":
+        await Promise.all([syncRecipe(), syncMusicOutputSettings()]);
+        ui.route = "workspace";
+        ui.previewMode = "single";
+        setInspectorTab("jobs");
+        await invokeTrackedOutput("generateMusic", undefined, "generateMusic");
         break;
       case "describe":
         ui.route = "workspace";
@@ -233,8 +255,7 @@ root.addEventListener("click", async (event) => {
         ui.route = "workspace";
         ui.previewMode = "single";
         if (describe) {
-          ui.promptTab = "prompt";
-          localStorage.setItem("genimage.promptTab", "prompt");
+          setGenerationType("image", "prompt");
           setInspectorTab("jobs");
         } else {
           setInspectorTab("info");
@@ -255,7 +276,7 @@ root.addEventListener("click", async (event) => {
         render();
         break;
       case "promptTab":
-        ui.promptTab = normalizePromptTab(target.dataset.tab);
+        ui.promptTab = normalizePromptTab(target.dataset.tab, ui.generationType);
         localStorage.setItem("genimage.promptTab", ui.promptTab);
         render();
         break;
@@ -286,11 +307,17 @@ root.addEventListener("click", async (event) => {
         break;
       }
       case "randomizeSeed":
-        await invoke(target.dataset.outputKind === "video" ? "randomizeVideoSeed" : "randomizeSeed");
+        await invoke(
+          target.dataset.outputKind === "music"
+            ? "randomizeMusicSeed"
+            : target.dataset.outputKind === "video"
+              ? "randomizeVideoSeed"
+              : "randomizeSeed",
+        );
         break;
       case "applyProfileDefaults":
         await invoke("applyProfileDefaults", {
-          outputKind: ui.promptTab === "videoOutput" ? "video" : "image",
+          outputKind: ui.generationType,
         });
         break;
       case "cancelJob":
@@ -367,11 +394,11 @@ root.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("contextmenu", (event) => {
-  const image = event.target.closest?.(".asset-artwork img[data-asset-id]");
-  if (!image) return;
+  const media = event.target.closest?.(".asset-artwork [data-asset-id]");
+  if (!media) return;
   event.preventDefault();
   event.stopPropagation();
-  openImageContextMenu(event.clientX, event.clientY, image.dataset.assetId);
+  openAssetContextMenu(event.clientX, event.clientY, media.dataset.assetId);
 });
 
 document.addEventListener("pointerdown", (event) => {
@@ -383,6 +410,12 @@ document.addEventListener("keydown", (event) => {
 });
 
 root.addEventListener("change", async (event) => {
+  if (event.target.dataset.uiField === "generationType") {
+    setGenerationType(event.target.value);
+    render();
+    return;
+  }
+
   if (event.target.matches("[data-model-root]")) {
     const path = event.target.value.trim();
     if (!path || path === state.modelRootPath) return;
@@ -454,6 +487,16 @@ root.addEventListener("change", async (event) => {
     return;
   }
 
+  if (event.target.dataset.musicField) {
+    state.musicOutputSettings[event.target.dataset.musicField] = event.target.value;
+    try {
+      await syncMusicOutputSettings();
+    } catch (error) {
+      showBridgeError(error);
+    }
+    return;
+  }
+
   if (event.target.dataset.recipeField && event.target.tagName !== "TEXTAREA") {
     try {
       await syncRecipe();
@@ -506,6 +549,15 @@ root.addEventListener("input", (event) => {
   const videoField = event.target.dataset.videoField;
   if (videoField) {
     state.videoOutputSettings[videoField] = event.target.value;
+    return;
+  }
+
+  const musicField = event.target.dataset.musicField;
+  if (musicField) {
+    state.musicOutputSettings[musicField] = event.target.value;
+    if (event.isComposing || event.target.tagName !== "TEXTAREA") return;
+    clearTimeout(recipeTimer);
+    recipeTimer = setTimeout(() => syncMusicOutputSettings().catch(showBridgeError), 240);
     return;
   }
 
@@ -610,7 +662,7 @@ root.addEventListener(
 
 root.addEventListener("pointerdown", (event) => {
   const stage = event.target.closest('.preview-stage[data-pan-enabled="true"]');
-  if (!stage || event.button !== 0 || event.target.closest("video")) return;
+  if (!stage || event.button !== 0 || event.target.closest("video, audio")) return;
   event.preventDefault();
   previewPan = {
     pointerID: event.pointerId,
@@ -653,17 +705,19 @@ function render() {
   refreshJobTimings(state, root);
 }
 
-function openImageContextMenu(clientX, clientY, assetID) {
+function openAssetContextMenu(clientX, clientY, assetID) {
   closeImageContextMenu();
+  const asset = state.assets.find((item) => item.id === assetID);
+  if (!asset) return;
   const menu = document.createElement("div");
   menu.className = "image-context-menu";
   menu.setAttribute("role", "menu");
   menu.innerHTML = [
-    ["openAsset", t("context.openImage")],
+    ["openAsset", t("context.openAsset")],
     ["revealAsset", t("context.openDirectory")],
-    ["downloadAsset", t("context.downloadImage")],
-    ["copyAsset", t("context.copyImage")],
-    ["shareAsset", t("context.shareImage")],
+    ["downloadAsset", t("context.downloadAsset")],
+    ...(isImageAsset(asset) ? [["copyAsset", t("context.copyImage")]] : []),
+    ["shareAsset", t("context.shareAsset")],
   ].map(([action, label]) => `<button type="button" role="menuitem" data-context-action="${action}">${label}</button>`).join("");
   menu.style.left = `${Math.max(8, clientX)}px`;
   menu.style.top = `${Math.max(8, clientY)}px`;
@@ -775,7 +829,7 @@ function reconcileWorkspaceTabs(nextState) {
   const validAssetIDs = new Set(nextState.assets.map((asset) => asset.id));
   const imageAssetIDs = new Set(
     nextState.assets
-      .filter((asset) => asset.kind !== "generatedVideo")
+      .filter(isImageAsset)
       .map((asset) => asset.id),
   );
   const assignedAssetIDs = new Set();
@@ -952,7 +1006,7 @@ function setActiveTabSelection(assetID, event) {
   const asset = state.assets.find((item) => item.id === assetID);
   if (!asset) return null;
 
-  const isImage = asset.kind !== "generatedVideo";
+  const isImage = isImageAsset(asset);
   const additive = Boolean(event?.metaKey || event?.ctrlKey);
   const rangeSelection = Boolean(event?.shiftKey && isImage);
   let selectedAssetIDs = (tab.selectedAssetIDs || []).filter((id) => isImageAssetID(id));
@@ -995,14 +1049,18 @@ function setActiveTabSelection(assetID, event) {
 }
 
 function isImageAssetID(assetID) {
-  return state.assets.some((asset) => asset.id === assetID && asset.kind !== "generatedVideo");
+  return state.assets.some((asset) => asset.id === assetID && isImageAsset(asset));
+}
+
+function isImageAsset(asset) {
+  return !["generatedVideo", "generatedAudio"].includes(asset.kind);
 }
 
 function selectedVideoSourceAssetIDs() {
   const workspaceState = workspaceStateForActiveTab(state);
   const imageIDs = new Set(
     workspaceState.assets
-      .filter((asset) => asset.kind !== "generatedVideo")
+      .filter(isImageAsset)
       .map((asset) => asset.id),
   );
   const selected = (workspaceState.selectedAssetIDs || []).filter((id) => imageIDs.has(id));
@@ -1475,9 +1533,45 @@ function syncVideoOutputSettings() {
   });
 }
 
-function normalizePromptTab(value) {
+function syncMusicOutputSettings() {
+  clearTimeout(recipeTimer);
+  return invoke("updateMusicOutputSettings", {
+    prompt: state.musicOutputSettings.prompt,
+    lyrics: state.musicOutputSettings.lyrics,
+    style: state.musicOutputSettings.style,
+    durationSeconds: state.musicOutputSettings.durationSeconds,
+    steps: state.musicOutputSettings.steps,
+    seed: String(state.musicOutputSettings.seed),
+    format: state.musicOutputSettings.format,
+  });
+}
+
+function normalizeLegacyPromptTab(value) {
   if (value === "output") return "imageOutput";
   return PROMPT_TABS.has(value) ? value : "prompt";
+}
+
+function normalizeGenerationType(value, promptTab = "prompt") {
+  if (GENERATION_TYPES.has(value)) return value;
+  if (promptTab === "videoOutput") return "video";
+  if (promptTab === "lyrics" || promptTab === "musicOutput") return "music";
+  return "image";
+}
+
+function normalizePromptTab(value, generationType) {
+  const promptTab = normalizeLegacyPromptTab(value);
+  const normalizedGenerationType = normalizeGenerationType(generationType, promptTab);
+  if (PROMPT_TABS_BY_GENERATION_TYPE[normalizedGenerationType].has(promptTab)) return promptTab;
+  if (promptTab.endsWith("Output")) return `${normalizedGenerationType}Output`;
+  return normalizedGenerationType === "music" ? "lyrics" : "prompt";
+}
+
+function setGenerationType(value, preferredPromptTab = ui.promptTab) {
+  const generationType = normalizeGenerationType(value);
+  ui.generationType = generationType;
+  ui.promptTab = normalizePromptTab(preferredPromptTab, generationType);
+  localStorage.setItem("genimage.generationType", generationType);
+  localStorage.setItem("genimage.promptTab", ui.promptTab);
 }
 
 function saveProfile(profileID) {

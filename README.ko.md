@@ -6,10 +6,14 @@ GenImage는 **Apple Silicon을 네이티브로 지원**하는 로컬 AI 미디�
 
 - Swift가 모델, 프로필, 작업 대기열, 파일, MLX/Core ML 추론을 관리합니다.
 - `WKWebView`에 HTML, CSS, JavaScript UI를 내장하여 네트워크 연결이나 npm 런타임이 필요하지 않습니다.
-- 텍스트→이미지, 이미지→텍스트, 이미지→이미지, 텍스트→비디오, 이미지→비디오, 업스케일을 독립적으로 실행하거나 에셋 계보를 통해 연결할 수 있습니다.
+- 텍스트→이미지, 이미지→텍스트, 이미지→이미지, 텍스트→비디오, 이미지→비디오, 텍스트→음악, 업스케일을 독립적으로 실행하거나 에셋 계보를 통해 연결할 수 있습니다.
 - 각 작업은 프로필 스냅샷을 보존하므로 모델이나 아키텍처가 업데이트된 뒤에도 당시 버전을 추적할 수 있습니다.
 - 별도의 설정 화면에서 번체 중국어, 영어, 일본어, 한국어와 저장 가능한 6가지 색상 테마를 지원합니다.
 - 표준 JSON-RPC 2.0 stdio MCP 서버를 Agent 및 자동화 도구에서 사용할 수 있습니다.
+
+## 미리보기
+
+![GenMedia 지능형 미디어 생성 인터페이스](images/cap001.jpg)
 
 ## 실행
 
@@ -20,23 +24,20 @@ GenImage는 **Apple Silicon을 네이티브로 지원**하는 로컬 AI 미디�
 ./run.command
 ```
 
-`build.command`는 기본적으로 Release 실행 파일과 표준 `GenImage.app`를 생성합니다. DMG가 필요하면 `--dmg`를 명시하세요. DMG에는 Applications 바로가기, WebUI 리소스, MLX Metal 런타임, MCP 서버, 모델 진단 도구가 포함됩니다.
+`build.command`는 Release 실행 파일과 표준 `GenMedia.app`를 `dist/`에 생성합니다. App에는 WebUI 리소스, MLX Metal 런타임, MCP 서버, 모델 진단 도구가 포함됩니다.
 
 ```bash
-# App 빌드 (기본값, DMG 없음)
+# Release 실행 파일과 App 빌드
 ./build.command
 
-# Release 실행 파일만 빌드 (App bundle 없음)
-./build.command --no-dmg
-
-# App 빌드 및 DMG 패키징
-./build.command --dmg
+# App bundle 없이 증분 Release 빌드만 실행
+./build.command --no-app
 
 # 버전과 Bundle ID 지정
 GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ```
 
-`run.command`는 자동으로 `--no-dmg`를 사용하므로 일반적인 개발 실행에서는 Release 실행 파일만 갱신합니다. DMG는 선택 사항인 공증되지 않은 로컬 테스트 패키지입니다. 공개 배포 전에는 Developer ID 서명과 Apple 공증이 필요합니다.
+`run.command`는 자동으로 `--no-app`를 사용하므로 일반적인 개발 실행에서 App bundle을 반복 생성하지 않습니다. 배포용 DMG는 Developer ID Application 서명, Apple 공증, Staple, Gatekeeper 검증을 수행하는 별도의 로컬 흐름에서 처리합니다.
 
 ### 비디오 Runtime
 
@@ -62,6 +63,12 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 - Z-Image MLX 호환 계층은 `quantize_config.json`, affine/mxfp4, packed pad token, FP16에서 BF16으로의 로딩을 처리합니다. `build.command`는 Swift Package 해석 후 `Patches/`의 Runtime 수정 사항을 자동 적용합니다. andrevp Z-Image Turbo MLX 4-bit는 실제 이미지 생성으로 검증했습니다.
 - 텍스트→이미지 작업이 끝난 뒤에도 모델 가중치와 워밍업 buffer를 유지합니다. 5분 동안 유휴 상태가 되면 재사용 가능한 MLX 임시 buffer만 정리하고 모델은 언로드하지 않습니다. 사이드바의 메모리 해제, 모델 전환 또는 프로필 전환 시 RAM 90% 초과 보호가 동작할 때만 불필요한 Runtime을 해제합니다.
 - 다운로드는 원본 파일명을 유지합니다. 생성 결과는 `Image-MMDD-HHmmss` 또는 `Video-MMDD-HHmmss`를 사용하며 설정에서 출력 디렉터리를 변경할 수 있습니다.
+
+### 음악 Runtime
+
+텍스트→음악은 외부 `mlx-minimax-music3` Runtime과 모델 센터의 MiniMax Music 3 MLX 8-bit 프로필을 사용합니다. Swift 앱은 음악 스타일, 선택적 프롬프트, 선택적 가사, 5~300초 길이(최대 5분), 스텝, 시드, 취소, 남은 시간 추정, 오디오 에셋 정보를 관리합니다. 프롬프트를 비워 두면 선택한 음악 스타일을 사용하고, 가사를 비워 두면 연주곡을 생성합니다. Runtime이 만든 임시 WAV는 FFmpeg를 통해 선택한 MP3, M4A, AAC 또는 FLAC으로 변환되며, 완료 후 WAV, 텍스트, 로그 임시 파일이 자동으로 삭제됩니다.
+
+앱은 `GENIMAGE_MINIMAX_MUSIC3_RUNTIME`, App Helpers, `~/Library/Application Support/GenImage/Runtime/minimax-music3/.venv/bin/mlx-minimax-music3`, 일반 설치 경로, `PATH` 순서로 검색합니다. Runtime, 모델, FFmpeg는 선택적 외부 구성 요소로 유지되며 App bundle이나 DMG에 포함되지 않습니다. MiniMax Music 3 모델에는 Community License가 계속 적용됩니다.
 
 ## 검증
 
@@ -98,7 +105,7 @@ MCP 엔드투엔드 검증을 완료했습니다. `genimage_generate_image`는 �
 Sources/
 ├── GenImageCore/
 │   ├── DomainModels.swift        # 에셋, 레시피, 작업, 모델, 프로필
-│   ├── InferenceServices.swift   # 이미지, 텍스트, 비디오 추론 인터페이스
+│   ├── InferenceServices.swift   # 이미지, 텍스트, 비디오, 음악 추론 인터페이스
 │   ├── ModelCatalog.swift        # 기본 제공 모델과 프로필
 │   ├── OutputFileNaming.swift    # 이미지 및 비디오 출력 이름
 │   └── WorkflowGraph.swift       # 에셋 계보와 분기 관계
@@ -107,19 +114,20 @@ Sources/
 │   ├── QwenVLImageDescriptionService.swift
 │   ├── Qwen2511ImageToImageService.swift
 │   ├── LTXVideoGenerationService.swift
+│   ├── MiniMaxMusic3GenerationService.swift
 │   └── CoreMLUpscaleService.swift
 └── GenImageApp/
     ├── AppStore.swift            # 애플리케이션 상태와 작업 조정
     ├── HybridBridgeController.swift
     ├── HybridWebView.swift
-    ├── AssetSchemeHandler.swift  # 로컬 이미지와 비디오를 WebUI에 안전하게 제공
+    ├── AssetSchemeHandler.swift  # 로컬 이미지, 비디오, 오디오를 WebUI에 안전하게 제공
     └── Resources/WebUI/          # HTML/CSS/JavaScript 프런트엔드
 Patches/                           # 빌드 시 적용되는 Z-Image MLX 호환성 수정
 ```
 
 ## 현재 상태
 
-앱은 Z-Image Turbo 텍스트→이미지, Qwen3-VL 이미지→텍스트, Qwen 2511 이미지→이미지, LTX-2.3 MLX 텍스트→비디오 및 이미지→비디오, Core ML Real-ESRGAN 업스케일의 로컬 추론에 연결되어 있습니다. 비디오 Runtime은 외부 `ltx-2-mlx` CLI를 통해 실행되며, 완료된 MP4는 프로필 스냅샷과 계보를 유지한 에셋으로 작업 공간에 추가됩니다.
+앱은 Z-Image Turbo 텍스트→이미지, Qwen3-VL 이미지→텍스트, Qwen 2511 이미지→이미지, LTX-2.3 MLX 텍스트→비디오 및 이미지→비디오, MiniMax Music 3 MLX 8-bit 텍스트→음악, Core ML Real-ESRGAN 업스케일의 로컬 추론에 연결되어 있습니다. 비디오는 MP4로, 음악은 MP3/M4A/AAC/FLAC으로 추가되며 실제 길이, 샘플링 레이트, 채널 수, 프로필 스냅샷, 계보를 보존합니다.
 
 추가 정보:
 

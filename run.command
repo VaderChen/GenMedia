@@ -13,7 +13,7 @@ if ! command -v swift >/dev/null 2>&1; then
 fi
 
 print "正在確認 GenImage 為最新版本…"
-"$SCRIPT_DIR/build.command" --no-dmg
+"$SCRIPT_DIR/build.command" --no-app
 
 BIN_DIR="$(swift build -c release --show-bin-path)"
 APP_EXECUTABLE="$BIN_DIR/GenImage"

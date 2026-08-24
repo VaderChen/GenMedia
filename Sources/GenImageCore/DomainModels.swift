@@ -7,6 +7,7 @@ public enum ModelCapability: String, CaseIterable, Codable, Hashable, Sendable, 
     case imageToImage
     case imageToVideo
     case textToVideo
+    case textToMusic
     case controlNet
     case lora
 
@@ -20,6 +21,7 @@ public enum ModelCapability: String, CaseIterable, Codable, Hashable, Sendable, 
         case .imageToImage: "圖生圖"
         case .imageToVideo: "圖生影"
         case .textToVideo: "文生影"
+        case .textToMusic: "文生音樂"
         case .controlNet: "ControlNet"
         case .lora: "LoRA"
         }
@@ -33,6 +35,7 @@ public enum ModelCapability: String, CaseIterable, Codable, Hashable, Sendable, 
         case .imageToImage: "photo.on.rectangle.angled"
         case .imageToVideo: "photo.badge.play"
         case .textToVideo: "text.badge.play"
+        case .textToMusic: "music.note"
         case .controlNet: "point.3.connected.trianglepath.dotted"
         case .lora: "slider.horizontal.3"
         }
@@ -101,6 +104,7 @@ public struct ProfileDefaults: Codable, Hashable, Sendable {
     public var tileSize: Int?
     public var frameCount: Int?
     public var frameRate: Int?
+    public var durationSeconds: Int?
 
     public init(
         width: Int? = nil,
@@ -112,7 +116,8 @@ public struct ProfileDefaults: Codable, Hashable, Sendable {
         upscaleScale: Int? = nil,
         tileSize: Int? = nil,
         frameCount: Int? = nil,
-        frameRate: Int? = nil
+        frameRate: Int? = nil,
+        durationSeconds: Int? = nil
     ) {
         self.width = width
         self.height = height
@@ -124,6 +129,7 @@ public struct ProfileDefaults: Codable, Hashable, Sendable {
         self.tileSize = tileSize
         self.frameCount = frameCount
         self.frameRate = frameRate
+        self.durationSeconds = durationSeconds
     }
 }
 
@@ -417,8 +423,71 @@ public enum AssetKind: String, Codable, Hashable, Sendable {
     case imported
     case generated
     case generatedVideo
+    case generatedAudio
     case edited
     case upscaled
+
+    public var isImage: Bool {
+        switch self {
+        case .imported, .generated, .edited, .upscaled:
+            true
+        case .generatedVideo, .generatedAudio:
+            false
+        }
+    }
+}
+
+public enum AudioOutputFormat: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+    case mp3
+    case m4a
+    case aac
+    case flac
+
+    public var id: String { rawValue }
+
+    public var fileExtension: String { rawValue }
+
+    public var displayName: String { rawValue.uppercased() }
+}
+
+public enum MusicStyle: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+    case pop
+    case rock
+    case hipHop
+    case rnb
+    case electronic
+    case jazz
+    case classical
+    case folk
+    case country
+    case blues
+    case reggae
+    case metal
+    case ambient
+    case cinematic
+    case lofi
+
+    public var id: String { rawValue }
+
+    public var prompt: String {
+        switch self {
+        case .pop: "Pop"
+        case .rock: "Rock"
+        case .hipHop: "Hip-hop"
+        case .rnb: "R&B"
+        case .electronic: "Electronic dance music"
+        case .jazz: "Jazz"
+        case .classical: "Classical"
+        case .folk: "Folk"
+        case .country: "Country"
+        case .blues: "Blues"
+        case .reggae: "Reggae"
+        case .metal: "Metal"
+        case .ambient: "Ambient"
+        case .cinematic: "Cinematic soundtrack"
+        case .lofi: "Lo-fi"
+        }
+    }
 }
 
 public struct ImageAsset: Identifiable, Codable, Hashable, Sendable {
@@ -431,6 +500,10 @@ public struct ImageAsset: Identifiable, Codable, Hashable, Sendable {
     public var fileURL: URL?
     public var pixelWidth: Int
     public var pixelHeight: Int
+    public var mediaDurationSeconds: Double?
+    public var sampleRate: Int?
+    public var channelCount: Int?
+    public var audioFormat: AudioOutputFormat?
     public var recipeID: UUID?
     public var createdAt: Date
 
@@ -444,6 +517,10 @@ public struct ImageAsset: Identifiable, Codable, Hashable, Sendable {
         fileURL: URL? = nil,
         pixelWidth: Int,
         pixelHeight: Int,
+        mediaDurationSeconds: Double? = nil,
+        sampleRate: Int? = nil,
+        channelCount: Int? = nil,
+        audioFormat: AudioOutputFormat? = nil,
         recipeID: UUID? = nil,
         createdAt: Date = .now
     ) {
@@ -456,6 +533,10 @@ public struct ImageAsset: Identifiable, Codable, Hashable, Sendable {
         self.fileURL = fileURL
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
+        self.mediaDurationSeconds = mediaDurationSeconds
+        self.sampleRate = sampleRate
+        self.channelCount = channelCount
+        self.audioFormat = audioFormat
         self.recipeID = recipeID
         self.createdAt = createdAt
     }
@@ -466,6 +547,7 @@ public enum WorkflowAction: String, Codable, Hashable, Sendable {
     case describe
     case generate
     case generateVideo
+    case generateMusic
     case imageToImage
     case upscale
 
@@ -475,6 +557,7 @@ public enum WorkflowAction: String, Codable, Hashable, Sendable {
         case .describe: "圖生文"
         case .generate: "文生圖"
         case .generateVideo: "生成影片"
+        case .generateMusic: "生成音樂"
         case .imageToImage: "圖生圖"
         case .upscale: "Upscale"
         }
@@ -486,6 +569,7 @@ public enum WorkflowAction: String, Codable, Hashable, Sendable {
         case .describe: "text.viewfinder"
         case .generate: "sparkles"
         case .generateVideo: "play.rectangle"
+        case .generateMusic: "music.note"
         case .imageToImage: "photo.on.rectangle.angled"
         case .upscale: "arrow.up.left.and.arrow.down.right"
         }

@@ -139,7 +139,9 @@ final class HybridBridgeController: NSObject, ObservableObject {
             store.deactivateProfile(id, for: capability)
 
         case "applyProfileDefaults":
-            if params["outputKind"] as? String == "video" {
+            if params["outputKind"] as? String == "music" {
+                store.applyActiveMusicProfileDefaults()
+            } else if params["outputKind"] as? String == "video" {
                 store.applyActiveVideoProfileDefaults()
             } else {
                 store.applyActiveGenerationProfileDefaults()
@@ -151,11 +153,17 @@ final class HybridBridgeController: NSObject, ObservableObject {
         case "updateVideoOutputSettings":
             updateVideoOutputSettings(params)
 
+        case "updateMusicOutputSettings":
+            try updateMusicOutputSettings(params)
+
         case "randomizeSeed":
             store.randomizeSeed()
 
         case "randomizeVideoSeed":
             store.randomizeVideoSeed()
+
+        case "randomizeMusicSeed":
+            store.randomizeMusicSeed()
 
         case "generate":
             store.generate(linkToSelectedAsset: params["linkToSelectedAsset"] as? Bool ?? false)
@@ -173,6 +181,9 @@ final class HybridBridgeController: NSObject, ObservableObject {
             } else {
                 store.requestVideoGeneration(sourceAssetIDs: sourceAssetIDs)
             }
+
+        case "generateMusic":
+            store.requestMusicGeneration()
 
         case "describe":
             performSourceImageAction(.describe)
@@ -371,6 +382,37 @@ final class HybridBridgeController: NSObject, ObservableObject {
         )
     }
 
+    private func updateMusicOutputSettings(_ params: [String: Any]) throws {
+        let seed = (params["seed"] as? String).flatMap(UInt64.init)
+        let style: MusicStyle?
+        if let rawStyle = params["style"] as? String {
+            guard let parsedStyle = MusicStyle(rawValue: rawStyle) else {
+                throw BridgeError.invalidParameters
+            }
+            style = parsedStyle
+        } else {
+            style = nil
+        }
+        let format: AudioOutputFormat?
+        if let rawFormat = params["format"] as? String {
+            guard let parsedFormat = AudioOutputFormat(rawValue: rawFormat) else {
+                throw BridgeError.invalidParameters
+            }
+            format = parsedFormat
+        } else {
+            format = nil
+        }
+        store.updateMusicOutputSettings(
+            prompt: params["prompt"] as? String,
+            lyrics: params["lyrics"] as? String,
+            style: style,
+            durationSeconds: integer(params["durationSeconds"]),
+            steps: integer(params["steps"]),
+            seed: seed,
+            format: format
+        )
+    }
+
     private func performSourceImageAction(_ action: SourceImageAction) {
         guard store.selectedSourceImage != nil else {
             importImage(then: action)
@@ -468,7 +510,7 @@ final class HybridBridgeController: NSObject, ObservableObject {
     private func openAsset(_ params: [String: Any]) throws {
         let url = try assetURL(from: params)
         guard NSWorkspace.shared.open(url) else {
-            throw BridgeError.assetActionFailed("無法開啟圖片檔案。")
+            throw BridgeError.assetActionFailed("無法開啟媒體檔案。")
         }
     }
 
@@ -485,17 +527,14 @@ final class HybridBridgeController: NSObject, ObservableObject {
         panel.allowedContentTypes = [
             UTType(filenameExtension: sourceURL.pathExtension) ?? .png
         ]
-        // Keep the original filename when exporting an asset. Generated assets
-        // already carry the timestamped Image/video name; imported assets keep
-        // the name they arrived with.
         panel.nameFieldStringValue = sourceURL.lastPathComponent
-        panel.message = "將圖片儲存到"
+        panel.message = "將媒體檔案儲存到"
         guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
         if FileManager.default.fileExists(atPath: destinationURL.path) {
             try FileManager.default.removeItem(at: destinationURL)
         }
         try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
-        store.statusMessage = "圖片已儲存至：\(destinationURL.path)"
+        store.statusMessage = "媒體檔案已儲存至：\(destinationURL.path)"
     }
 
     private func copyAsset(_ params: [String: Any]) throws {

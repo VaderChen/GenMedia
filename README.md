@@ -6,10 +6,14 @@ GenImage 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App�
 
 - Swift 負責模型、Profile、工作佇列、檔案與 MLX／Core ML 推論。
 - `WKWebView` 內嵌 HTML、CSS 與 JavaScript UI，不需要網路或 npm runtime。
-- 文生圖、圖生文、圖生圖、文生影、圖生影與 Upscale 都可獨立執行，也可以透過資產來源關係串接。
+- 文生圖、圖生文、圖生圖、文生影、圖生影、文生音樂與 Upscale 都可獨立執行，也可以透過資產來源關係串接。
 - 每次操作保存 Profile 快照，模型或架構更新後仍可追蹤當時的版本。
 - 獨立設定頁支援繁體中文、英文、日文、韓文及六套可持久保存的配色。
 - 標準 JSON-RPC 2.0 stdio MCP server 可供其他 Agent 或自動化工具呼叫。
+
+## 預覽
+
+![GenMedia 媒體智能生成介面](images/cap001.jpg)
 
 ## 執行
 
@@ -20,23 +24,20 @@ GenImage 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App�
 ./run.command
 ```
 
-`build.command` 預設建立 Release 執行檔與標準 `GenImage.app`。若需要磁碟映像，請明確使用 `--dmg`；DMG 內含 Applications 捷徑、WebUI 資源、MLX Metal runtime、MCP server 及模型診斷工具。
+`build.command` 會建立 Release 執行檔，並在 `dist/` 輸出標準 `GenMedia.app`。App 內含 WebUI 資源、MLX Metal runtime、MCP server 及模型診斷工具。
 
 ```bash
-# 建置 App（預設，不產生 DMG）
+# 建置 Release 執行檔與 App
 ./build.command
 
-# 只做 Release 執行檔，不建立 App bundle
-./build.command --no-dmg
-
-# 建置 App 並打包 DMG
-./build.command --dmg
+# 只做增量 Release 建置，不建立 App bundle
+./build.command --no-app
 
 # 指定版本與 Bundle ID
 GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ```
 
-`run.command` 會自動使用 `--no-dmg`，日常啟動只更新 Release 執行檔，不建立 App 或磁碟映像。目前 DMG 為選用的未公證本機測試包；若要對外發佈，還需完成 Developer ID 簽章與 Apple Notarization。
+`run.command` 會自動使用 `--no-app`，日常啟動不會重複建立 App bundle。對外發佈的 DMG 由獨立本機流程完成 Developer ID Application 簽章、Apple Notarization、Staple 與 Gatekeeper 驗證。
 
 ### 影片 Runtime
 
@@ -73,6 +74,12 @@ Token 只會透過 HTTPS `Authorization: Bearer` 標頭傳給 Civitai，不會�
 - 文生圖完成後保留模型權重與暖機 buffer；5 分鐘後只清理可重用的 MLX 暫存 buffer，不卸載模型。按下側欄「釋放記憶體」、切換模型，或切換 Profile 時 RAM 超過 90%，才會卸載不再需要的 Runtime。
 - 下載保留來源原始檔名；生成輸出使用 `Image-MMDD-HHmmss` 或 `Video-MMDD-HHmmss`，並可在設定頁更改輸出目錄。
 
+### 音樂 Runtime
+
+文生音樂使用外部 `mlx-minimax-music3` Runtime 與模型中心的 MiniMax Music 3 MLX 8-bit Profile。Swift App 負責音樂風格、可選 Prompt、可選歌詞、5～300 秒長度（最長 5 分鐘）、步數、Seed、工作取消、時間推估及音訊資產資訊；Prompt 留空時會使用所選音樂風格，歌詞留空時生成純音樂。Runtime 生成的暫存 WAV 會由 FFmpeg 轉為使用者選擇的 MP3、M4A、AAC 或 FLAC，完成後自動移除 WAV、文字與日誌暫存檔。
+
+App 會先讀取 `GENIMAGE_MINIMAX_MUSIC3_RUNTIME`，再搜尋 App Helpers、`~/Library/Application Support/GenImage/Runtime/minimax-music3/.venv/bin/mlx-minimax-music3`、常見安裝路徑與 `PATH`。Runtime、模型與 FFmpeg 均維持外部選用元件，不放入 App bundle 或 DMG；MiniMax Music 3 模型仍適用其 Community License。
+
 ## 驗證
 
 ```bash
@@ -108,7 +115,7 @@ MCP 支援 `initialize`、`ping`、`tools/list`、`tools/call`，工具包含本
 Sources/
 ├── GenImageCore/
 │   ├── DomainModels.swift        # 資產、配方、工作、模型與 Profile
-│   ├── InferenceServices.swift   # 圖片、文字、影片推論服務介面
+│   ├── InferenceServices.swift   # 圖片、文字、影片與音樂推論服務介面
 │   ├── ModelCatalog.swift        # 內建模型及 Profile
 │   ├── OutputFileNaming.swift    # 圖片與影片輸出命名
 │   └── WorkflowGraph.swift       # 資產來源與分支關係
@@ -117,19 +124,20 @@ Sources/
 │   ├── QwenVLImageDescriptionService.swift
 │   ├── Qwen2511ImageToImageService.swift
 │   ├── LTXVideoGenerationService.swift
+│   ├── MiniMaxMusic3GenerationService.swift
 │   └── CoreMLUpscaleService.swift
 └── GenImageApp/
     ├── AppStore.swift            # 應用程式狀態與工作協調
     ├── HybridBridgeController.swift
     ├── HybridWebView.swift
-    ├── AssetSchemeHandler.swift  # 安全提供本機圖片與影片給 Web UI
+    ├── AssetSchemeHandler.swift  # 安全提供本機圖片、影片與音訊給 Web UI
     └── Resources/WebUI/          # HTML/CSS/JavaScript 前端
 Patches/                           # 建置時套用的 Z-Image MLX 相容性修正
 ```
 
 ## 目前狀態
 
-App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL 圖生文、Qwen 2511 圖生圖、LTX-2.3 MLX 文生影／圖生影，以及 Core ML Real-ESRGAN Upscale。影片 Runtime 透過外部 `ltx-2-mlx` CLI 執行，完成後以 MP4 資產加入工作區並保留 Profile 快照與 lineage。
+App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL 圖生文、Qwen 2511 圖生圖、LTX-2.3 MLX 文生影／圖生影、MiniMax Music 3 MLX 8-bit 文生音樂，以及 Core ML Real-ESRGAN Upscale。影片以 MP4 加入工作區；音樂可輸出 MP3、M4A、AAC 或 FLAC，並保存實際時長、取樣率、聲道、Profile 快照與 lineage。
 
 更多資訊：
 
