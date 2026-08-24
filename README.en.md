@@ -1,8 +1,8 @@
-# GenImage
+# GenMedia
 
 [繁體中文](README.md) | English | [日本語](README.ja.md) | [한국어](README.ko.md)
 
-GenImage is a local AI media generation app with **native Apple Silicon support**. The project provides a compilable hybrid application with the following capabilities:
+GenMedia is a local AI media generation app with **native Apple Silicon support**. The project provides a compilable hybrid application with the following capabilities:
 
 - Swift handles models, profiles, job queues, files, and MLX/Core ML inference.
 - `WKWebView` embeds the HTML, CSS, and JavaScript UI without requiring a network connection or npm runtime.
