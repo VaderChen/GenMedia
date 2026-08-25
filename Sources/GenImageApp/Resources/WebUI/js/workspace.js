@@ -233,7 +233,7 @@ export function renderCreationPanel(state, ui) {
             >
               ${creationTabs.map((tab) => promptTabButton(tab.id, t(tab.labelKey), promptTab)).join("")}
             </div>
-            ${promptTab === "imageOutput" ? renderInlineAspectRatios(recipe, "image") : ""}
+            ${promptTab === "imageOutput" ? renderInlineAspectRatios(recipe, "image", selectedSourceImage(state)) : ""}
             ${promptTab === "videoOutput" ? renderInlineAspectRatios(videoOutputSettings, "video") : ""}
           </div>
           <button class="ghost-button compact" data-action="applyProfileDefaults">${t("workspace.applyDefaults")}</button>
@@ -410,12 +410,31 @@ function musicNumberField(label, field, value, min, max) {
   </div>`;
 }
 
-function renderInlineAspectRatios(settings, outputKind) {
-  const activeRatio = closestAspectRatio(settings.width, settings.height);
+function renderInlineAspectRatios(settings, outputKind, sourceAsset = null) {
+  const originalResolutionAvailable = outputKind === "image" && sourceAsset;
+  const originalResolution = originalResolutionAvailable ? sourceImageDimensions(sourceAsset) : null;
+  const originalResolutionActive = originalResolutionAvailable
+    && settings.width === originalResolution.width
+    && settings.height === originalResolution.height;
   const label = outputKind === "video" ? t("workspace.videoAspectRatio") : t("workspace.aspectRatio");
-  return `<div class="inline-aspect-ratios" aria-label="${label}">
-    ${aspectRatios.map((ratio) => aspectRatioChip(ratio, activeRatio, outputKind)).join("")}
-  </div>`;
+  const activeRatio = closestAspectRatio(settings.width, settings.height);
+  return `<select
+    class="field aspect-ratio-select"
+    data-aspect-ratio-select
+    data-output-kind="${outputKind}"
+    aria-label="${label}"
+    title="${label}"
+  >
+    ${originalResolutionAvailable
+      ? `<option value="original" ${originalResolutionActive ? "selected" : ""}>${t("workspace.originalResolution")}</option>`
+      : ""}
+    ${aspectRatios.map((ratio) => `<option
+      value="${ratio.label}"
+      data-ratio-width="${ratio.width}"
+      data-ratio-height="${ratio.height}"
+      ${!originalResolutionActive && ratio.label === activeRatio.label ? "selected" : ""}
+    >${ratio.label}</option>`).join("")}
+  </select>`;
 }
 
 function renderPromptEditor(recipe, promptTab, disabled) {
@@ -523,17 +542,6 @@ function closestAspectRatio(width, height) {
   return aspectRatios.reduce((best, ratio) =>
     Math.abs(ratio.width / ratio.height - value) < Math.abs(best.width / best.height - value) ? ratio : best,
   );
-}
-
-function aspectRatioChip(ratio, activeRatio, outputKind) {
-  const active = ratio.label === activeRatio.label;
-  return `<button
-    class="chip aspect-ratio-chip ${active ? "active" : ""}"
-    data-action="aspectRatio"
-    data-ratio-width="${ratio.width}"
-    data-ratio-height="${ratio.height}"
-    data-output-kind="${outputKind}"
-  >${ratio.label}</button>`;
 }
 
 function resolutionBounds(dimension, ratio) {
@@ -1218,9 +1226,21 @@ function selectedAsset(state) {
   return state.assets.find((asset) => asset.id === state.selectedAssetID);
 }
 
-function selectedSourceImage(state) {
+export function selectedSourceImage(state) {
   const asset = selectedAsset(state);
   return asset && !["generatedVideo", "generatedAudio"].includes(asset.kind) ? asset : null;
+}
+
+export function sourceImageDimensions(asset) {
+  const sourceWidth = Math.max(1, Number(asset.pixelWidth));
+  const sourceHeight = Math.max(1, Number(asset.pixelHeight));
+  const quantize = (value) => Math.min(4096, Math.max(64, Math.round(value / 16) * 16));
+  if (sourceWidth >= sourceHeight) {
+    const width = quantize(sourceWidth);
+    return { width, height: quantize(width * sourceHeight / sourceWidth) };
+  }
+  const height = quantize(sourceHeight);
+  return { width: quantize(height * sourceWidth / sourceHeight), height };
 }
 
 function buildLineage(assets, start) {

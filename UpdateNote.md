@@ -6,6 +6,8 @@
 
 - 工作區底片列新增圖片匯入 ICON，支援 Finder 拖放一張或多張 PNG、JPEG、WebP、GIF、TIFF、HEIC 與 HEIF 圖片；音樂生成模式會停用圖片匯入按鈕。
 - 圖片生成主按鈕會依目前是否選取有效來源圖片，自動路由至圖生圖或文生圖 Profile，避免圖生圖誤要求文生圖 Profile。
+- 圖片與影片比例選項改為下拉選單；圖生圖有來源圖片時才顯示「原解析度」，並將來源尺寸換算為 16 倍數。
+- 圖生圖指定寬高會真正傳入 Qwen Image Edit Runtime；來源比例與輸出比例不同時，先等比例縮放並以邊緣延展補足畫布，避免生成前裁切來源內容。過低的 `128 × 192` 仍可能降低細節與構圖穩定性。
 - 音樂風格新增「動漫」，並同步提供繁體中文、英文、日文與韓文標籤；Prompt 留空時會使用 `Anime soundtrack` 作為生成風格。
 - ACE-Step 1.5 已使用 App 內建的純 Swift／MLX Runtime，直接執行文字編碼、Turbo DiT、Euler sampler 與 Oobleck VAE，不使用 Python Adapter 或本機 Python 服務。
 - 每個工作區分頁作為持久化生成專案；資產、lineage、操作與選取狀態會在 App 重新啟動後恢復，關閉分頁時才移除工作區索引。

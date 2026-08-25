@@ -54,6 +54,8 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
             outputPath: outputURL.path,
             prompt: request.recipe.prompt,
             negativePrompt: request.recipe.negativePrompt,
+            width: request.recipe.width,
+            height: request.recipe.height,
             steps: request.recipe.steps,
             seed: request.recipe.seed
         )
@@ -120,6 +122,8 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
         var outputPath: String
         var prompt: String
         var negativePrompt: String
+        var width: Int
+        var height: Int
         var steps: Int
         var seed: UInt64
     }

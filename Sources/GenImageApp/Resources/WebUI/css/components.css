@@ -588,22 +588,12 @@ button:disabled {
   font-weight: 650;
 }
 
-.inline-aspect-ratios {
-  align-items: center;
-  display: flex;
-  flex: 1;
-  flex-wrap: nowrap;
-  gap: 4px;
-  min-width: 0;
-  overflow-x: auto;
-  white-space: nowrap;
-}
-
-.inline-aspect-ratios .aspect-ratio-chip {
-  flex: 0 0 auto;
-  min-height: 28px;
-  min-width: 48px;
-  padding-block: 4px;
+.aspect-ratio-select {
+  flex: 0 0 10em;
+  font-size: 12px;
+  height: 36px;
+  min-width: 10em;
+  padding: 5px 28px 5px 10px;
 }
 
 .output-detail-grid {

@@ -1,0 +1,13 @@
+--- a/Sources/QwenImageEdit/Pipeline.swift
++++ b/Sources/QwenImageEdit/Pipeline.swift
+@@ -265,2 +265,8 @@
+-        let (tw, th) = QwenVLPromptEncoder.calculateDimensions(
+-            targetArea: 1024 * 1024, ratio: Double(content.width) / Double(content.height))
++        let (tw, th): (Int, Int)
++        if let width, let height {
++            tw = max(width / 16, 1) * 16
++            th = max(height / 16, 1) * 16
++        } else {
++            (tw, th) = QwenVLPromptEncoder.calculateDimensions(
++                targetArea: 1024 * 1024, ratio: Double(content.width) / Double(content.height))
++        }
