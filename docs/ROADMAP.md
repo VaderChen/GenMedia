@@ -2,38 +2,29 @@
 
 繁體中文 | [English](ROADMAP.en.md) | [日本語](ROADMAP.ja.md) | [한국어](ROADMAP.ko.md)
 
-## 已完成：Foundation
+## 已完成：核心能力
 
-- Swift Package 與 macOS 14+ 應用程式入口。
-- HTML/CSS/JavaScript 混合式 UI。
-- JSON Bridge 與本機圖片 scheme。
-- 文生圖、圖生文、Upscale 獨立服務介面。
-- Profile 模型、切換、複製、revision 與操作快照。
-- 工作佇列、流程分支、模型中心及圖片預覽 UI。
-- Core ML Real-ESRGAN 512 tile／4× Upscale Runtime 與端到端測試。
-- 原生 Z-Image Turbo Q4 文生圖 Runtime、進度與取消。
-- 原生 Qwen3-VL 4-bit 圖生文 Runtime 與多語言描述。
-- 文生圖輸出串接圖生文與 Upscale 的端到端測試。
-- MLX metallib Release 封裝與原生 MCP 推論工具。
-- Core 單元測試與 JavaScript 語法驗證。
+- Swift Package、macOS 14+ App、Apple Silicon 原生 MLX／Core ML 推論與混合式 Web UI。
+- 文生圖、圖生文、圖生圖、文生影、圖生影、文生音樂及 4× Upscale 獨立服務與資產 lineage。
+- Z-Image Turbo、Qwen3-VL、Qwen 2511、LTX-2.3、ACE-Step 1.5、MiniMax Music 3 與 Real-ESRGAN Profile。
+- 音樂 Prompt、可選歌詞、常見音樂風格、5～300 秒設定，以及 MP3／M4A／AAC／FLAC 輸出。
+- 模型中心下載、暫停、續傳、磁碟預檢、修復、刪除、Profile 相依檢查與安裝後自動排序。
+- 工作佇列、取消、進度、預估剩餘時間、生成耗時、模型快取及手動記憶體釋放。
+- 每個工作區分頁作為持久化生成專案；App 重啟後恢復資產、操作、選取狀態與 Profile 快照。
+- 創作設定區域渲染、輸入游標與 IME 保護，以及音訊／影片連續播放。
+- `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm`、`Music-YYYYMMDD-HHmm` 輸出命名與同分鐘防碰撞流水號。
+- Release App bundle、MLX metallib、原生 MCP 推論工具及獨立 DMG 簽章／公證流程。
 
-## 下一階段：Runtime
+## 目前階段：穩定與驗證
 
-1. 建立實際 ModelDownloadManager：續傳、SHA-256、磁碟預檢、修復與刪除。
-2. 建立應用程式資產目錄並複製匯入圖片，避免依賴暫時性檔案權限。
-3. 將工作、Profile 與專案狀態持久化。
-4. 保存生成參數、模型 revision 與輸出圖片中繼資料。
-5. 加入 MLX 模型卸載策略與多工作記憶體協調。
+1. 完成 ACE-Step 長音訊的 16GB、24GB、32GB 記憶體、熱壓與取消恢復測試。
+2. 擴充模型下載中斷、雜湊不符、磁碟不足及重新啟動恢復測試。
+3. 驗證多分頁專案在 App 異常退出、資產遺失與索引修復情境下的一致性。
+4. 完成各 Runtime、模型與 LoRA 的授權頁面及散佈清單。
 
-## 後續：Caption 與 Upscale
+## 後續
 
-1. 完成 Z-Image、Qwen3-VL 與 Real-ESRGAN 的授權頁面。
-2. 依 Profile architecture 建立可擴充 Engine Factory。
-3. 加入 Profile 匯入／匯出及版本遷移。
-
-## 發佈前
-
-- 16GB、24GB、32GB Apple Silicon 記憶體與熱壓測試。
-- 模型下載中斷與磁碟不足測試。
-- App Sandbox、簽章、公證及授權頁面。
-- 工作取消、App 異常退出與重啟恢復。
+1. 加入 Profile 匯入／匯出、版本遷移與相容性檢查。
+2. 擴充更多 Apple Silicon 原生 MLX 媒體生成引擎。
+3. 擴充 MCP 的影片、音樂與專案工作流工具。
+4. 建立可重現的模型與 Runtime 效能基準。

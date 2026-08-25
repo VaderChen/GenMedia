@@ -62,13 +62,19 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 - キャンセル時はまず `cancelling` になり、Runtime Task の終了後に `cancelled` へ移行して生成・メモリ関連の操作を再び有効にします。ETA は進捗 35% かつ開始 15 秒後から数値表示し、安定したサンプルが不足する場合は全体経過時間を使用します。
 - Z-Image MLX 互換レイヤーは `quantize_config.json`、affine／mxfp4、packed pad token、FP16 から BF16 への読み込みを処理します。`build.command` は Swift Package 解決後に `Patches/` の修正を自動適用します。andrevp Z-Image Turbo MLX 4-bit は実際の画像生成で検証済みです。
 - テキストから画像の完了後もモデル重みと暖機 buffer を保持します。5 分間アイドルになると再利用可能な MLX 一時 buffer だけを整理し、モデルはアンロードしません。側面のメモリ解放、モデル切り替え、またはプロファイル切り替え時の RAM 90% 超過保護でのみ不要な Runtime を解放します。
-- ダウンロードでは配布元のファイル名を保持し、生成出力は `Image-MMDD-HHmmss` または `Video-MMDD-HHmmss` を使用します。出力ディレクトリは設定画面で変更できます。
+- ダウンロードでは配布元のファイル名を保持し、生成出力は `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm`、`Music-YYYYMMDD-HHmm` を使用します。同じ分に重複する場合は連番を追加します。出力ディレクトリは設定画面で変更できます。
+- 開いている各ワークスペースタブを生成プロジェクトとして扱います。アセットと lineage は Application Support にアトミック保存され、アプリ再起動後も復元されます。タブを明示的に閉じた場合のみプロジェクトのワークスペース索引を削除し、出力済みメディアはディスクに保持します。
+- プロンプトと歌詞の編集中は、カーソル、選択範囲、IME の変換状態をネイティブ状態更新から保護します。生成タイプ、プロンプト、歌詞、出力設定のタブは作成パネルだけを再描画します。避けられない全体更新でも、再生中の音声・動画ノードを再利用して再生を中断しません。
 
 ### 音楽 Runtime
 
-テキストから音楽は、外部 `mlx-minimax-music3` Runtime とモデルセンターの MiniMax Music 3 MLX 8-bit プロファイルを使用します。Swift アプリが音楽スタイル、任意のプロンプト、任意の歌詞、5～300 秒の長さ（最長 5 分）、ステップ、シード、キャンセル、残り時間推定、音声アセット情報を管理します。プロンプトが空欄の場合は選択した音楽スタイルを使用し、歌詞が空欄の場合はインストゥルメンタルを生成します。Runtime の一時 WAV は FFmpeg で選択した MP3、M4A、AAC、FLAC に変換され、完了後に WAV、テキスト、ログの一時ファイルを削除します。
+テキストから音楽は、`MusicGenerationRouter` がアクティブなプロファイルに応じて ACE-Step 1.5 または MiniMax Music 3 Adapter へ振り分けます。Swift アプリが音楽スタイル、任意のプロンプト、任意の歌詞、ステップ、シード、キャンセル、残り時間推定、音声情報を一貫して管理します。プロンプトが空欄の場合は選択したスタイルを使用し、歌詞が空欄の場合はインストゥルメンタルを生成します。各 Runtime の一時 WAV は共通 FFmpeg 層で MP3、M4A、AAC、FLAC に変換されます。
 
-アプリは `GENIMAGE_MINIMAX_MUSIC3_RUNTIME`、App Helpers、`~/Library/Application Support/GenImage/Runtime/minimax-music3/.venv/bin/mlx-minimax-music3`、一般的なインストール先、`PATH` の順に検索します。Runtime、モデル、FFmpeg は任意の外部コンポーネントとして App bundle／DMG には含めず、MiniMax Music 3 モデルには Community License が適用されます。
+- **ACE-Step 1.5 Turbo MLX**：推奨プロファイルです。アプリ内蔵の Apple Silicon ネイティブ Swift／MLX Runtime により、追加サービスをインストールせずに 10～300 秒の歌またはインストゥルメンタルを生成します。コードとモデルは商用利用可能な MIT License です。長時間音声はオーバーラップ付き分割 VAE デコードでメモリ使用量を抑えます。
+
+- **MiniMax Music 3 MLX 8-bit**：外部 `mlx-minimax-music3` CLI で動作します。5～300 秒の設定値は最長時間であり、曲構成に応じてモデルが早めに自然終了する場合があります。完了後、アプリに実際の出力時間を表示します。モデルには Community License が適用されます。
+
+ACE-Step ネイティブ Runtime はアプリに同梱されます。モデル、MiniMax Music 3 Runtime、FFmpeg は任意の外部コンポーネントです。
 
 ## 検証
 
@@ -107,14 +113,18 @@ Sources/
 │   ├── DomainModels.swift        # アセット、レシピ、ジョブ、モデル、プロファイル
 │   ├── InferenceServices.swift   # 画像、テキスト、動画、音楽の推論インターフェース
 │   ├── ModelCatalog.swift        # 組み込みモデルとプロファイル
-│   ├── OutputFileNaming.swift    # 画像・動画の出力名
+│   ├── OutputFileNaming.swift    # 画像・動画・音楽の出力名
+│   ├── ProjectWorkspacePersistence.swift # 開いている生成プロジェクトの永続化
 │   └── WorkflowGraph.swift       # アセットの系譜と分岐関係
 ├── GenImageRuntime/
 │   ├── ZImageTextToImageService.swift
 │   ├── QwenVLImageDescriptionService.swift
 │   ├── Qwen2511ImageToImageService.swift
 │   ├── LTXVideoGenerationService.swift
+│   ├── MusicGenerationRouter.swift
+│   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── AudioOutputEncoder.swift
 │   └── CoreMLUpscaleService.swift
 └── GenImageApp/
     ├── AppStore.swift            # アプリケーション状態とジョブ調整
@@ -127,7 +137,7 @@ Patches/                           # ビルド時に適用する Z-Image MLX 互
 
 ## 現在の状態
 
-アプリは Z-Image Turbo のテキストから画像、Qwen3-VL の画像からテキスト、Qwen 2511 の画像から画像、LTX-2.3 MLX のテキストから動画／画像から動画、MiniMax Music 3 MLX 8-bit のテキストから音楽、Core ML Real-ESRGAN のアップスケールによるローカル推論に接続済みです。動画は MP4、音楽は MP3／M4A／AAC／FLAC として追加され、実際の長さ、サンプルレート、チャンネル数、プロファイルスナップショット、系譜を保持します。
+アプリは Z-Image Turbo のテキストから画像、Qwen3-VL の画像からテキスト、Qwen 2511 の画像から画像、LTX-2.3 MLX のテキストから動画／画像から動画、ACE-Step 1.5 Turbo MLX と MiniMax Music 3 MLX 8-bit のテキストから音楽、Core ML Real-ESRGAN のアップスケールによるローカル推論に接続済みです。動画は MP4、音楽は MP3／M4A／AAC／FLAC として追加され、実際の長さ、サンプルレート、チャンネル数、プロファイルスナップショット、系譜を保持します。
 
 詳細情報：
 

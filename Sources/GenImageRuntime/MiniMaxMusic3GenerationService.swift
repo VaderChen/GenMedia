@@ -2,11 +2,19 @@ import Darwin
 import Foundation
 import GenImageCore
 
-public final class MiniMaxMusic3GenerationService: MusicGenerating, Sendable {
+public final class MiniMaxMusic3GenerationService: MusicRuntimeAdapter, Sendable {
     private let outputDirectory: URL
 
     public init(outputDirectory: URL) {
         self.outputDirectory = outputDirectory
+    }
+
+    public func supports(_ request: MusicGenerationRequest) -> Bool {
+        request.profile.capability == .textToMusic
+            && request.profile.architecture == .externalCLI
+            && request.profile.modelID.caseInsensitiveCompare(
+                HuggingFaceModelInstaller.miniMaxMusic3MLX8BitModelID
+            ) == .orderedSame
     }
 
     public func generate(
@@ -27,7 +35,6 @@ public final class MiniMaxMusic3GenerationService: MusicGenerating, Sendable {
         try Self.validateModel(at: request.modelURL)
 
         let runtimeExecutable = try Self.runtimeExecutable()
-        let ffmpegExecutable = try Self.ffmpegExecutable()
         try FileManager.default.createDirectory(
             at: outputDirectory,
             withIntermediateDirectories: true
@@ -38,8 +45,9 @@ public final class MiniMaxMusic3GenerationService: MusicGenerating, Sendable {
         let lyricsURL = outputDirectory.appendingPathComponent("music-\(identifier)-lyrics.txt")
         let waveURL = outputDirectory.appendingPathComponent("music-\(identifier).wav")
         let logURL = outputDirectory.appendingPathComponent("music-\(identifier).log")
-        let outputURL = outputDirectory.appendingPathComponent(
-            "minimax-music3-\(identifier).\(request.options.format.fileExtension)"
+        let outputURL = OutputFileNaming.musicURL(
+            in: outputDirectory,
+            pathExtension: request.options.format.fileExtension
         )
         let temporaryURLs = [promptURL, lyricsURL, waveURL, logURL]
         var completed = false
@@ -113,13 +121,11 @@ public final class MiniMaxMusic3GenerationService: MusicGenerating, Sendable {
               Self.fileSize(at: waveURL) > 0 else {
             throw MiniMaxMusic3RuntimeError.waveOutputMissing(waveURL)
         }
-        let waveMetadata = try Self.waveMetadata(at: waveURL)
         progress(0.92)
-        try await Self.transcode(
+        let waveMetadata = try await AudioOutputEncoder.encodeWave(
             inputURL: waveURL,
             outputURL: outputURL,
-            format: request.options.format,
-            ffmpegExecutable: ffmpegExecutable
+            format: request.options.format
         )
         guard FileManager.default.fileExists(atPath: outputURL.path),
               Self.fileSize(at: outputURL) > 0 else {
@@ -174,125 +180,6 @@ public final class MiniMaxMusic3GenerationService: MusicGenerating, Sendable {
         }
     }
 
-    private static func transcode(
-        inputURL: URL,
-        outputURL: URL,
-        format: AudioOutputFormat,
-        ffmpegExecutable: URL
-    ) async throws {
-        let process = Process()
-        process.executableURL = ffmpegExecutable
-        var arguments = [
-            "-y",
-            "-nostdin",
-            "-loglevel", "error",
-            "-i", inputURL.path,
-            "-map_metadata", "-1",
-            "-vn"
-        ]
-        switch format {
-        case .mp3:
-            arguments.append(contentsOf: ["-c:a", "libmp3lame", "-b:a", "320k"])
-        case .m4a:
-            arguments.append(contentsOf: ["-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart"])
-        case .aac:
-            arguments.append(contentsOf: ["-c:a", "aac", "-b:a", "256k", "-f", "adts"])
-        case .flac:
-            arguments.append(contentsOf: ["-c:a", "flac", "-compression_level", "8"])
-        }
-        arguments.append(outputURL.path)
-        process.arguments = arguments
-        process.environment = runtimeEnvironment()
-        process.standardInput = FileHandle.nullDevice
-        let logURL = outputURL.appendingPathExtension("log")
-        defer { try? FileManager.default.removeItem(at: logURL) }
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        let logHandle = try FileHandle(forWritingTo: logURL)
-        defer { try? logHandle.close() }
-        process.standardOutput = logHandle
-        process.standardError = logHandle
-
-        do {
-            try process.run()
-            let startedAt = Date()
-            while process.isRunning {
-                try Task.checkCancellation()
-                try await Task.sleep(for: .milliseconds(100))
-                if Date().timeIntervalSince(startedAt) >= 5 * 60 {
-                    forceTerminate(process)
-                    throw MiniMaxMusic3RuntimeError.transcodeTimedOut
-                }
-            }
-        } catch {
-            forceTerminate(process)
-            throw error
-        }
-        process.waitUntilExit()
-        try? logHandle.synchronize()
-        guard process.terminationStatus == 0 else {
-            throw MiniMaxMusic3RuntimeError.transcodeFailed(
-                status: process.terminationStatus,
-                message: logMessage(in: logURL)
-            )
-        }
-    }
-
-    private struct WaveMetadata {
-        var durationSeconds: Double
-        var sampleRate: Int
-        var channelCount: Int
-    }
-
-    private static func waveMetadata(at url: URL) throws -> WaveMetadata {
-        let data = try Data(contentsOf: url)
-        guard data.count >= 44,
-              String(data: data[0..<4], encoding: .ascii) == "RIFF",
-              String(data: data[8..<12], encoding: .ascii) == "WAVE" else {
-            throw MiniMaxMusic3RuntimeError.invalidWaveOutput(url)
-        }
-        var offset = 12
-        var sampleRate: Int?
-        var channelCount: Int?
-        var byteRate: Int?
-        var audioByteCount: Int?
-        while offset + 8 <= data.count {
-            let chunkID = String(data: data[offset..<(offset + 4)], encoding: .ascii)
-            let chunkSize = Int(littleEndianUInt32(data, at: offset + 4))
-            let contentOffset = offset + 8
-            guard chunkSize >= 0, contentOffset + chunkSize <= data.count else { break }
-            if chunkID == "fmt ", chunkSize >= 16 {
-                channelCount = Int(littleEndianUInt16(data, at: contentOffset + 2))
-                sampleRate = Int(littleEndianUInt32(data, at: contentOffset + 4))
-                byteRate = Int(littleEndianUInt32(data, at: contentOffset + 8))
-            } else if chunkID == "data" {
-                audioByteCount = chunkSize
-            }
-            offset = contentOffset + chunkSize + (chunkSize % 2)
-        }
-        guard let sampleRate, sampleRate > 0,
-              let channelCount, channelCount > 0,
-              let byteRate, byteRate > 0,
-              let audioByteCount, audioByteCount > 0 else {
-            throw MiniMaxMusic3RuntimeError.invalidWaveOutput(url)
-        }
-        return WaveMetadata(
-            durationSeconds: Double(audioByteCount) / Double(byteRate),
-            sampleRate: sampleRate,
-            channelCount: channelCount
-        )
-    }
-
-    private static func littleEndianUInt16(_ data: Data, at offset: Int) -> UInt16 {
-        UInt16(data[offset]) | UInt16(data[offset + 1]) << 8
-    }
-
-    private static func littleEndianUInt32(_ data: Data, at offset: Int) -> UInt32 {
-        UInt32(data[offset])
-            | UInt32(data[offset + 1]) << 8
-            | UInt32(data[offset + 2]) << 16
-            | UInt32(data[offset + 3]) << 24
-    }
-
     private static func runtimeExecutable() throws -> URL {
         let fileManager = FileManager.default
         let environment = ProcessInfo.processInfo.environment
@@ -328,30 +215,6 @@ public final class MiniMaxMusic3GenerationService: MusicGenerating, Sendable {
             fileManager.isExecutableFile(atPath: $0.path)
         }) else {
             throw MiniMaxMusic3RuntimeError.runtimeNotFound(candidates.map(\.path))
-        }
-        return executable
-    }
-
-    private static func ffmpegExecutable() throws -> URL {
-        let fileManager = FileManager.default
-        let environment = ProcessInfo.processInfo.environment
-        var candidates: [URL] = []
-        if let configured = environment["GENIMAGE_FFMPEG"], !configured.isEmpty {
-            candidates.append(URL(fileURLWithPath: configured))
-        }
-        candidates.append(URL(fileURLWithPath: "/opt/homebrew/bin/ffmpeg"))
-        candidates.append(URL(fileURLWithPath: "/usr/local/bin/ffmpeg"))
-        candidates.append(URL(fileURLWithPath: "/usr/bin/ffmpeg"))
-        for directory in (environment["PATH"] ?? "").split(separator: ":") {
-            candidates.append(
-                URL(fileURLWithPath: String(directory), isDirectory: true)
-                    .appendingPathComponent("ffmpeg")
-            )
-        }
-        guard let executable = candidates.first(where: {
-            fileManager.isExecutableFile(atPath: $0.path)
-        }) else {
-            throw MiniMaxMusic3RuntimeError.ffmpegNotFound(candidates.map(\.path))
         }
         return executable
     }
@@ -400,13 +263,9 @@ public enum MiniMaxMusic3RuntimeError: LocalizedError, Sendable {
     case unsupportedModel(String)
     case modelIncomplete(URL, [String])
     case runtimeNotFound([String])
-    case ffmpegNotFound([String])
     case runtimeTimedOut
     case runtimeFailed(status: Int32, message: String)
     case waveOutputMissing(URL)
-    case invalidWaveOutput(URL)
-    case transcodeTimedOut
-    case transcodeFailed(status: Int32, message: String)
     case encodedOutputMissing(URL)
 
     public var errorDescription: String? {
@@ -421,20 +280,12 @@ public enum MiniMaxMusic3RuntimeError: LocalizedError, Sendable {
             "MiniMax Music 3 模型不完整：\(url.path)；缺少 \(missing.joined(separator: "、"))"
         case let .runtimeNotFound(paths):
             "找不到 mlx-minimax-music3 Runtime。請安裝後設定 GENIMAGE_MINIMAX_MUSIC3_RUNTIME；已檢查：\(paths.joined(separator: "、"))"
-        case let .ffmpegNotFound(paths):
-            "找不到 FFmpeg，無法輸出 MP3、M4A、AAC 或 FLAC；已檢查：\(paths.joined(separator: "、"))"
         case .runtimeTimedOut:
             "MiniMax Music 3 Runtime 超過安全執行時間，已自動停止。"
         case let .runtimeFailed(status, message):
             "MiniMax Music 3 Runtime 結束（\(status)）：\(message)"
         case let .waveOutputMissing(url):
             "MiniMax Music 3 完成但未產生暫存音訊：\(url.path)"
-        case let .invalidWaveOutput(url):
-            "MiniMax Music 3 產生的暫存音訊格式無效：\(url.path)"
-        case .transcodeTimedOut:
-            "FFmpeg 音訊轉碼超過 5 分鐘，已自動停止。"
-        case let .transcodeFailed(status, message):
-            "音訊轉碼失敗（\(status)）：\(message)"
         case let .encodedOutputMissing(url):
             "音訊轉碼完成但找不到輸出檔案：\(url.path)"
         }

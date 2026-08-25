@@ -133,6 +133,27 @@ public struct ProfileDefaults: Codable, Hashable, Sendable {
     }
 }
 
+public enum MusicDurationSemantics: String, Codable, Hashable, Sendable {
+    case target
+    case maximum
+}
+
+public struct ProfileMusicConfiguration: Codable, Hashable, Sendable {
+    public var minimumDurationSeconds: Int
+    public var maximumDurationSeconds: Int
+    public var durationSemantics: MusicDurationSemantics
+
+    public init(
+        minimumDurationSeconds: Int = 5,
+        maximumDurationSeconds: Int = 300,
+        durationSemantics: MusicDurationSemantics = .target
+    ) {
+        self.minimumDurationSeconds = minimumDurationSeconds
+        self.maximumDurationSeconds = maximumDurationSeconds
+        self.durationSemantics = durationSemantics
+    }
+}
+
 public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
     public let id: UUID
     public var name: String
@@ -141,6 +162,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
     public var modelRevision: String
     public var architecture: InferenceArchitecture
     public var defaults: ProfileDefaults
+    public var music: ProfileMusicConfiguration?
     public var loras: [ProfileLoRAConfiguration]
     public var profileRevision: Int
     public var notes: String
@@ -154,6 +176,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         modelRevision: String = "main",
         architecture: InferenceArchitecture,
         defaults: ProfileDefaults = ProfileDefaults(),
+        music: ProfileMusicConfiguration? = nil,
         loras: [ProfileLoRAConfiguration] = [],
         profileRevision: Int = 1,
         notes: String = "",
@@ -166,6 +189,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         self.modelRevision = modelRevision
         self.architecture = architecture
         self.defaults = defaults
+        self.music = music
         self.loras = loras
         self.profileRevision = profileRevision
         self.notes = notes
@@ -186,6 +210,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         case modelRevision
         case architecture
         case defaults
+        case music
         case loras
         case profileRevision
         case notes
@@ -202,6 +227,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         architecture = try container.decode(InferenceArchitecture.self, forKey: .architecture)
         defaults = try container.decodeIfPresent(ProfileDefaults.self, forKey: .defaults)
             ?? ProfileDefaults()
+        music = try container.decodeIfPresent(ProfileMusicConfiguration.self, forKey: .music)
         loras = try container.decodeIfPresent([ProfileLoRAConfiguration].self, forKey: .loras) ?? []
         profileRevision = try container.decodeIfPresent(Int.self, forKey: .profileRevision) ?? 1
         notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
@@ -217,6 +243,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         try container.encode(modelRevision, forKey: .modelRevision)
         try container.encode(architecture, forKey: .architecture)
         try container.encode(defaults, forKey: .defaults)
+        try container.encodeIfPresent(music, forKey: .music)
         try container.encode(loras, forKey: .loras)
         try container.encode(profileRevision, forKey: .profileRevision)
         try container.encode(notes, forKey: .notes)
@@ -465,6 +492,7 @@ public enum MusicStyle: String, CaseIterable, Codable, Hashable, Sendable, Ident
     case metal
     case ambient
     case cinematic
+    case anime
     case lofi
 
     public var id: String { rawValue }
@@ -485,6 +513,7 @@ public enum MusicStyle: String, CaseIterable, Codable, Hashable, Sendable, Ident
         case .metal: "Metal"
         case .ambient: "Ambient"
         case .cinematic: "Cinematic soundtrack"
+        case .anime: "Anime soundtrack"
         case .lofi: "Lo-fi"
         }
     }

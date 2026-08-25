@@ -62,13 +62,19 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 - Cancellation enters `cancelling` first, then changes to `cancelled` and unlocks all generation and memory controls when the runtime task exits. A numeric ETA appears after 35% progress and 15 seconds; overall elapsed time is used as a fallback when stable samples are not yet available.
 - The Z-Image MLX compatibility layer handles `quantize_config.json`, affine/mxfp4 modes, packed pad tokens, and FP16-to-BF16 loading. `build.command` reapplies the patches under `Patches/` after Swift Package resolution. The andrevp Z-Image Turbo MLX 4-bit profile has been validated with a real generation run.
 - Text-to-image completion keeps model weights and warm buffers resident. Reusable MLX buffers are trimmed after five idle minutes without unloading the model. Models are unloaded only by the sidebar Release Memory action, a model switch, or the over-90% RAM protection applied while switching profiles.
-- Downloads retain their upstream filenames. Generated outputs use `Image-MMDD-HHmmss` or `Video-MMDD-HHmmss`, and the output directory is configurable in Settings.
+- Downloads retain their upstream filenames. Generated outputs use `Image-YYYYMMDD-HHmm`, `Video-YYYYMMDD-HHmm`, or `Music-YYYYMMDD-HHmm`; a numeric suffix prevents collisions within the same minute. The output directory is configurable in Settings.
+- Each open workspace tab is treated as a generation project. Assets and lineage are atomically stored under Application Support and restored after the app relaunches. Explicitly closing a tab removes that project's workspace index while keeping exported media files on disk.
+- Prompt and lyrics editors preserve the caret, selection, and IME composition while native state updates arrive. Generation type, Prompt, Lyrics, and output-setting tabs rerender only the creation panel. Unavoidable full updates reuse playing audio and video nodes instead of interrupting playback.
 
 ### Music Runtime
 
-Text-to-music uses the external `mlx-minimax-music3` runtime with the MiniMax Music 3 MLX 8-bit profile from Model Center. The Swift app manages music style, an optional prompt, optional lyrics, a 5–300 second duration (up to five minutes), steps, seed, cancellation, time estimation, and audio asset metadata. When the prompt is blank, the selected music style is used; when lyrics are blank, instrumental music is generated. The runtime's temporary WAV is converted by FFmpeg to the selected MP3, M4A, AAC, or FLAC format, after which all WAV, text, and log temporary files are removed.
+Text-to-music is dispatched by `MusicGenerationRouter` to an ACE-Step 1.5 or MiniMax Music 3 adapter according to the active profile. The Swift app consistently manages music style, an optional prompt, optional lyrics, steps, seed, cancellation, time estimation, and audio metadata. A blank prompt uses the selected style, while blank lyrics generate instrumental music. Temporary WAV output from either runtime is converted by the shared FFmpeg layer to MP3, M4A, AAC, or FLAC.
 
-The app checks `GENIMAGE_MINIMAX_MUSIC3_RUNTIME` first, followed by app helpers, `~/Library/Application Support/GenImage/Runtime/minimax-music3/.venv/bin/mlx-minimax-music3`, common installation paths, and `PATH`. The runtime, model, and FFmpeg remain optional external components and are not bundled in the app or DMG. The MiniMax Music 3 model remains subject to its Community License.
+- **ACE-Step 1.5 Turbo MLX**: the recommended profile, generating 10–300 second songs or instrumentals through the app's built-in Apple Silicon-native Swift/MLX runtime with no additional service installation. Its code and model use the commercially usable MIT License. Long audio uses overlap-discard tiled VAE decoding to control memory use.
+
+- **MiniMax Music 3 MLX 8-bit**: runs through the external `mlx-minimax-music3` CLI. Its 5–300 second setting is a maximum duration; the model may end naturally earlier based on the song structure, and the app reports the actual output duration after completion. Its model remains subject to the Community License.
+
+The native ACE-Step runtime ships with the app. Models, the MiniMax Music 3 runtime, and FFmpeg remain optional external components.
 
 ## Validation
 
@@ -107,14 +113,18 @@ Sources/
 │   ├── DomainModels.swift        # Assets, recipes, jobs, models, and profiles
 │   ├── InferenceServices.swift   # Image, text, video, and music inference interfaces
 │   ├── ModelCatalog.swift        # Built-in models and profiles
-│   ├── OutputFileNaming.swift    # Image and video output names
+│   ├── OutputFileNaming.swift    # Image, video, and music output names
+│   ├── ProjectWorkspacePersistence.swift # Open generation-project persistence
 │   └── WorkflowGraph.swift       # Asset lineage and branch relationships
 ├── GenImageRuntime/
 │   ├── ZImageTextToImageService.swift
 │   ├── QwenVLImageDescriptionService.swift
 │   ├── Qwen2511ImageToImageService.swift
 │   ├── LTXVideoGenerationService.swift
+│   ├── MusicGenerationRouter.swift
+│   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── AudioOutputEncoder.swift
 │   └── CoreMLUpscaleService.swift
 └── GenImageApp/
     ├── AppStore.swift            # Application state and job coordination
@@ -127,7 +137,7 @@ Patches/                           # Z-Image MLX compatibility patches applied d
 
 ## Current Status
 
-The app is connected to local inference for Z-Image Turbo text-to-image, Qwen3-VL image-to-text, Qwen 2511 image-to-image, LTX-2.3 MLX text-to-video and image-to-video, MiniMax Music 3 MLX 8-bit text-to-music, and Core ML Real-ESRGAN upscaling. Videos are added as MP4 assets; music can be exported as MP3, M4A, AAC, or FLAC with actual duration, sample rate, channel count, profile snapshots, and lineage preserved.
+The app is connected to local inference for Z-Image Turbo text-to-image, Qwen3-VL image-to-text, Qwen 2511 image-to-image, LTX-2.3 MLX text-to-video and image-to-video, ACE-Step 1.5 Turbo MLX and MiniMax Music 3 MLX 8-bit text-to-music, and Core ML Real-ESRGAN upscaling. Videos are added as MP4 assets; music can be exported as MP3, M4A, AAC, or FLAC with actual duration, sample rate, channel count, profile snapshots, and lineage preserved.
 
 More information:
 

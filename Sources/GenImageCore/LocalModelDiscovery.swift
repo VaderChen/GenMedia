@@ -27,6 +27,7 @@ public enum LocalModelDiscovery {
         discoverLTX23(root: root, fileManager: fileManager, result: &result)
         discoverLTX23MLXQ4(root: root, fileManager: fileManager, result: &result)
         discoverMiniMaxH3MLX(root: root, fileManager: fileManager, result: &result)
+        discoverACEStep15(root: root, fileManager: fileManager, result: &result)
         discoverMiniMaxMusic3MLX(root: root, fileManager: fileManager, result: &result)
         discoverUpscalers(root: root, fileManager: fileManager, result: &result)
         discoverLoRAs(root: root, fileManager: fileManager, result: &result)
@@ -36,6 +37,65 @@ public enum LocalModelDiscovery {
 
     private struct ManagedModelManifest: Decodable {
         var modelID: String
+    }
+
+    private static func discoverACEStep15(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let modelID = "ACE-Step/Ace-Step1.5"
+        let revision = "19671f406d603126926c1b7e2adc169acbcade22"
+        let directory = root.appendingPathComponent("ace-step-1.5-turbo", isDirectory: true)
+        let requiredPaths = [
+            "config.json",
+            "Qwen3-Embedding-0.6B/config.json",
+            "Qwen3-Embedding-0.6B/model.safetensors",
+            "Qwen3-Embedding-0.6B/tokenizer.json",
+            "acestep-v15-turbo/config.json",
+            "acestep-v15-turbo/model.safetensors",
+            "acestep-v15-turbo/silence_latent.pt",
+            "vae/config.json",
+            "vae/diffusion_pytorch_model.safetensors"
+        ]
+        guard requiredPaths.allSatisfy({
+            fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }) else { return }
+        let manifestURL = directory.appendingPathComponent("genimage-model.json")
+        if fileManager.fileExists(atPath: manifestURL.path) {
+            guard let data = try? Data(contentsOf: manifestURL),
+                  let manifest = try? JSONDecoder().decode(ManagedModelManifest.self, from: data),
+                  manifest.modelID == modelID else { return }
+        }
+
+        result.models.append(
+            ModelDescriptor(
+                id: modelID,
+                displayName: "ACE-Step 1.5 Turbo MLX（本機）",
+                publisher: "Local / ACE Studio / StepFun",
+                summary: "已安裝 ACE-Step 1.5 Turbo DiT、Qwen3 Embedding 與 VAE，可由原生 Swift／MLX Runtime 執行。",
+                capabilities: [.textToMusic],
+                quantization: .bf16,
+                approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                recommendedMemoryGB: 16,
+                licenseName: "MIT",
+                sourceURL: URL(string: "https://huggingface.co/\(modelID)"),
+                localURL: directory,
+                isRecommended: true
+            )
+        )
+        result.profiles.append(
+            InferenceProfile(
+                name: "文生音樂 · ACE-Step 1.5 Turbo MLX",
+                capability: .textToMusic,
+                modelID: modelID,
+                modelRevision: revision,
+                architecture: .mlxSwift,
+                defaults: ProfileDefaults(steps: 8, outputCount: 1, durationSeconds: 30),
+                notes: "從 \(directory.path) 自動偵測；透過 ACE-Step 原生 Swift／MLX Runtime 執行，支援 Prompt、選填歌詞、純音樂與 10–300 秒生成。",
+                isBuiltIn: true
+            )
+        )
     }
 
     private static func discoverMiniMaxMusic3MLX(

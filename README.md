@@ -72,13 +72,19 @@ Token 只會透過 HTTPS `Authorization: Bearer` 標頭傳給 Civitai，不會�
 - 工作取消會先進入 `cancelling`，Runtime Task 結束後自動轉成 `cancelled` 並解除所有生成與記憶體按鈕。ETA 在進度 35% 且執行滿 15 秒後顯示數字，樣本不足時會使用整體耗時備援估算。
 - Z-Image MLX 量化相容層支援 `quantize_config.json`、affine／mxfp4、packed pad token 與 FP16→BF16 載入修正；`build.command` 會在解析 Swift Package 後自動套用 `Patches/` 內的 Runtime 修正。andrevp Z-Image Turbo MLX 4-bit 已完成實際生成驗證。
 - 文生圖完成後保留模型權重與暖機 buffer；5 分鐘後只清理可重用的 MLX 暫存 buffer，不卸載模型。按下側欄「釋放記憶體」、切換模型，或切換 Profile 時 RAM 超過 90%，才會卸載不再需要的 Runtime。
-- 下載保留來源原始檔名；生成輸出使用 `Image-MMDD-HHmmss` 或 `Video-MMDD-HHmmss`，並可在設定頁更改輸出目錄。
+- 下載保留來源原始檔名；生成輸出使用 `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm` 或 `Music-YYYYMMDD-HHmm`，同分鐘重複時自動加上流水號，並可在設定頁更改輸出目錄。
+- 每個開啟的工作區分頁視為一個生成專案；資產與 lineage 會原子寫入 Application Support，App 關閉後仍可恢復。只有明確關閉分頁時才移除該專案的工作區索引，已輸出的媒體檔仍保留於磁碟。
+- Prompt 與歌詞編輯期間會保留游標、選取範圍及輸入法組字狀態；生成類型、Prompt、歌詞與輸出設定 TAB 只局部更新創作面板。必要的完整畫面更新會沿用播放中的音訊或影片節點，避免中斷播放。
 
 ### 音樂 Runtime
 
-文生音樂使用外部 `mlx-minimax-music3` Runtime 與模型中心的 MiniMax Music 3 MLX 8-bit Profile。Swift App 負責音樂風格、可選 Prompt、可選歌詞、5～300 秒長度（最長 5 分鐘）、步數、Seed、工作取消、時間推估及音訊資產資訊；Prompt 留空時會使用所選音樂風格，歌詞留空時生成純音樂。Runtime 生成的暫存 WAV 會由 FFmpeg 轉為使用者選擇的 MP3、M4A、AAC 或 FLAC，完成後自動移除 WAV、文字與日誌暫存檔。
+文生音樂由 `MusicGenerationRouter` 依 Profile 分派至 ACE-Step 1.5 或 MiniMax Music 3 Adapter。Swift App 統一管理音樂風格、可選 Prompt、可選歌詞、步數、Seed、工作取消、時間推估及音訊資產資訊；Prompt 留空時使用所選音樂風格，歌詞留空時生成純音樂。各 Runtime 產生的暫存 WAV 都由共用 FFmpeg 輸出層轉為 MP3、M4A、AAC 或 FLAC。
 
-App 會先讀取 `GENIMAGE_MINIMAX_MUSIC3_RUNTIME`，再搜尋 App Helpers、`~/Library/Application Support/GenImage/Runtime/minimax-music3/.venv/bin/mlx-minimax-music3`、常見安裝路徑與 `PATH`。Runtime、模型與 FFmpeg 均維持外部選用元件，不放入 App bundle 或 DMG；MiniMax Music 3 模型仍適用其 Community License。
+- **ACE-Step 1.5 Turbo MLX**：建議 Profile，透過 App 內建的 Apple Silicon 原生 Swift／MLX Runtime 生成 10～300 秒歌曲或純音樂，不需要安裝額外服務。程式與模型採 MIT License，可商業使用；長音訊採重疊分塊 VAE 解碼以控制記憶體用量。
+
+- **MiniMax Music 3 MLX 8-bit**：透過外部 `mlx-minimax-music3` CLI 執行，設定值是 5～300 秒的最長長度；模型可依歌曲結構提前自然結束，完成後 App 會顯示實際生成長度。模型仍適用其 Community License。
+
+ACE-Step 原生 Runtime 隨 App 提供；模型、MiniMax Music 3 Runtime 與 FFmpeg 維持外部選用元件。
 
 ## 驗證
 
@@ -117,14 +123,18 @@ Sources/
 │   ├── DomainModels.swift        # 資產、配方、工作、模型與 Profile
 │   ├── InferenceServices.swift   # 圖片、文字、影片與音樂推論服務介面
 │   ├── ModelCatalog.swift        # 內建模型及 Profile
-│   ├── OutputFileNaming.swift    # 圖片與影片輸出命名
+│   ├── OutputFileNaming.swift    # 圖片、影片與音樂輸出命名
+│   ├── ProjectWorkspacePersistence.swift # 開啟中生成專案持久化
 │   └── WorkflowGraph.swift       # 資產來源與分支關係
 ├── GenImageRuntime/
 │   ├── ZImageTextToImageService.swift
 │   ├── QwenVLImageDescriptionService.swift
 │   ├── Qwen2511ImageToImageService.swift
 │   ├── LTXVideoGenerationService.swift
+│   ├── MusicGenerationRouter.swift
+│   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── AudioOutputEncoder.swift
 │   └── CoreMLUpscaleService.swift
 └── GenImageApp/
     ├── AppStore.swift            # 應用程式狀態與工作協調
@@ -137,7 +147,7 @@ Patches/                           # 建置時套用的 Z-Image MLX 相容性修
 
 ## 目前狀態
 
-App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL 圖生文、Qwen 2511 圖生圖、LTX-2.3 MLX 文生影／圖生影、MiniMax Music 3 MLX 8-bit 文生音樂，以及 Core ML Real-ESRGAN Upscale。影片以 MP4 加入工作區；音樂可輸出 MP3、M4A、AAC 或 FLAC，並保存實際時長、取樣率、聲道、Profile 快照與 lineage。
+App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL 圖生文、Qwen 2511 圖生圖、LTX-2.3 MLX 文生影／圖生影、ACE-Step 1.5 Turbo MLX 與 MiniMax Music 3 MLX 8-bit 文生音樂，以及 Core ML Real-ESRGAN Upscale。影片以 MP4 加入工作區；音樂可輸出 MP3、M4A、AAC 或 FLAC，並保存實際時長、取樣率、聲道、Profile 快照與 lineage。
 
 更多資訊：
 
