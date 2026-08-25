@@ -68,6 +68,7 @@ const ui = {
   renameWorkspaceTabID: null,
   renameWorkspaceTabValue: "",
   pasteDialogOpen: false,
+  smallOutputWarning: null,
   modelFilter: "all",
   profileFilter: "all",
   modelSearch: "",
@@ -209,12 +210,25 @@ root.addEventListener("click", async (event) => {
         setInspectorTab("jobs");
         await invoke("describe");
         break;
-      case "imageToImage":
-        await syncRecipe();
-        ui.route = "workspace";
-        ui.previewMode = "single";
-        setInspectorTab("jobs");
-        await invokeTrackedOutput("imageToImage", undefined, "imageToImage");
+      case "imageToImage": {
+        const smallOutput = undersizedImageOutput(state);
+        if (smallOutput && !smallOutputWarningAcknowledged) {
+          ui.smallOutputWarning = smallOutput;
+          render();
+          break;
+        }
+        await runImageToImage();
+        break;
+      }
+      case "smallOutputCancel":
+        ui.smallOutputWarning = null;
+        render();
+        break;
+      case "smallOutputContinue":
+        smallOutputWarningAcknowledged = true;
+        ui.smallOutputWarning = null;
+        render();
+        await runImageToImage();
         break;
       case "upscale":
         ui.route = "workspace";
@@ -787,6 +801,7 @@ function render() {
     </div>
     ${renderWorkspaceTabRenameDialog()}
     ${renderPasteDialog()}
+    ${renderSmallOutputWarningDialog()}
     ${renderToast()}
   `;
   restoreViewState(viewState);
@@ -1787,6 +1802,48 @@ function renderWorkspaceTabRenameDialog() {
       <div class="dialog-actions">
         <button class="secondary-button" data-action="workspaceRenameCancel">${t("common.cancel")}</button>
         <button class="primary-button" data-action="workspaceRenameSave">${t("common.save")}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
+// Image-to-image renders at the Runtime's own 1024²-area canvas and resamples down, so a
+// tiny output no longer breaks the composition — but the detail it can carry is bounded by
+// the pixels asked for, which is easy to set and then forget. Warn once per session.
+const IMAGE_OUTPUT_MINIMUM_SIDE = 512;
+const IMAGE_OUTPUT_MINIMUM_AREA = IMAGE_OUTPUT_MINIMUM_SIDE * IMAGE_OUTPUT_MINIMUM_SIDE;
+let smallOutputWarningAcknowledged = false;
+
+function undersizedImageOutput(state) {
+  const width = Number(state?.recipe?.width);
+  const height = Number(state?.recipe?.height);
+  if (![width, height].every((value) => Number.isFinite(value) && value > 0)) return null;
+  if (width * height >= IMAGE_OUTPUT_MINIMUM_AREA) return null;
+  return { width, height };
+}
+
+async function runImageToImage() {
+  await syncRecipe();
+  ui.route = "workspace";
+  ui.previewMode = "single";
+  setInspectorTab("jobs");
+  await invokeTrackedOutput("imageToImage", undefined, "imageToImage");
+}
+
+function renderSmallOutputWarningDialog() {
+  if (!ui.smallOutputWarning) return "";
+  const { width, height } = ui.smallOutputWarning;
+  return `<div class="dialog-backdrop">
+    <section class="paste-dialog" role="dialog" aria-modal="true" aria-labelledby="small-output-dialog-title">
+      <h2 id="small-output-dialog-title">${t("imageToImage.smallOutputTitle")}</h2>
+      <p>${t("imageToImage.smallOutputMessage", {
+        width,
+        height,
+        minimum: `${IMAGE_OUTPUT_MINIMUM_SIDE} × ${IMAGE_OUTPUT_MINIMUM_SIDE}`,
+      })}</p>
+      <div class="dialog-actions">
+        <button class="secondary-button" data-action="smallOutputCancel">${t("common.cancel")}</button>
+        <button class="primary-button" data-action="smallOutputContinue">${t("imageToImage.smallOutputContinue")}</button>
       </div>
     </section>
   </div>`;
