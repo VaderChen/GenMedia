@@ -75,6 +75,7 @@ Token 只會透過 HTTPS `Authorization: Bearer` 標頭傳給 Civitai，不會�
 - 下載保留來源原始檔名；生成輸出使用 `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm` 或 `Music-YYYYMMDD-HHmm`，同分鐘重複時自動加上流水號，並可在設定頁更改輸出目錄。
 - 每個開啟的工作區分頁視為一個生成專案；資產與 lineage 會原子寫入 Application Support，App 關閉後仍可恢復。只有明確關閉分頁時才移除該專案的工作區索引，已輸出的媒體檔仍保留於磁碟。
 - Prompt 與歌詞編輯期間會保留游標、選取範圍及輸入法組字狀態；生成類型、Prompt、歌詞與輸出設定 TAB 只局部更新創作面板。必要的完整畫面更新會沿用播放中的音訊或影片節點，避免中斷播放。
+- 工作區底片列提供圖片匯入按鈕，並支援從 Finder 拖放一張或多張 PNG、JPEG、WebP、GIF、TIFF、HEIC 與 HEIF 圖片；音樂生成模式會停用圖片匯入，避免混用媒體來源。圖片生成時若已選取來源圖片，主按鈕會自動使用圖生圖 Profile，未選取時則使用文生圖 Profile。
 
 ### 音樂 Runtime
 

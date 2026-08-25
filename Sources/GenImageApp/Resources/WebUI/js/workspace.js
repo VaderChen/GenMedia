@@ -165,6 +165,10 @@ export function renderCreationPanel(state, ui) {
   const showGenerateImage = generationType === "image";
   const showGenerateVideo = generationType === "video";
   const showGenerateMusic = generationType === "music";
+  const imageGenerationAction = selectedSourceImage(state) ? "imageToImage" : "generate";
+  const imageGenerationLabel = imageGenerationAction === "imageToImage"
+    ? t("cap.imageToImage")
+    : t("workspace.generate");
   return `
     <aside class="creation-panel ${collapsed ? "collapsed" : ""}">
       <div class="creation-header">
@@ -188,9 +192,9 @@ export function renderCreationPanel(state, ui) {
           showGenerateImage
             ? `<button
                 class="primary-button creation-generate-button creation-generate-image"
-                data-action="generate"
+                data-action="${imageGenerationAction}"
                 ${inferenceDisabledAttribute}
-              >✦ ${t("workspace.generate")}</button>`
+              >✦ ${imageGenerationLabel}</button>`
             : ""
         }
         ${
@@ -686,7 +690,7 @@ function renderPreviewPanel(state, ui) {
         ${renderPreviewContent(state, previewUI)}
       </div>
       ${fixedKindAsset ? `<span class="asset-kind preview-fixed-kind">${kindLabel(fixedKindAsset.kind)}</span>` : ""}
-      ${renderFilmstrip(state)}
+      ${renderFilmstrip(state, ui.generationType === "music")}
     </main>
   `;
 }
@@ -793,33 +797,49 @@ function renderArtwork(asset, controls = false, showKind = true) {
   `;
 }
 
-function renderFilmstrip(state) {
-  return `<div class="filmstrip" data-scroll-id="filmstrip">
-    ${state.assets
-      .map(
-        (asset) => {
-          const selection = assetSelection(asset, state);
-          return `
-          <div class="film-thumb-shell">
-            <button
-              class="film-thumb ${selection.classes}"
-              data-action="selectAsset"
-              data-asset-id="${asset.id}"
-              title="${escapeHTML(asset.title)} · ⌘/Ctrl ${t("preview.multiSelectHint")}"
-              aria-pressed="${selection.selected}"
-            >${renderArtwork(asset)}${selection.badge}</button>
-            <button
-              class="film-thumb-remove"
-              data-action="removeAsset"
-              data-asset-id="${asset.id}"
-              title="${t("preview.removeImage")}"
-              aria-label="${t("preview.removeImage")}"
-            >×</button>
-          </div>
-        `;
-        },
-      )
-      .join("")}
+function renderFilmstrip(state, importDisabled = false) {
+  return `<div class="filmstrip">
+    <div class="filmstrip-assets" data-scroll-id="filmstrip">
+      ${state.assets
+        .map(
+          (asset) => {
+            const selection = assetSelection(asset, state);
+            return `
+            <div class="film-thumb-shell">
+              <button
+                class="film-thumb ${selection.classes}"
+                data-action="selectAsset"
+                data-asset-id="${asset.id}"
+                title="${escapeHTML(asset.title)} · ⌘/Ctrl ${t("preview.multiSelectHint")}"
+                aria-pressed="${selection.selected}"
+              >${renderArtwork(asset)}${selection.badge}</button>
+              <button
+                class="film-thumb-remove"
+                data-action="removeAsset"
+                data-asset-id="${asset.id}"
+                title="${t("preview.removeImage")}"
+                aria-label="${t("preview.removeImage")}"
+              >×</button>
+            </div>
+          `;
+          },
+        )
+        .join("")}
+    </div>
+    <button
+      class="icon-button compact filmstrip-import-button"
+      data-action="importImage"
+      title="${t("sidebar.import")}"
+      aria-label="${t("sidebar.import")}"
+      ${importDisabled ? "disabled" : ""}
+    >
+      <svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3.5" y="5" width="17" height="14.5" rx="2.5"></rect>
+        <circle cx="8.5" cy="9.5" r="1.5"></circle>
+        <path d="m5.5 17 4.5-4.5 3.2 3.1 2.1-2.1 3.2 3.5"></path>
+        <path d="M17 2.5v5M14.5 5h5"></path>
+      </svg>
+    </button>
   </div>`;
 }
 
@@ -1196,6 +1216,11 @@ function assetSummary(asset) {
 
 function selectedAsset(state) {
   return state.assets.find((asset) => asset.id === state.selectedAssetID);
+}
+
+function selectedSourceImage(state) {
+  const asset = selectedAsset(state);
+  return asset && !["generatedVideo", "generatedAudio"].includes(asset.kind) ? asset : null;
 }
 
 function buildLineage(assets, start) {
