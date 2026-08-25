@@ -226,8 +226,18 @@
   display: flex;
   flex: 0 0 84px;
   gap: 8px;
-  overflow-x: auto;
+  overflow: hidden;
   padding: 9px 12px;
+}
+
+.filmstrip-assets {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .inspector-panel {

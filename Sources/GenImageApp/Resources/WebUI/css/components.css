@@ -1213,6 +1213,19 @@ button:disabled {
   position: relative;
 }
 
+.filmstrip-import-button {
+  border: 1px solid var(--line-strong);
+  color: var(--accent);
+  flex: 0 0 38px;
+  height: 38px;
+  padding: 0;
+  width: 38px;
+}
+
+.filmstrip-import-button:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+
 .film-thumb {
   background: none;
   border: 2px solid transparent;
@@ -1507,6 +1520,44 @@ button:disabled {
   justify-content: center;
   position: fixed;
   z-index: 1000;
+}
+
+.image-drop-overlay {
+  align-items: center;
+  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--surface-solid) 82%, transparent);
+  border: 2px dashed color-mix(in srgb, var(--accent) 72%, white);
+  border-radius: 24px;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  inset: 22px;
+  justify-content: center;
+  pointer-events: none;
+  position: fixed;
+  z-index: 2000;
+}
+
+.image-drop-overlay svg {
+  fill: none;
+  height: 72px;
+  margin-bottom: 18px;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+  width: 72px;
+}
+
+.image-drop-overlay strong {
+  color: var(--text);
+  font-size: 20px;
+}
+
+.image-drop-overlay span {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 8px;
 }
 
 .paste-dialog {

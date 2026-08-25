@@ -30,6 +30,7 @@ const AUDIO_FFT_SIZE = 8192;
 const AUDIO_MIN_FREQUENCY_HZ = 18;
 const AUDIO_MAX_FREQUENCY_HZ = 24_000;
 const AUDIO_MAX_WAVEFORM_POINTS = 1_600;
+const SUPPORTED_IMAGE_FILE_PATTERN = /\.(png|jpe?g|webp|gif|tiff?|heic|heif)$/i;
 
 let state = null;
 let recipeTimer = null;
@@ -39,6 +40,8 @@ let composingEditableField = null;
 let renderDeferredDuringEditing = false;
 let deferredRenderTimer = null;
 let previewPan = null;
+let imageDragDepth = 0;
+let imageDropOverlay = null;
 let stateContentSignature = null;
 const pendingOutputs = [];
 const pasteState = { image: null };
@@ -639,9 +642,7 @@ document.addEventListener("paste", async (event) => {
   if (!state) return;
   const imageItem = Array.from(event.clipboardData?.items || []).find((item) => item.type.startsWith("image/"));
   const imageFile = imageItem?.getAsFile()
-    || Array.from(event.clipboardData?.files || []).find((file) =>
-      file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|tiff?|heic)$/i.test(file.name),
-    );
+    || Array.from(event.clipboardData?.files || []).find(isSupportedImageFile);
   if (!imageFile) return;
 
   event.preventDefault();
@@ -651,6 +652,45 @@ document.addEventListener("paste", async (event) => {
     showBridgeError(error);
   }
 });
+
+document.addEventListener("dragenter", (event) => {
+  if (!dataTransferHasFiles(event.dataTransfer)) return;
+  event.preventDefault();
+  imageDragDepth += 1;
+  showImageDropOverlay();
+});
+
+document.addEventListener("dragover", (event) => {
+  if (!dataTransferHasFiles(event.dataTransfer)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+});
+
+document.addEventListener("dragleave", (event) => {
+  if (!imageDragDepth) return;
+  event.preventDefault();
+  imageDragDepth = Math.max(0, imageDragDepth - 1);
+  if (!imageDragDepth) hideImageDropOverlay();
+});
+
+document.addEventListener("drop", async (event) => {
+  if (!state || !dataTransferHasFiles(event.dataTransfer)) return;
+  event.preventDefault();
+  const imageFiles = Array.from(event.dataTransfer.files || []).filter(isSupportedImageFile);
+  resetImageDragState();
+  if (!imageFiles.length) {
+    showBridgeError(new Error(t("import.unsupportedImage")));
+    return;
+  }
+
+  try {
+    await importDroppedImageFiles(imageFiles);
+  } catch (error) {
+    showBridgeError(error);
+  }
+});
+
+window.addEventListener("blur", resetImageDragState);
 
 root.addEventListener(
   "wheel",
@@ -1757,9 +1797,61 @@ function readFileAsDataURL(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.addEventListener("load", () => resolve(reader.result));
-    reader.addEventListener("error", () => reject(reader.error || new Error("Clipboard image read failed")));
+    reader.addEventListener("error", () => reject(reader.error || new Error(t("import.imageReadFailed"))));
     reader.readAsDataURL(file);
   });
+}
+
+function isSupportedImageFile(file) {
+  return file?.type?.startsWith("image/") || SUPPORTED_IMAGE_FILE_PATTERN.test(file?.name || "");
+}
+
+function dataTransferHasFiles(dataTransfer) {
+  return Array.from(dataTransfer?.types || []).includes("Files");
+}
+
+async function importDroppedImageFiles(imageFiles) {
+  ui.route = "workspace";
+  ui.previewMode = "single";
+  setInspectorTab("info");
+  for (const imageFile of imageFiles) {
+    await invoke("pasteImage", {
+      dataURL: await readFileAsDataURL(imageFile),
+      name: imageFile.name,
+      describe: false,
+    });
+  }
+}
+
+function showImageDropOverlay() {
+  if (imageDropOverlay) return;
+  const overlay = document.createElement("div");
+  overlay.className = "image-drop-overlay";
+  overlay.setAttribute("role", "status");
+  overlay.innerHTML = `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2.5"></rect>
+      <circle cx="8.5" cy="9" r="1.5"></circle>
+      <path d="m5.5 17 4.5-4.5 3.2 3.1 2.1-2.1 3.2 3.5"></path>
+      <path d="M16.5 3v5M14 5.5h5"></path>
+    </svg>
+    <strong></strong>
+    <span></span>
+  `;
+  overlay.querySelector("strong").textContent = t("import.dropImages");
+  overlay.querySelector("span").textContent = t("import.supportedImageFormats");
+  document.body.append(overlay);
+  imageDropOverlay = overlay;
+}
+
+function hideImageDropOverlay() {
+  imageDropOverlay?.remove();
+  imageDropOverlay = null;
+}
+
+function resetImageDragState() {
+  imageDragDepth = 0;
+  hideImageDropOverlay();
 }
 
 async function handleClipboardImage(dataURL, name) {
