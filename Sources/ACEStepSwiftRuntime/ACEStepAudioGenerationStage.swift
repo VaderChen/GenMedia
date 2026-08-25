@@ -1,7 +1,10 @@
+// ACE-Step 原生管線的音訊生成階段：Turbo sampler 取樣後交給 VAE 解碼並寫出 PCM16。生成音樂的
+// 正式路徑會走到這裡，過去的檔名 GeneratedAudioPoC 看不出這一點。
+
 import MLX
 import Foundation
 
-public struct GeneratedAudioPoCReport {
+public struct ACEStepAudioGenerationReport {
     public let latentShape: [Int]
     public let schedule: [Float]
     public let diffusionSeconds: TimeInterval
@@ -9,7 +12,7 @@ public struct GeneratedAudioPoCReport {
     public let outputURL: URL
 }
 
-public enum GeneratedAudioPoC {
+public enum ACEStepAudioGenerationStage {
     public static func run(
         modelRoot: URL,
         conditionURL: URL,
@@ -18,7 +21,7 @@ public enum GeneratedAudioPoC {
         inferenceSteps: Int,
         shift: Float,
         progress: ((Double) -> Void)? = nil
-    ) throws -> GeneratedAudioPoCReport {
+    ) throws -> ACEStepAudioGenerationReport {
         let configuration = try ACEStepDiTConfiguration.load(
             from: modelRoot.appendingPathComponent("acestep-v15-turbo/config.json")
         )
@@ -41,14 +44,14 @@ public enum GeneratedAudioPoC {
         )
         Memory.clearCache()
         try Task.checkCancellation()
-        let decoded = try VAEDecodePoC.run(
+        let decoded = try ACEStepVAEDecodeStage.run(
             modelRoot: modelRoot,
             outputURL: outputURL,
             latents: sampled.latents,
             progress: { progress?(0.78 + 0.22 * $0) }
         )
         progress?(1)
-        return GeneratedAudioPoCReport(
+        return ACEStepAudioGenerationReport(
             latentShape: sampled.latents.shape,
             schedule: sampled.schedule,
             diffusionSeconds: sampled.elapsedSeconds,

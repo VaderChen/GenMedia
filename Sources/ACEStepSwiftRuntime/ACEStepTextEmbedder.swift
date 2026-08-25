@@ -1,3 +1,5 @@
+// ACE-Step 條件編碼所需的 Qwen 文字嵌入。由條件編碼階段呼叫，屬於正式路徑。
+
 import MLX
 import MLXNN
 import ZImage
@@ -50,7 +52,7 @@ struct QwenEmbeddingConfiguration: Decodable {
     }
 }
 
-enum QwenEmbeddingPoCError: LocalizedError {
+enum ACEStepTextEmbeddingError: LocalizedError {
     case emptyTokens(String)
     case parameterMismatch(missing: [String], unexpected: [String])
     case nonFiniteOutput
@@ -67,7 +69,7 @@ enum QwenEmbeddingPoCError: LocalizedError {
     }
 }
 
-public struct QwenEmbeddingPoCReport {
+public struct ACEStepTextEmbeddingReport {
     public let promptText: String
     public let lyricsText: String
     public let textTokenCount: Int
@@ -92,14 +94,14 @@ struct QwenConditionEmbeddings {
     let textMeanAbsoluteValue: Float
 }
 
-public enum QwenEmbeddingPoC {
+public enum ACEStepTextEmbedder {
     public static func run(
         modelRoot: URL,
         prompt: String,
         lyrics: String,
         language: String,
         outputURL: URL?
-    ) throws -> QwenEmbeddingPoCReport {
+    ) throws -> ACEStepTextEmbeddingReport {
         let embeddings = try encode(
             modelRoot: modelRoot,
             prompt: prompt,
@@ -109,7 +111,7 @@ public enum QwenEmbeddingPoC {
         if let outputURL {
             try save(embeddings, to: outputURL)
         }
-        return QwenEmbeddingPoCReport(
+        return ACEStepTextEmbeddingReport(
             promptText: embeddings.promptText,
             lyricsText: embeddings.lyricsText,
             textTokenCount: embeddings.textTokenCount,
@@ -164,7 +166,7 @@ public enum QwenEmbeddingPoC {
 
         let textValues = textHiddenStates.asType(.float32).asArray(Float.self)
         guard textValues.allSatisfy(\.isFinite) else {
-            throw QwenEmbeddingPoCError.nonFiniteOutput
+            throw ACEStepTextEmbeddingError.nonFiniteOutput
         }
         let meanAbsoluteValue = textValues.reduce(Float(0)) { $0 + abs($1) }
             / Float(max(1, textValues.count))
@@ -214,7 +216,7 @@ public enum QwenEmbeddingPoC {
         let maskValues = batch.attentionMask.asType(.int32).asArray(Int32.self)
         let validLength = maskValues.reduce(0) { $0 + Int($1) }
         guard validLength > 0 else {
-            throw QwenEmbeddingPoCError.emptyTokens(kind)
+            throw ACEStepTextEmbeddingError.emptyTokens(kind)
         }
         return CompactTokenBatch(
             inputIds: batch.inputIds[0..., 0..<validLength],
@@ -233,7 +235,7 @@ public enum QwenEmbeddingPoC {
         let missing = expectedKeys.subtracting(sourceKeys).sorted()
         let unexpected = sourceKeys.subtracting(expectedKeys).sorted()
         guard missing.isEmpty, unexpected.isEmpty else {
-            throw QwenEmbeddingPoCError.parameterMismatch(
+            throw ACEStepTextEmbeddingError.parameterMismatch(
                 missing: missing,
                 unexpected: unexpected
             )

@@ -4,7 +4,6 @@ import ImageIO
 
 public actor Qwen2511ImageToImageService: ImageToImageGenerating {
     private var outputDirectory: URL
-    private var runningProcess: Process?
 
     public init(outputDirectory: URL) {
         self.outputDirectory = outputDirectory
@@ -17,7 +16,7 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
     public func generate(
         request: ImageToImageRequest,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> ImageAsset {
+    ) async throws -> MediaAsset {
         guard request.profile.capability == .imageToImage else {
             throw Qwen2511RuntimeError.incompatibleProfile
         }
@@ -47,6 +46,12 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
             try? FileManager.default.removeItem(at: logURL)
         }
 
+        // Sizing policy lives in OutputGeometry, not in the Worker: the Worker is handed the
+        // canvas to denoise and the size to write, and executes both.
+        let plan = OutputGeometry.imageEditPlan(
+            width: request.recipe.width,
+            height: request.recipe.height
+        )
         let payload = WorkerRequest(
             modelDirectory: request.modelURL.path,
             quantization: Self.workerQuantization(request.quantization),
@@ -54,48 +59,34 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
             outputPath: outputURL.path,
             prompt: request.recipe.prompt,
             negativePrompt: request.recipe.negativePrompt,
-            width: request.recipe.width,
-            height: request.recipe.height,
+            generationWidth: plan.generationWidth,
+            generationHeight: plan.generationHeight,
+            outputWidth: plan.outputWidth,
+            outputHeight: plan.outputHeight,
             steps: request.recipe.steps,
             seed: request.recipe.seed
         )
         try JSONEncoder().encode(payload).write(to: requestURL, options: .atomic)
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        let logHandle = try FileHandle(forWritingTo: logURL)
-        defer { try? logHandle.close() }
-
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = ["--request", requestURL.path]
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = logHandle
-        process.standardError = logHandle
-        runningProcess = process
-        defer { runningProcess = nil }
+        let log = try RuntimeLog(at: logURL)
+        defer { log.close() }
 
         progress(0.01)
-        try process.run()
         var lastProgress = 0.01
-        do {
-            while process.isRunning {
-                try Task.checkCancellation()
-                try await Task.sleep(for: .milliseconds(250))
-                if let value = Self.latestProgress(in: logURL), value > lastProgress {
-                    lastProgress = value
-                    progress(value)
-                }
+        let status = try await RuntimeProcess.run(
+            executable: executable,
+            arguments: ["--request", requestURL.path],
+            log: log
+        ) {
+            if let value = Self.latestProgress(in: log), value > lastProgress {
+                lastProgress = value
+                progress(value)
             }
-        } catch is CancellationError {
-            process.terminate()
-            process.waitUntilExit()
-            throw CancellationError()
         }
-        process.waitUntilExit()
 
-        guard process.terminationStatus == 0 else {
+        guard status == 0 else {
             throw Qwen2511RuntimeError.workerFailed(
-                status: process.terminationStatus,
-                message: Self.logMessage(in: logURL)
+                status: status,
+                message: Self.logMessage(in: log)
             )
         }
         guard FileManager.default.fileExists(atPath: outputURL.path),
@@ -103,7 +94,7 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
             throw Qwen2511RuntimeError.outputMissing(outputURL)
         }
         progress(1)
-        return ImageAsset(
+        return MediaAsset(
             projectID: request.projectID,
             parentAssetID: request.sourceAsset.id,
             kind: .edited,
@@ -122,8 +113,10 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
         var outputPath: String
         var prompt: String
         var negativePrompt: String
-        var width: Int
-        var height: Int
+        var generationWidth: Int
+        var generationHeight: Int
+        var outputWidth: Int
+        var outputHeight: Int
         var steps: Int
         var seed: UInt64
     }
@@ -147,7 +140,6 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
     }
 
     private nonisolated static func workerExecutable() throws -> URL {
-        let fileManager = FileManager.default
         let name = "GenImageQwen2511Worker"
         var candidates: [URL] = []
         if let configured = ProcessInfo.processInfo.environment["GENIMAGE_QWEN_WORKER"],
@@ -183,19 +175,18 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
                 .appendingPathComponent(name)
         )
         candidates.append(
-            URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
                 .appendingPathComponent("RuntimeSupport/Qwen2511Worker/.build/release/\(name)")
         )
-        guard let executable = candidates.first(where: {
-            fileManager.isExecutableFile(atPath: $0.path)
-        }) else {
+        guard let executable = RuntimeExecutable.locate(candidates) else {
             throw Qwen2511RuntimeError.workerNotFound(candidates.map(\.path))
         }
         return executable
     }
 
-    private nonisolated static func latestProgress(in logURL: URL) -> Double? {
-        guard let data = try? Data(contentsOf: logURL), !data.isEmpty else { return nil }
+    // Worker 的 log 是一行一個 JSON 事件，所以進度與錯誤訊息都從事件取，取不到才退回純文字。
+    private nonisolated static func latestProgress(in log: RuntimeLog) -> Double? {
+        guard let data = log.data() else { return nil }
         return data.split(separator: 0x0A).compactMap { line -> Double? in
             guard let event = try? JSONDecoder().decode(WorkerEvent.self, from: Data(line)),
                   event.type == "progress" else { return nil }
@@ -203,18 +194,15 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
         }.max()
     }
 
-    private nonisolated static func logMessage(in logURL: URL) -> String {
-        guard let data = try? Data(contentsOf: logURL), !data.isEmpty else {
-            return "Worker 未提供錯誤訊息。"
-        }
+    private nonisolated static func logMessage(in log: RuntimeLog) -> String {
+        guard let data = log.data() else { return "Worker 未提供錯誤訊息。" }
         let events = data.split(separator: 0x0A).compactMap {
             try? JSONDecoder().decode(WorkerEvent.self, from: Data($0))
         }
         if let message = events.last(where: { $0.type == "error" })?.message {
             return message
         }
-        let suffix = data.suffix(4_096)
-        return String(data: suffix, encoding: .utf8) ?? "Worker 執行失敗。"
+        return log.message(maximumBytes: 4_096, fallback: "Worker 執行失敗。")
     }
 
     private nonisolated static func imageDimensions(at url: URL) -> (width: Int, height: Int)? {

@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import GenImageCore
 
@@ -16,8 +15,6 @@ enum AudioOutputEncoder {
     ) async throws -> AudioOutputMetadata {
         let metadata = try waveMetadata(at: inputURL)
         let ffmpegExecutable = try ffmpegExecutable()
-        let process = Process()
-        process.executableURL = ffmpegExecutable
         var arguments = [
             "-y",
             "-nostdin",
@@ -37,42 +34,31 @@ enum AudioOutputEncoder {
             arguments.append(contentsOf: ["-c:a", "flac", "-compression_level", "8"])
         }
         arguments.append(outputURL.path)
-        process.arguments = arguments
-        process.environment = runtimeEnvironment()
-        process.standardInput = FileHandle.nullDevice
 
         let logURL = outputURL.appendingPathExtension("log")
         defer { try? FileManager.default.removeItem(at: logURL) }
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        let logHandle = try FileHandle(forWritingTo: logURL)
-        defer { try? logHandle.close() }
-        process.standardOutput = logHandle
-        process.standardError = logHandle
+        let log = try RuntimeLog(at: logURL)
+        defer { log.close() }
 
-        do {
-            try process.run()
-            let startedAt = Date()
-            while process.isRunning {
-                try Task.checkCancellation()
-                try await Task.sleep(for: .milliseconds(100))
-                if Date().timeIntervalSince(startedAt) >= 5 * 60 {
-                    forceTerminate(process)
-                    throw AudioOutputEncodingError.transcodeTimedOut
-                }
+        let startedAt = Date()
+        let status = try await RuntimeProcess.run(
+            executable: ffmpegExecutable,
+            arguments: arguments,
+            environment: RuntimeExecutable.environment(),
+            log: log,
+            pollInterval: .milliseconds(100)
+        ) {
+            if Date().timeIntervalSince(startedAt) >= 5 * 60 {
+                throw AudioOutputEncodingError.transcodeTimedOut
             }
-        } catch {
-            forceTerminate(process)
-            throw error
         }
-        process.waitUntilExit()
-        try? logHandle.synchronize()
-        guard process.terminationStatus == 0 else {
+        guard status == 0 else {
             throw AudioOutputEncodingError.transcodeFailed(
-                status: process.terminationStatus,
-                message: logMessage(in: logURL)
+                status: status,
+                message: log.message(fallback: "轉檔未提供錯誤訊息。")
             )
         }
-        guard fileSize(at: outputURL) > 0 else {
+        guard RuntimeLog.fileSize(at: outputURL) > 0 else {
             throw AudioOutputEncodingError.encodedOutputMissing(outputURL)
         }
         return metadata
@@ -117,45 +103,7 @@ enum AudioOutputEncoder {
         )
     }
 
-    static func runtimeEnvironment() -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        let commonPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
-        let currentPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
-        environment["PATH"] = (currentPaths + commonPaths)
-            .reduce(into: [String]()) { paths, path in
-                if !paths.contains(path) { paths.append(path) }
-            }
-            .joined(separator: ":")
-        environment["PYTHONUNBUFFERED"] = "1"
-        return environment
-    }
-
-    static func forceTerminate(_ process: Process) {
-        guard process.isRunning else { return }
-        process.terminate()
-        if process.isRunning {
-            Darwin.kill(process.processIdentifier, SIGKILL)
-        }
-        process.waitUntilExit()
-    }
-
-    static func fileSize(at url: URL) -> Int64 {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attributes[.size] as? NSNumber else { return 0 }
-        return size.int64Value
-    }
-
-    static func logMessage(in logURL: URL) -> String {
-        guard let data = try? Data(contentsOf: logURL), !data.isEmpty else {
-            return "Runtime 未提供錯誤訊息。"
-        }
-        return String(data: data.suffix(8_192), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? "Runtime 執行失敗。"
-    }
-
     private static func ffmpegExecutable() throws -> URL {
-        let fileManager = FileManager.default
         let environment = ProcessInfo.processInfo.environment
         var candidates: [URL] = []
         for key in ["GENMEDIA_FFMPEG", "GENIMAGE_FFMPEG"] {
@@ -166,15 +114,10 @@ enum AudioOutputEncoder {
         candidates.append(URL(fileURLWithPath: "/opt/homebrew/bin/ffmpeg"))
         candidates.append(URL(fileURLWithPath: "/usr/local/bin/ffmpeg"))
         candidates.append(URL(fileURLWithPath: "/usr/bin/ffmpeg"))
-        for directory in (environment["PATH"] ?? "").split(separator: ":") {
-            candidates.append(
-                URL(fileURLWithPath: String(directory), isDirectory: true)
-                    .appendingPathComponent("ffmpeg")
-            )
-        }
-        guard let executable = candidates.first(where: {
-            fileManager.isExecutableFile(atPath: $0.path)
-        }) else {
+        candidates.append(
+            contentsOf: RuntimeExecutable.pathCandidates(for: "ffmpeg", environment: environment)
+        )
+        guard let executable = RuntimeExecutable.locate(candidates) else {
             throw AudioOutputEncodingError.ffmpegNotFound(candidates.map(\.path))
         }
         return executable

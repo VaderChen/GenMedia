@@ -4,13 +4,13 @@ public struct TextToImageRequest: Sendable, Hashable {
     public var projectID: UUID
     public var recipe: GenerationRecipe
     public var profile: InferenceProfile
-    public var sourceAsset: ImageAsset?
+    public var sourceAsset: MediaAsset?
 
     public init(
         projectID: UUID,
         recipe: GenerationRecipe,
         profile: InferenceProfile,
-        sourceAsset: ImageAsset? = nil
+        sourceAsset: MediaAsset? = nil
     ) {
         self.projectID = projectID
         self.recipe = recipe
@@ -20,12 +20,12 @@ public struct TextToImageRequest: Sendable, Hashable {
 }
 
 public struct ImageDescriptionRequest: Sendable, Hashable {
-    public var asset: ImageAsset
+    public var asset: MediaAsset
     public var profile: InferenceProfile
     public var languageCode: String
 
     public init(
-        asset: ImageAsset,
+        asset: MediaAsset,
         profile: InferenceProfile,
         languageCode: String = "zh-Hant"
     ) {
@@ -37,7 +37,7 @@ public struct ImageDescriptionRequest: Sendable, Hashable {
 
 public struct ImageToImageRequest: Sendable, Hashable {
     public var projectID: UUID
-    public var sourceAsset: ImageAsset
+    public var sourceAsset: MediaAsset
     public var recipe: GenerationRecipe
     public var profile: InferenceProfile
     public var modelURL: URL
@@ -45,7 +45,7 @@ public struct ImageToImageRequest: Sendable, Hashable {
 
     public init(
         projectID: UUID,
-        sourceAsset: ImageAsset,
+        sourceAsset: MediaAsset,
         recipe: GenerationRecipe,
         profile: InferenceProfile,
         modelURL: URL,
@@ -61,11 +61,11 @@ public struct ImageToImageRequest: Sendable, Hashable {
 }
 
 public struct UpscaleRequest: Sendable, Hashable {
-    public var asset: ImageAsset
+    public var asset: MediaAsset
     public var profile: InferenceProfile
     public var scale: Int
 
-    public init(asset: ImageAsset, profile: InferenceProfile, scale: Int = 4) {
+    public init(asset: MediaAsset, profile: InferenceProfile, scale: Int = 4) {
         self.asset = asset
         self.profile = profile
         self.scale = scale
@@ -106,10 +106,14 @@ public struct VideoGenerationOptions: Sendable, Hashable {
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw VideoGenerationValidationError.emptyPrompt
         }
-        guard (64...4096).contains(width), (64...4096).contains(height) else {
+        guard OutputGeometry.supportedRange.contains(width),
+              OutputGeometry.supportedRange.contains(height)
+        else {
             throw VideoGenerationValidationError.invalidDimensions
         }
-        guard width.isMultiple(of: 16), height.isMultiple(of: 16) else {
+        guard width.isMultiple(of: OutputGeometry.alignment),
+              height.isMultiple(of: OutputGeometry.alignment)
+        else {
             throw VideoGenerationValidationError.dimensionsMustBeMultiplesOf16
         }
         guard (1...100).contains(steps) else {
@@ -227,8 +231,8 @@ public struct MusicGenerationRequest: Sendable, Hashable {
 public struct VideoGenerationRequest: Sendable, Hashable {
     public var projectID: UUID
     public var recipeID: UUID
-    public var sourceAssets: [ImageAsset]
-    public var sourceAsset: ImageAsset? { sourceAssets.first }
+    public var sourceAssets: [MediaAsset]
+    public var sourceAsset: MediaAsset? { sourceAssets.first }
     public var options: VideoGenerationOptions
     public var profile: InferenceProfile
     public var modelURL: URL
@@ -237,8 +241,8 @@ public struct VideoGenerationRequest: Sendable, Hashable {
     public init(
         projectID: UUID,
         recipeID: UUID,
-        sourceAsset: ImageAsset?,
-        sourceAssets: [ImageAsset]? = nil,
+        sourceAsset: MediaAsset?,
+        sourceAssets: [MediaAsset]? = nil,
         options: VideoGenerationOptions,
         profile: InferenceProfile,
         modelURL: URL,
@@ -274,7 +278,7 @@ public protocol TextToImageGenerating: Sendable {
     func generate(
         request: TextToImageRequest,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> [ImageAsset]
+    ) async throws -> [MediaAsset]
 }
 
 public protocol ImageDescribing: Sendable {
@@ -288,28 +292,28 @@ public protocol ImageToImageGenerating: Sendable {
     func generate(
         request: ImageToImageRequest,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> ImageAsset
+    ) async throws -> MediaAsset
 }
 
 public protocol ImageUpscaling: Sendable {
     func upscale(
         request: UpscaleRequest,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> ImageAsset
+    ) async throws -> MediaAsset
 }
 
 public protocol VideoGenerating: Sendable {
     func generate(
         request: VideoGenerationRequest,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> [ImageAsset]
+    ) async throws -> [MediaAsset]
 }
 
 public protocol MusicGenerating: Sendable {
     func generate(
         request: MusicGenerationRequest,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> ImageAsset
+    ) async throws -> MediaAsset
 }
 
 public struct InferenceServices: Sendable {

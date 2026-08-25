@@ -70,10 +70,12 @@ Token 只會透過 HTTPS `Authorization: Bearer` 標頭傳給 Civitai，不會�
 
 - Profile 依「使用中、可用、下載中、不可用」排序；模型與 LoRA 相依項目完整時使用淡綠色外框，下載完成後會立即重新排序。
 - 工作取消會先進入 `cancelling`，Runtime Task 結束後自動轉成 `cancelled` 並解除所有生成與記憶體按鈕。ETA 在進度 35% 且執行滿 15 秒後顯示數字，樣本不足時會使用整體耗時備援估算。
-- Z-Image MLX 量化相容層支援 `quantize_config.json`、affine／mxfp4、packed pad token 與 FP16→BF16 載入修正；`build.command` 會在解析 Swift Package 後自動套用 `Patches/` 內的 Runtime 修正。andrevp Z-Image Turbo MLX 4-bit 已完成實際生成驗證。
+- Z-Image MLX 量化相容層支援 `quantize_config.json`、affine／mxfp4、packed pad token 與 FP16→BF16 載入修正。andrevp Z-Image Turbo MLX 4-bit 已完成實際生成驗證。
+- 相依套件的原始碼修正列於 `Patches/manifest.txt`，由 `scripts/apply-runtime-patches.command` 在 Swift Package resolve 後套用；`build.command` 會自動呼叫。相依套件版本與 manifest 記載不符、修正檔遺失、套用失敗或套用後找不到預期標記，都會中止建置而不會以未修正的原始碼繼續。執行 `scripts/apply-runtime-patches.command --verify` 可只做檢查。
 - 文生圖完成後保留模型權重與暖機 buffer；5 分鐘後只清理可重用的 MLX 暫存 buffer，不卸載模型。按下側欄「釋放記憶體」、切換模型，或切換 Profile 時 RAM 超過 90%，才會卸載不再需要的 Runtime。
 - 下載保留來源原始檔名；生成輸出使用 `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm` 或 `Music-YYYYMMDD-HHmm`，同分鐘重複時自動加上流水號，並可在設定頁更改輸出目錄。
 - 每個開啟的工作區分頁視為一個生成專案；資產與 lineage 會原子寫入 Application Support，App 關閉後仍可恢復。只有明確關閉分頁時才移除該專案的工作區索引，已輸出的媒體檔仍保留於磁碟。
+- App 的資料一律位於 `~/Library/Application Support/GenImage/`（`Models`、`Runtime`、`Workspace`、`Pasted`、`Generated`），由 `GenImageCore/ApplicationSupport.swift` 統一定義。工作區索引曾寫在 `GenMedia/`，啟動時會自動接回目前的根目錄；同名項目一律保留現有的，不覆蓋也不合併。目錄名稱維持 `GenImage` 而非改為與 App 一致的 `GenMedia`，因為 `Runtime/` 底下的 Python venv 把絕對路徑寫死在啟動 script 內，改名會讓已安裝的 LTX 與 MiniMax Runtime 失效。
 - Prompt 與歌詞編輯期間會保留游標、選取範圍及輸入法組字狀態；生成類型、Prompt、歌詞與輸出設定 TAB 只局部更新創作面板。必要的完整畫面更新會沿用播放中的音訊或影片節點，避免中斷播放。
 - 工作區底片列提供圖片匯入按鈕，並支援從 Finder 拖放一張或多張 PNG、JPEG、WebP、GIF、TIFF、HEIC 與 HEIF 圖片；音樂生成模式會停用圖片匯入，避免混用媒體來源。圖片生成時若已選取來源圖片，主按鈕會自動使用圖生圖 Profile，未選取時則使用文生圖 Profile。
 - 圖片與影片比例選項改為下拉選單；圖生圖選取來源圖片後才會顯示「原解析度」，並依來源尺寸換算為符合 Runtime 的 16 倍數寬高。
@@ -124,13 +126,17 @@ MCP 支援 `initialize`、`ping`、`tools/list`、`tools/call`，工具包含本
 
 ## 專案結構
 
+本次內部整理只調整程式分層與責任邊界，不改變既有生成能力、使用流程或 Web Bridge 協定。
+
 ```text
 Sources/
 ├── GenImageCore/
+│   ├── ApplicationSupport.swift  # Application Support 資料位置的唯一定義
 │   ├── DomainModels.swift        # 資產、配方、工作、模型與 Profile
 │   ├── InferenceServices.swift   # 圖片、文字、影片與音樂推論服務介面
 │   ├── ModelCatalog.swift        # 內建模型及 Profile
 │   ├── OutputFileNaming.swift    # 圖片、影片與音樂輸出命名
+│   ├── OutputGeometry.swift      # 輸出尺寸運算的唯一定義（WebUI 端由 js/geometry.js 鏡像）
 │   ├── ProjectWorkspacePersistence.swift # 開啟中生成專案持久化
 │   └── WorkflowGraph.swift       # 資產來源與分支關係
 ├── GenImageRuntime/
@@ -141,15 +147,19 @@ Sources/
 │   ├── MusicGenerationRouter.swift
 │   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── SubprocessRuntime.swift   # 外部 Runtime 子行程的共用執行流程
 │   ├── AudioOutputEncoder.swift
 │   └── CoreMLUpscaleService.swift
 └── GenImageApp/
-    ├── AppStore.swift            # 應用程式狀態與工作協調
+    ├── AppStore.swift            # 型別宣告、儲存屬性與 init
+    ├── AppStore+*.swift          # 依職責拆分的行為（Persistence、Profiles、Jobs 等 10 個檔案）
     ├── HybridBridgeController.swift
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # 安全提供本機圖片、影片與音訊給 Web UI
     └── Resources/WebUI/          # HTML/CSS/JavaScript 前端
-Patches/                           # 建置時套用的 Z-Image MLX 相容性修正
+Patches/                           # 建置時套用的相依套件原始碼修正與 manifest.txt
+scripts/
+└── apply-runtime-patches.command  # 依 manifest 套用與驗證相依套件修正
 ```
 
 ## 目前狀態

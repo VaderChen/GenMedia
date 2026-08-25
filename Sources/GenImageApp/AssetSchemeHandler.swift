@@ -7,7 +7,7 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
     private let lock = NSLock()
     private var assetURLs: [String: URL] = [:]
 
-    func updateAssets(_ assets: [GenImageCore.ImageAsset]) {
+    func updateAssets(_ assets: [GenImageCore.MediaAsset]) {
         lock.lock()
         assetURLs = Dictionary(
             uniqueKeysWithValues: assets.compactMap { asset in

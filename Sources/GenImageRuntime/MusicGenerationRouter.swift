@@ -15,7 +15,7 @@ public final class MusicGenerationRouter: MusicGenerating, Sendable {
     public func generate(
         request: MusicGenerationRequest,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> ImageAsset {
+    ) async throws -> MediaAsset {
         guard let adapter = adapters.first(where: { $0.supports(request) }) else {
             throw MusicGenerationRouterError.unsupportedRequest(
                 modelID: request.profile.modelID,

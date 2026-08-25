@@ -1,7 +1,13 @@
+// ACE-Step 原生管線的條件編碼階段：Prompt／歌詞 → Qwen 文字嵌入 → ACE-Step condition encoder。
+//
+// 這個檔案原本叫 ConditioningPoC —— 名字說是實驗，實際上音樂生成的正式路徑就是走這裡
+// （ACEStepMusicGenerationService → ACEStepNativeGenerator → 這裡）。名字不改，任何一次清理
+// 都可能把它當成實驗殘留刪掉。
+
 import MLX
 import Foundation
 
-enum ConditioningPoCError: LocalizedError {
+enum ACEStepConditioningError: LocalizedError {
     case nonFiniteOutput(String)
 
     var errorDescription: String? {
@@ -12,7 +18,7 @@ enum ConditioningPoCError: LocalizedError {
     }
 }
 
-public struct ConditioningPoCReport {
+public struct ACEStepConditioningReport {
     public let textTokenCount: Int
     public let lyricTokenCount: Int
     public let sourceSilenceShape: [Int]
@@ -25,7 +31,7 @@ public struct ConditioningPoCReport {
     public let outputURL: URL
 }
 
-public enum ConditioningPoC {
+public enum ACEStepConditioningStage {
     public static func run(
         modelRoot: URL,
         prompt: String,
@@ -34,18 +40,18 @@ public enum ConditioningPoC {
         conditionFrames: Int,
         embeddingOutputURL: URL?,
         outputURL: URL
-    ) throws -> ConditioningPoCReport {
+    ) throws -> ACEStepConditioningReport {
         let configuration = try ACEStepDiTConfiguration.load(
             from: modelRoot.appendingPathComponent("acestep-v15-turbo/config.json")
         )
-        let embeddings = try QwenEmbeddingPoC.encode(
+        let embeddings = try ACEStepTextEmbedder.encode(
             modelRoot: modelRoot,
             prompt: prompt,
             lyrics: lyrics,
             language: language
         )
         if let embeddingOutputURL {
-            try QwenEmbeddingPoC.save(embeddings, to: embeddingOutputURL)
+            try ACEStepTextEmbedder.save(embeddings, to: embeddingOutputURL)
         }
 
         let requiredSilenceFrames = max(configuration.timbreFixFrame, conditionFrames)
@@ -79,11 +85,11 @@ public enum ConditioningPoC {
 
         let encoderValues = encoded.hiddenStates.asType(.float32).asArray(Float.self)
         guard encoderValues.allSatisfy(\.isFinite) else {
-            throw ConditioningPoCError.nonFiniteOutput("encoder_hidden_states")
+            throw ACEStepConditioningError.nonFiniteOutput("encoder_hidden_states")
         }
         let contextValues = contextLatents.asType(.float32).asArray(Float.self)
         guard contextValues.allSatisfy(\.isFinite) else {
-            throw ConditioningPoCError.nonFiniteOutput("context_latents")
+            throw ACEStepConditioningError.nonFiniteOutput("context_latents")
         }
         let meanAbsoluteValue = encoderValues.reduce(Float(0)) { $0 + abs($1) }
             / Float(max(1, encoderValues.count))
@@ -101,7 +107,7 @@ public enum ConditioningPoC {
             ],
             url: outputURL
         )
-        return ConditioningPoCReport(
+        return ACEStepConditioningReport(
             textTokenCount: embeddings.textTokenCount,
             lyricTokenCount: embeddings.lyricTokenCount,
             sourceSilenceShape: silence.sourceShape,

@@ -1,14 +1,16 @@
+// ACE-Step 原生管線的 VAE 解碼階段：latent → 波形。由音訊生成階段呼叫，屬於正式路徑。
+
 import MLX
 import Foundation
 
-public struct VAEDecodePoCReport {
+public struct ACEStepVAEDecodeReport {
     public let outputURL: URL
     public let latentShape: [Int]
     public let audioShape: [Int]
     public let wave: PCM16WaveReport
 }
 
-enum VAEDecodePoCError: LocalizedError {
+enum ACEStepVAEDecodeError: LocalizedError {
     case invalidOutputShape(expectedSamples: Int, actualShape: [Int])
     case invalidTiledSampleCount(expected: Int, actual: Int)
 
@@ -22,12 +24,12 @@ enum VAEDecodePoCError: LocalizedError {
     }
 }
 
-public enum VAEDecodePoC {
+public enum ACEStepVAEDecodeStage {
     public static func run(
         modelRoot: URL,
         outputURL: URL,
         latentFrames: Int
-    ) throws -> VAEDecodePoCReport {
+    ) throws -> ACEStepVAEDecodeReport {
         let configuration = try loadConfiguration(modelRoot: modelRoot)
         let latentValueCount = latentFrames * configuration.decoderInputChannels
         let latentValues = (0..<latentValueCount).map { index in
@@ -43,14 +45,14 @@ public enum VAEDecodePoC {
         outputURL: URL,
         latents: MLXArray,
         progress: ((Double) -> Void)? = nil
-    ) throws -> VAEDecodePoCReport {
+    ) throws -> ACEStepVAEDecodeReport {
         let vaeRoot = modelRoot.appendingPathComponent("vae", isDirectory: true)
         let configuration = try loadConfiguration(modelRoot: modelRoot)
         guard latents.ndim == 3,
               latents.dim(0) == 1,
               latents.dim(1) > 0,
               latents.dim(2) == configuration.decoderInputChannels else {
-            throw VAEDecodePoCError.invalidOutputShape(
+            throw ACEStepVAEDecodeError.invalidOutputShape(
                 expectedSamples: latents.ndim > 1 ? latents.dim(1) * configuration.hopLength : 0,
                 actualShape: latents.shape
             )
@@ -75,7 +77,7 @@ public enum VAEDecodePoC {
 
         let expectedSamples = latents.dim(1) * configuration.hopLength
         guard audio.shape == [1, expectedSamples, configuration.audioChannels] else {
-            throw VAEDecodePoCError.invalidOutputShape(
+            throw ACEStepVAEDecodeError.invalidOutputShape(
                 expectedSamples: expectedSamples,
                 actualShape: audio.shape
             )
@@ -86,7 +88,7 @@ public enum VAEDecodePoC {
             sampleRate: configuration.samplingRate,
             to: outputURL
         )
-        return VAEDecodePoCReport(
+        return ACEStepVAEDecodeReport(
             outputURL: outputURL,
             latentShape: latents.shape,
             audioShape: audio.shape,
@@ -100,7 +102,7 @@ public enum VAEDecodePoC {
         latents: MLXArray,
         outputURL: URL,
         progress: ((Double) -> Void)?
-    ) throws -> VAEDecodePoCReport {
+    ) throws -> ACEStepVAEDecodeReport {
         let chunkSize = 512
         let overlap = 64
         let strideLength = chunkSize - 2 * overlap
@@ -135,12 +137,12 @@ public enum VAEDecodePoC {
         let wave = try writer.finish()
         let expectedSamples = latentFrames * configuration.hopLength
         guard wave.sampleCount == expectedSamples else {
-            throw VAEDecodePoCError.invalidTiledSampleCount(
+            throw ACEStepVAEDecodeError.invalidTiledSampleCount(
                 expected: expectedSamples,
                 actual: wave.sampleCount
             )
         }
-        return VAEDecodePoCReport(
+        return ACEStepVAEDecodeReport(
             outputURL: outputURL,
             latentShape: latents.shape,
             audioShape: [1, expectedSamples, configuration.audioChannels],

@@ -48,6 +48,18 @@ The Web UI can access local capabilities only through the bridge. It cannot dire
 - Generation type and Prompt, Lyrics, and output-setting tabs use an independent creation-panel renderer and do not replace the preview, players, Inspector, or sidebar DOM.
 - When global state genuinely requires a full render, playing `<audio>`, `<video>`, and audio-visualizer nodes are detached and reattached at the matching asset position, preserving playback progress and the Web Audio connection.
 
+## Internal Structure Refactor
+
+This refactor changes code boundaries and ownership only; existing generation capabilities, user flows, and the Web Bridge protocol remain unchanged:
+
+- `ApplicationSupport` is the single definition for the Application Support paths of `Models`, `Runtime`, `Workspace`, `Pasted`, and `Generated`, and adopts legacy workspace data from `GenMedia` at launch.
+- `OutputGeometry` owns dimension limits, 16-pixel alignment, aspect-ratio conversion, and image-to-image generation plans. Web UI `js/geometry.js` mirrors it so Native, MCP, and UI calculations stay consistent.
+- `AppStore` now keeps only type declarations, stored properties, and initialization. Persistence, Paths, Selection, Profiles, OutputSettings, Assets, ImageGeneration, MediaGeneration, Jobs, and ModelInstallation are split into `AppStore+*.swift` extensions by responsibility.
+- The Web UI separates sidebar and routing, workspace tabs, geometry, and full-render preservation into `chrome.js`, `workspace-tabs.js`, `geometry.js`, and `render-preservation.js`; `app.js` retains bridge and application coordination.
+- `SubprocessRuntime` centralizes executable lookup, environment setup, logs, progress, stall detection, cancellation, and termination semantics for external workers, video and music CLIs, and FFmpeg.
+- Dependency source patches are described by `Patches/manifest.txt` and applied and verified by `scripts/apply-runtime-patches.command`. A pin mismatch or failed patch stops the build instead of silently continuing with unpatched sources.
+- Production ACE-Step stages no longer use PoC names. The diagnostic-only DiT probe is kept separate from the production generation stages so experimental code is not confused with the application path.
+
 ## Profiles
 
 `InferenceProfile` contains:
@@ -65,7 +77,7 @@ Built-in profiles are not modified directly. Users duplicate a profile before sa
 
 ## Assets and Workflows
 
-`ImageAsset.parentAssetID` identifies the source asset. Assets without a parent are root nodes of independent jobs:
+`MediaAsset.parentAssetID` identifies the source media. Assets without a parent are root nodes of independent jobs:
 
 - Standalone text-to-image: the generated image has no parent.
 - Standalone image-to-text: a root image is imported first, and the description output is written to the recipe.
@@ -77,7 +89,7 @@ Built-in profiles are not modified directly. Users duplicate a profile before sa
 
 `WorkflowGraph` provides lineage and children queries, so the UI does not need to infer asset relationships.
 
-Open workspace tabs define generation-project lifetimes. Swift atomically stores `Project`, `ImageAsset`, `WorkflowOperation`, and selection state as a JSON snapshot under Application Support; ordinary app termination does not clear it. The Web UI keeps tab metadata in WebKit localStorage. Closing a tab notifies the native layer through the bridge to remove that tab's asset and lineage indexes without deleting exported media files.
+Open workspace tabs define generation-project lifetimes. Swift atomically stores `Project`, `MediaAsset`, `WorkflowOperation`, and selection state as a JSON snapshot under Application Support; ordinary app termination does not clear it. The Web UI keeps tab metadata in WebKit localStorage. Closing a tab notifies the native layer through the bridge to remove that tab's asset and lineage indexes without deleting exported media files.
 
 ## Inference Runtimes
 

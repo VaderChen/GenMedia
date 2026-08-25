@@ -2,6 +2,8 @@
 
 `ACEStepSwiftPoC` 用來驗證 ACE-Step 1.5 Turbo 在 macOS 上的完整 Swift／MLX 推論鏈。驗證完成後，核心程式已抽離為 `ACEStepSwiftRuntime`，並由 GenMedia 正式音樂生成服務直接使用。
 
+`ACEStepSwiftRuntime` 內的階段型別原本沿用 PoC 時期的名稱（`ConditioningPoC`、`GeneratedAudioPoC`、`VAEDecodePoC`、`QwenEmbeddingPoC`），但它們是正式生成路徑的一部分，已改名為 `ACEStepConditioningStage`、`ACEStepAudioGenerationStage`、`ACEStepVAEDecodeStage` 與 `ACEStepTextEmbedder`。只有 `ACEStepDiTForwardProbe`（原 `DiTForwardPoC`）僅供本執行檔診斷使用。
+
 ## 已驗證範圍
 
 - 解析 ACE-Step、Qwen3 Embedding 與 Oobleck VAE 設定。

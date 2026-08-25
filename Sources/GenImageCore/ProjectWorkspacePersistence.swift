@@ -6,7 +6,7 @@ public struct ProjectWorkspaceSnapshot: Codable, Sendable {
     public var schemaVersion: Int
     public var projects: [Project]
     public var selectedProjectID: UUID
-    public var assets: [ImageAsset]
+    public var assets: [MediaAsset]
     public var operations: [WorkflowOperation]
     public var selectedAssetID: UUID?
     public var comparisonAssetID: UUID?
@@ -15,7 +15,7 @@ public struct ProjectWorkspaceSnapshot: Codable, Sendable {
         schemaVersion: Int = currentSchemaVersion,
         projects: [Project],
         selectedProjectID: UUID,
-        assets: [ImageAsset],
+        assets: [MediaAsset],
         operations: [WorkflowOperation],
         selectedAssetID: UUID?,
         comparisonAssetID: UUID?
@@ -44,13 +44,7 @@ public enum ProjectWorkspacePersistence {
                 ).standardizedFileURL
             }
         }
-        let applicationSupport = fileManager.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? fileManager.temporaryDirectory
-        return applicationSupport
-            .appendingPathComponent("GenMedia", isDirectory: true)
-            .appendingPathComponent("Workspace", isDirectory: true)
+        return ApplicationSupport.directory(.workspace, fileManager: fileManager)
             .appendingPathComponent("open-projects.json", isDirectory: false)
             .standardizedFileURL
     }

@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import GenImageCore
 
@@ -24,7 +23,7 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
     public func generate(
         request: VideoGenerationRequest,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> [ImageAsset] {
+    ) async throws -> [MediaAsset] {
         progress(0.01)
         try request.options.validate()
         guard request.profile.capability == .textToVideo
@@ -111,7 +110,7 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
             }
         }
 
-        var outputs: [ImageAsset] = []
+        var outputs: [MediaAsset] = []
         var generatedOutputURLs: [URL] = []
         var completed = false
         defer {
@@ -129,65 +128,42 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
             let logURL = outputDirectory.appendingPathComponent("ltx-video-\(identifier).log")
             defer { try? FileManager.default.removeItem(at: logURL) }
 
-            FileManager.default.createFile(atPath: logURL.path, contents: nil)
-            let logHandle = try FileHandle(forWritingTo: logURL)
-            defer { try? logHandle.close() }
+            let log = try RuntimeLog(at: logURL)
+            defer { log.close() }
 
-            let process = Process()
-            process.executableURL = executable
-            process.arguments = Self.arguments(
-                request: request,
-                outputURL: outputURL,
-                seed: request.options.seed &+ UInt64(index),
-                controlVideoURL: controlVideoURL
-            )
-            process.environment = Self.runtimeEnvironment()
-            process.standardInput = FileHandle.nullDevice
-            process.standardOutput = logHandle
-            process.standardError = logHandle
             let generationSpan = 1 - controlPreparationSpan
             let perOutputSpan = generationSpan / Double(request.options.outputCount)
             let completedFraction = controlPreparationSpan + Double(index) * perOutputSpan
             progress(completedFraction + 0.01 * perOutputSpan)
-            try process.run()
-            var observedLogSize = Self.fileSize(at: logURL)
-            var lastLogActivity = Date()
-            do {
-                while process.isRunning {
-                    try Task.checkCancellation()
-                    try await Task.sleep(for: .milliseconds(300))
-                    let currentLogSize = Self.fileSize(at: logURL)
-                    if currentLogSize != observedLogSize {
-                        observedLogSize = currentLogSize
-                        lastLogActivity = Date()
-                    } else if Date().timeIntervalSince(lastLogActivity) >= 30 * 60 {
-                        Self.forceTerminate(process)
-                        throw LTXVideoRuntimeError.runtimeStalled(
-                            details: Self.lastLogLine(in: logURL)
-                        )
-                    }
-                    let runtimeProgress = min(
-                        Self.runtimeProgress(
-                            in: logURL,
-                            stage1Steps: request.options.steps
-                        ) ?? 0.01,
-                        0.99
-                    )
-                    progress(
-                        completedFraction
-                            + runtimeProgress * perOutputSpan
+            var activity = RuntimeLogActivity(log: log)
+            let status = try await RuntimeProcess.run(
+                executable: executable,
+                arguments: Self.arguments(
+                    request: request,
+                    outputURL: outputURL,
+                    seed: request.options.seed &+ UInt64(index),
+                    controlVideoURL: controlVideoURL
+                ),
+                environment: RuntimeExecutable.environment(),
+                log: log,
+                pollInterval: .milliseconds(300)
+            ) {
+                if !activity.sample(log), activity.idleDuration >= 30 * 60 {
+                    throw LTXVideoRuntimeError.runtimeStalled(
+                        details: log.lastLine(fallback: "Runtime 未提供最後狀態。")
                     )
                 }
-            } catch is CancellationError {
-                Self.forceTerminate(process)
-                throw CancellationError()
+                let runtimeProgress = min(
+                    Self.runtimeProgress(in: log, stage1Steps: request.options.steps) ?? 0.01,
+                    0.99
+                )
+                progress(completedFraction + runtimeProgress * perOutputSpan)
             }
-            process.waitUntilExit()
 
-            guard process.terminationStatus == 0 else {
+            guard status == 0 else {
                 throw LTXVideoRuntimeError.runtimeFailed(
-                    status: process.terminationStatus,
-                    message: Self.logMessage(in: logURL)
+                    status: status,
+                    message: log.message(fallback: "Runtime 未提供錯誤訊息。")
                 )
             }
             guard FileManager.default.fileExists(atPath: outputURL.path),
@@ -196,7 +172,7 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
             }
 
             outputs.append(
-                ImageAsset(
+                MediaAsset(
                     projectID: request.projectID,
                     parentAssetID: request.sourceAsset?.id,
                     kind: .generatedVideo,
@@ -232,73 +208,54 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
                 try? FileManager.default.removeItem(at: outputURL)
             }
         }
-        let process = Process()
-        process.executableURL = try Self.ffmpegExecutable()
-        process.arguments = [
-            "-y",
-            "-nostdin",
-            "-loglevel", "error",
-            "-nostats",
-            "-progress", "pipe:1",
-            "-loop", "1",
-            "-i", inputURL.path,
-            "-vf", "scale=\(width):\(height):force_original_aspect_ratio=increase,crop=\(width):\(height),edgedetect=mode=canny:low=0.1:high=0.4,format=yuv420p",
-            "-frames:v", String(frameCount),
-            "-r", String(frameRate),
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "18",
-            outputURL.path
-        ]
-        process.environment = Self.runtimeEnvironment()
         let logURL = outputURL.appendingPathExtension("log")
         defer { try? FileManager.default.removeItem(at: logURL) }
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        let logHandle = try FileHandle(forWritingTo: logURL)
-        defer { try? logHandle.close() }
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = logHandle
-        process.standardError = logHandle
-        do {
-            try process.run()
-            var observedLogSize = Self.fileSize(at: logURL)
-            var lastLogActivity = Date()
-            progress(0.01)
-            while process.isRunning {
-                try Task.checkCancellation()
-                try await Task.sleep(for: .milliseconds(100))
-                let currentLogSize = Self.fileSize(at: logURL)
-                if currentLogSize != observedLogSize {
-                    observedLogSize = currentLogSize
-                    lastLogActivity = Date()
-                    if let frameProgress = Self.ffmpegFrameProgress(
-                        in: logURL,
-                        frameCount: frameCount
-                    ) {
-                        progress(frameProgress)
-                    }
-                } else if Date().timeIntervalSince(lastLogActivity) >= 120 {
-                    Self.forceTerminate(process)
-                    throw LTXVideoRuntimeError.controlVideoStalled(
-                        details: Self.lastLogLine(in: logURL)
-                    )
-                }
-            }
-        } catch {
-            Self.forceTerminate(process)
-            throw error
-        }
-        process.waitUntilExit()
-        try? logHandle.close()
+        let log = try RuntimeLog(at: logURL)
+        defer { log.close() }
 
-        guard process.terminationStatus == 0 else {
+        progress(0.01)
+        var activity = RuntimeLogActivity(log: log)
+        let status = try await RuntimeProcess.run(
+            executable: try Self.ffmpegExecutable(),
+            arguments: [
+                "-y",
+                "-nostdin",
+                "-loglevel", "error",
+                "-nostats",
+                "-progress", "pipe:1",
+                "-loop", "1",
+                "-i", inputURL.path,
+                "-vf", "scale=\(width):\(height):force_original_aspect_ratio=increase,crop=\(width):\(height),edgedetect=mode=canny:low=0.1:high=0.4,format=yuv420p",
+                "-frames:v", String(frameCount),
+                "-r", String(frameRate),
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "18",
+                outputURL.path
+            ],
+            environment: RuntimeExecutable.environment(),
+            log: log,
+            pollInterval: .milliseconds(100)
+        ) {
+            if activity.sample(log) {
+                if let frameProgress = Self.ffmpegFrameProgress(in: log, frameCount: frameCount) {
+                    progress(frameProgress)
+                }
+            } else if activity.idleDuration >= 120 {
+                throw LTXVideoRuntimeError.controlVideoStalled(
+                    details: log.lastLine(fallback: "Runtime 未提供最後狀態。")
+                )
+            }
+        }
+
+        guard status == 0 else {
             throw LTXVideoRuntimeError.controlVideoFailed(
-                status: process.terminationStatus,
-                message: Self.logMessage(in: logURL)
+                status: status,
+                message: log.message(fallback: "Runtime 未提供錯誤訊息。")
             )
         }
         guard FileManager.default.fileExists(atPath: outputURL.path),
-              Self.fileSize(at: outputURL) > 0 else {
+              RuntimeLog.fileSize(at: outputURL) > 0 else {
             throw LTXVideoRuntimeError.controlVideoMissing(outputURL)
         }
         progress(1)
@@ -306,12 +263,10 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
     }
 
     private static func ffmpegFrameProgress(
-        in logURL: URL,
+        in log: RuntimeLog,
         frameCount: Int
     ) -> Double? {
-        guard frameCount > 0,
-              let data = try? Data(contentsOf: logURL),
-              let text = String(data: data.suffix(16 * 1_024), encoding: .utf8) else {
+        guard frameCount > 0, let text = log.tail(16 * 1_024) else {
             return nil
         }
         for line in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).reversed() {
@@ -412,7 +367,7 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
         return arguments
     }
 
-    private static func uniqueSourceAssets(_ assets: [ImageAsset]) -> [ImageAsset] {
+    private static func uniqueSourceAssets(_ assets: [MediaAsset]) -> [MediaAsset] {
         var seen = Set<UUID>()
         return assets.filter { seen.insert($0.id).inserted }
     }
@@ -427,15 +382,10 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
         candidates.append(URL(fileURLWithPath: "/opt/homebrew/bin/ffmpeg"))
         candidates.append(URL(fileURLWithPath: "/usr/local/bin/ffmpeg"))
         candidates.append(URL(fileURLWithPath: "/usr/bin/ffmpeg"))
-        for directory in (environment["PATH"] ?? "").split(separator: ":") {
-            candidates.append(
-                URL(fileURLWithPath: String(directory), isDirectory: true)
-                    .appendingPathComponent("ffmpeg")
-            )
-        }
-        guard let executable = candidates.first(where: {
-            fileManager.isExecutableFile(atPath: $0.path)
-        }) else {
+        candidates.append(
+            contentsOf: RuntimeExecutable.pathCandidates(for: "ffmpeg", environment: environment)
+        )
+        guard let executable = RuntimeExecutable.locate(candidates) else {
             throw LTXVideoRuntimeError.ffmpegNotFound(candidates.map(\.path))
         }
         return executable
@@ -467,49 +417,27 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
         let home = fileManager.homeDirectoryForCurrentUser
         candidates.append(home.appendingPathComponent(".local/bin/ltx-2-mlx"))
         candidates.append(
-            home.appendingPathComponent(
-                "Library/Application Support/GenImage/Runtime/ltx-2-mlx/.venv/bin/ltx-2-mlx"
-            )
+            ApplicationSupport.directory(.runtime, fileManager: fileManager)
+                .appendingPathComponent("ltx-2-mlx/.venv/bin/ltx-2-mlx")
         )
         candidates.append(URL(fileURLWithPath: "/opt/homebrew/bin/ltx-2-mlx"))
         candidates.append(URL(fileURLWithPath: "/usr/local/bin/ltx-2-mlx"))
 
-        for directory in (environment["PATH"] ?? "").split(separator: ":") {
-            candidates.append(
-                URL(fileURLWithPath: String(directory), isDirectory: true)
-                    .appendingPathComponent("ltx-2-mlx")
-            )
-        }
+        candidates.append(
+            contentsOf: RuntimeExecutable.pathCandidates(for: "ltx-2-mlx", environment: environment)
+        )
 
-        guard let executable = candidates.first(where: {
-            fileManager.isExecutableFile(atPath: $0.path)
-        }) else {
+        guard let executable = RuntimeExecutable.locate(candidates) else {
             throw LTXVideoRuntimeError.runtimeNotFound(candidates.map(\.path))
         }
         return executable
     }
 
-    private static func runtimeEnvironment() -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        let commonPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
-        let currentPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
-        environment["PATH"] = (currentPaths + commonPaths)
-            .reduce(into: [String]()) { paths, path in
-                if !paths.contains(path) { paths.append(path) }
-            }
-            .joined(separator: ":")
-        environment["PYTHONUNBUFFERED"] = "1"
-        return environment
-    }
-
     private static func runtimeProgress(
-        in logURL: URL,
+        in log: RuntimeLog,
         stage1Steps: Int
     ) -> Double? {
-        guard let data = try? Data(contentsOf: logURL),
-              let text = String(data: data.suffix(64 * 1_024), encoding: .utf8) else {
-            return nil
-        }
+        guard let text = log.tail(64 * 1_024) else { return nil }
         let plan = runtimeProgressPlan(stage1Steps: stage1Steps)
         if text.contains("[Decoding video + audio + muxing] done") { return 0.99 }
         if text.contains("[Decoding video + audio + muxing] ...") {
@@ -581,41 +509,6 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
         let stage1End = setupEnd + stage1Span
         let stage2End = stage1End + stage2Span
         return (setupEnd, stage1Span, stage1End, stage2Span, stage2End, decodeSpan)
-    }
-
-    private static func fileSize(at url: URL) -> Int64 {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attributes[.size] as? NSNumber else { return 0 }
-        return size.int64Value
-    }
-
-    private static func lastLogLine(in logURL: URL) -> String {
-        guard let data = try? Data(contentsOf: logURL),
-              let text = String(data: data.suffix(4_096), encoding: .utf8) else {
-            return "Runtime 未提供最後狀態。"
-        }
-        return text.split(whereSeparator: { $0 == "\n" || $0 == "\r" })
-            .last?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? "Runtime 未提供最後狀態。"
-    }
-
-    private static func forceTerminate(_ process: Process) {
-        guard process.isRunning else { return }
-        process.terminate()
-        if process.isRunning {
-            Darwin.kill(process.processIdentifier, SIGKILL)
-        }
-        process.waitUntilExit()
-    }
-
-    private static func logMessage(in logURL: URL) -> String {
-        guard let data = try? Data(contentsOf: logURL), !data.isEmpty else {
-            return "Runtime 未提供錯誤訊息。"
-        }
-        return String(data: data.suffix(8_192), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? "Runtime 執行失敗。"
     }
 }
 

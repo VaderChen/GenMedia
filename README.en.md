@@ -60,10 +60,12 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 
 - Profiles are ordered as active, ready, downloading, and unavailable. A subtle green outline marks profiles whose model and LoRA dependencies are complete, and the list is reordered as soon as a download finishes.
 - Cancellation enters `cancelling` first, then changes to `cancelled` and unlocks all generation and memory controls when the runtime task exits. A numeric ETA appears after 35% progress and 15 seconds; overall elapsed time is used as a fallback when stable samples are not yet available.
-- The Z-Image MLX compatibility layer handles `quantize_config.json`, affine/mxfp4 modes, packed pad tokens, and FP16-to-BF16 loading. `build.command` reapplies the patches under `Patches/` after Swift Package resolution. The andrevp Z-Image Turbo MLX 4-bit profile has been validated with a real generation run.
+- The Z-Image MLX compatibility layer handles `quantize_config.json`, affine/mxfp4 modes, packed pad tokens, and FP16-to-BF16 loading. The andrevp Z-Image Turbo MLX 4-bit profile has been validated with a real generation run.
+- Source patches for dependencies are listed in `Patches/manifest.txt` and applied by `scripts/apply-runtime-patches.command` after Swift Package resolution; `build.command` invokes it. A dependency pinned to a version the manifest was not written against, a missing patch file, a failed application, or a missing marker afterwards all abort the build rather than letting it continue against unpatched sources. Run `scripts/apply-runtime-patches.command --verify` to check without changing anything.
 - Text-to-image completion keeps model weights and warm buffers resident. Reusable MLX buffers are trimmed after five idle minutes without unloading the model. Models are unloaded only by the sidebar Release Memory action, a model switch, or the over-90% RAM protection applied while switching profiles.
 - Downloads retain their upstream filenames. Generated outputs use `Image-YYYYMMDD-HHmm`, `Video-YYYYMMDD-HHmm`, or `Music-YYYYMMDD-HHmm`; a numeric suffix prevents collisions within the same minute. The output directory is configurable in Settings.
 - Each open workspace tab is treated as a generation project. Assets and lineage are atomically stored under Application Support and restored after the app relaunches. Explicitly closing a tab removes that project's workspace index while keeping exported media files on disk.
+- All app data lives under `~/Library/Application Support/GenImage/` (`Models`, `Runtime`, `Workspace`, `Pasted`, `Generated`), defined in one place by `GenImageCore/ApplicationSupport.swift`. The workspace index used to be written under `GenMedia/`; it is adopted into the current root at launch, and an entry that already exists is kept rather than overwritten or merged. The directory keeps the name `GenImage` rather than matching the app's `GenMedia` because the Python venvs under `Runtime/` bake absolute paths into their launch scripts — renaming would break the installed LTX and MiniMax runtimes.
 - Prompt and lyrics editors preserve the caret, selection, and IME composition while native state updates arrive. Generation type, Prompt, Lyrics, and output-setting tabs rerender only the creation panel. Unavoidable full updates reuse playing audio and video nodes instead of interrupting playback.
 - The workspace filmstrip provides an image import button and supports dropping one or more PNG, JPEG, WebP, GIF, TIFF, HEIC, or HEIF files from Finder. Image import is disabled during music generation to keep media sources separate. In image generation mode, selecting a source image automatically routes the main button to the image-to-image profile; without a source image it uses the text-to-image profile.
 - Image and video aspect-ratio choices are dropdowns. Image-to-image shows `Original Resolution` only after a source image is selected, using source dimensions quantized to Runtime-compatible multiples of 16.
@@ -114,13 +116,17 @@ End-to-end MCP validation has been completed: `genimage_generate_image` outputs 
 
 ## Project Structure
 
+This internal refactor changes code boundaries and ownership only; existing generation capabilities, user flows, and the Web Bridge protocol remain unchanged.
+
 ```text
 Sources/
 ├── GenImageCore/
+│   ├── ApplicationSupport.swift  # The one definition of where app data lives
 │   ├── DomainModels.swift        # Assets, recipes, jobs, models, and profiles
 │   ├── InferenceServices.swift   # Image, text, video, and music inference interfaces
 │   ├── ModelCatalog.swift        # Built-in models and profiles
 │   ├── OutputFileNaming.swift    # Image, video, and music output names
+│   ├── OutputGeometry.swift      # The one definition of output-size arithmetic (mirrored by js/geometry.js)
 │   ├── ProjectWorkspacePersistence.swift # Open generation-project persistence
 │   └── WorkflowGraph.swift       # Asset lineage and branch relationships
 ├── GenImageRuntime/
@@ -131,15 +137,19 @@ Sources/
 │   ├── MusicGenerationRouter.swift
 │   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── SubprocessRuntime.swift   # Shared subprocess plumbing for external runtimes
 │   ├── AudioOutputEncoder.swift
 │   └── CoreMLUpscaleService.swift
 └── GenImageApp/
-    ├── AppStore.swift            # Application state and job coordination
+    ├── AppStore.swift            # Type declaration, stored properties, init
+    ├── AppStore+*.swift          # Behaviour split by responsibility (Persistence, Profiles, Jobs, … 10 files)
     ├── HybridBridgeController.swift
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # Secure local image, video, and audio delivery to WebUI
     └── Resources/WebUI/          # HTML/CSS/JavaScript frontend
-Patches/                           # Z-Image MLX compatibility patches applied during builds
+Patches/                           # Dependency source patches plus manifest.txt, applied during builds
+scripts/
+└── apply-runtime-patches.command  # Apply and verify dependency patches from the manifest
 ```
 
 ## Current Status

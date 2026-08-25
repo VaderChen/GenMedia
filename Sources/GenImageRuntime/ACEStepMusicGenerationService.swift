@@ -21,7 +21,7 @@ public final class ACEStepMusicGenerationService: MusicRuntimeAdapter, Sendable 
     public func generate(
         request: MusicGenerationRequest,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> ImageAsset {
+    ) async throws -> MediaAsset {
         progress(0.001)
         try request.options.validate()
         guard supports(request) else {
@@ -66,7 +66,7 @@ public final class ACEStepMusicGenerationService: MusicRuntimeAdapter, Sendable 
             outputURL: waveURL,
             progress: { progress(0.01 + 0.89 * $0) }
         )
-        guard AudioOutputEncoder.fileSize(at: waveURL) > 0 else {
+        guard RuntimeLog.fileSize(at: waveURL) > 0 else {
             throw ACEStepRuntimeError.waveOutputMissing(waveURL)
         }
         try Task.checkCancellation()
@@ -79,7 +79,7 @@ public final class ACEStepMusicGenerationService: MusicRuntimeAdapter, Sendable 
 
         progress(1)
         completed = true
-        return ImageAsset(
+        return MediaAsset(
             projectID: request.projectID,
             kind: .generatedAudio,
             title: "生成音樂",

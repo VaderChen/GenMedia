@@ -598,13 +598,7 @@ final class HybridBridgeController: NSObject, ObservableObject {
             maxLongEdge: 2_048
         )
 
-        let applicationSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? FileManager.default.temporaryDirectory
-        let directory = applicationSupport
-            .appendingPathComponent("GenImage", isDirectory: true)
-            .appendingPathComponent("Pasted", isDirectory: true)
+        let directory = ApplicationSupport.directory(.pasted)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent(
             "Pasted-\(UUID().uuidString.prefix(8)).\(normalized.fileExtension)"

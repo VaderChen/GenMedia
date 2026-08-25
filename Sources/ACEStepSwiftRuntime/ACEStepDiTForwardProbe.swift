@@ -1,20 +1,25 @@
+// DiT 單步 forward 的診斷入口，只有 ACEStepSwiftPoC 執行檔會用到，不在生成路徑上。
+//
+// 之所以留在這個 module 而不是搬進 PoC 執行檔：它需要的 ACEStepDiTDecoder 等型別都是 internal，
+// 搬出去就得把它們改成 public，為了一個診斷工具擴大 module 的公開介面並不划算。
+
 import MLX
 import Foundation
 
-public struct DiTForwardPoCReport {
+public struct ACEStepDiTForwardReport {
     public let inputShape: [Int]
     public let outputShape: [Int]
     public let meanAbsoluteValue: Float
     public let outputURL: URL
 }
 
-public enum DiTForwardPoC {
+public enum ACEStepDiTForwardProbe {
     public static func run(
         modelRoot: URL,
         conditionURL: URL,
         outputURL: URL,
         seed: UInt64
-    ) throws -> DiTForwardPoCReport {
+    ) throws -> ACEStepDiTForwardReport {
         let configuration = try ACEStepDiTConfiguration.load(
             from: modelRoot.appendingPathComponent("acestep-v15-turbo/config.json")
         )
@@ -66,7 +71,7 @@ public enum DiTForwardPoC {
             ],
             url: outputURL
         )
-        return DiTForwardPoCReport(
+        return ACEStepDiTForwardReport(
             inputShape: noise.shape,
             outputShape: output.shape,
             meanAbsoluteValue: meanAbsoluteValue,

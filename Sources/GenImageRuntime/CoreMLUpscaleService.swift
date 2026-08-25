@@ -25,7 +25,7 @@ public actor CoreMLUpscaleService: ImageUpscaling {
     public func upscale(
         request: UpscaleRequest,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> ImageAsset {
+    ) async throws -> MediaAsset {
         guard request.profile.capability == .upscale else {
             throw CoreMLUpscaleError.incompatibleProfile
         }
@@ -155,7 +155,7 @@ public actor CoreMLUpscaleService: ImageUpscaling {
         )
         progress(1)
 
-        return ImageAsset(
+        return MediaAsset(
             projectID: request.asset.projectID,
             parentAssetID: request.asset.id,
             kind: .upscaled,

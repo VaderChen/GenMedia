@@ -4,14 +4,7 @@ public enum ModelStorage {
     public static let environmentKey = "GENIMAGE_MODEL_ROOT"
 
     public static var defaultRootURL: URL {
-        let applicationSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? FileManager.default.temporaryDirectory
-        return applicationSupport
-            .appendingPathComponent("GenImage", isDirectory: true)
-            .appendingPathComponent("Models", isDirectory: true)
-            .standardizedFileURL
+        ApplicationSupport.directory(.models)
     }
 
     public static func rootURL(

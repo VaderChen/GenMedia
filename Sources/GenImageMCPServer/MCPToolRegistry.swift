@@ -156,7 +156,7 @@ public struct MCPToolRegistry {
             URL(fileURLWithPath: $0, isDirectory: true)
         } ?? FileManager.default.temporaryDirectory.appendingPathComponent("GenImageMCP", isDirectory: true)
 
-        let asset = ImageAsset(
+        let asset = MediaAsset(
             projectID: UUID(),
             kind: .imported,
             title: inputURL.deletingPathExtension().lastPathComponent,
@@ -201,8 +201,12 @@ public struct MCPToolRegistry {
         let height = integer(arguments["height"], defaultValue: 1024)
         let steps = integer(arguments["steps"], defaultValue: 9)
         let seed = integer(arguments["seed"], defaultValue: 42)
-        guard width >= 64, height >= 64, width.isMultiple(of: 16), height.isMultiple(of: 16) else {
-            throw MCPToolError.invalidArgument("width and height must be >= 64 and divisible by 16")
+        guard OutputGeometry.isSupported(width: width, height: height) else {
+            throw MCPToolError.invalidArgument(
+                "width and height must be between \(OutputGeometry.minimumDimension) and "
+                    + "\(OutputGeometry.maximumDimension) and divisible by "
+                    + "\(OutputGeometry.alignment)"
+            )
         }
         guard (1...100).contains(steps) else {
             throw MCPToolError.invalidArgument("steps must be between 1 and 100")
@@ -311,7 +315,7 @@ public struct MCPToolRegistry {
         let modelURL = try requiredFileURL("model_path", arguments: arguments)
         let languageCode = arguments["language_code"] as? String ?? "zh-Hant"
         let maxTokens = max(32, min(integer(arguments["max_tokens"], defaultValue: 512), 2_048))
-        let asset = ImageAsset(
+        let asset = MediaAsset(
             projectID: UUID(),
             kind: .imported,
             title: inputURL.deletingPathExtension().lastPathComponent,
@@ -385,7 +389,7 @@ public struct MCPToolRegistry {
         )
 
         let projectID = UUID()
-        let asset = ImageAsset(
+        let asset = MediaAsset(
             projectID: projectID,
             kind: .imported,
             title: inputURL.deletingPathExtension().lastPathComponent,

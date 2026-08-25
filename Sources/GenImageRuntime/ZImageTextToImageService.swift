@@ -30,7 +30,7 @@ public actor ZImageTextToImageService: TextToImageGenerating {
     public func generate(
         request: TextToImageRequest,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> [ImageAsset] {
+    ) async throws -> [MediaAsset] {
         guard request.profile.capability == .textToImage else {
             throw ZImageRuntimeError.incompatibleProfile
         }
@@ -70,7 +70,7 @@ public actor ZImageTextToImageService: TextToImageGenerating {
         )
 
         let outputCount = request.recipe.outputCount
-        var assets: [ImageAsset] = []
+        var assets: [MediaAsset] = []
         assets.reserveCapacity(outputCount)
 
         for index in 0..<outputCount {
@@ -139,7 +139,7 @@ public actor ZImageTextToImageService: TextToImageGenerating {
                 throw ZImageRuntimeError.outputMissing(outputURL)
             }
             assets.append(
-                ImageAsset(
+                MediaAsset(
                     projectID: request.projectID,
                     parentAssetID: request.sourceAsset?.id,
                     kind: .generated,
