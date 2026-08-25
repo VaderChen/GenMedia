@@ -3,7 +3,13 @@ import { t } from "./i18n.js";
 
 const primaryCapabilities = ["imageToText", "textToImage", "imageToImage", "textToVideo", "imageToVideo", "textToMusic", "upscale"];
 
-export function renderProfiles(state) {
+export function renderProfiles(state, ui) {
+  const selectedCapability = primaryCapabilities.includes(ui.profileFilter)
+    ? ui.profileFilter
+    : "all";
+  const visibleCapabilities = selectedCapability === "all"
+    ? primaryCapabilities
+    : [selectedCapability];
   return `
     <section class="page">
       <header class="page-header">
@@ -11,19 +17,29 @@ export function renderProfiles(state) {
           <h1>${t("profile.title")}</h1>
           <p>${t("profile.subtitle")}</p>
         </div>
-        <div class="button-row">
+        <div class="filter-row" role="group" aria-label="${t("profile.title")}">
+          ${profileFilterChip("all", t("common.all"), selectedCapability)}
           ${primaryCapabilities
-            .map(
-              (capability) => `<button class="secondary-button compact" data-action="createProfile" data-capability="${capability}">＋ ${t("profile.create", { capability: capabilityLabel(capability) })}</button>`,
-            )
+            .map((capability) =>
+              profileFilterChip(capability, capabilityLabel(capability), selectedCapability))
             .join("")}
         </div>
       </header>
       <div class="page-scroll" data-scroll-id="profiles">
-        ${primaryCapabilities.map((capability) => renderProfileSection(state, capability)).join("")}
+        ${visibleCapabilities.map((capability) => renderProfileSection(state, capability)).join("")}
       </div>
     </section>
   `;
+}
+
+function profileFilterChip(value, label, selectedCapability) {
+  const active = selectedCapability === value;
+  return `<button
+    class="chip ${active ? "active" : ""}"
+    data-action="profileFilter"
+    data-filter="${value}"
+    aria-pressed="${active}"
+  >${label}</button>`;
 }
 
 function renderProfileSection(state, capability) {

@@ -1,4 +1,4 @@
-# GenImage アーキテクチャ
+# GenMedia アーキテクチャ
 
 [繁體中文](ARCHITECTURE.md) | [English](ARCHITECTURE.en.md) | 日本語 | [한국어](ARCHITECTURE.ko.md)
 
@@ -37,10 +37,16 @@ AppStore / Workflow coordination
         └── ImageUpscaling
                     │
                     ▼
-       MLX Swift / Core ML / External CLI
+       MLX Swift / Core ML / Local REST Service / External CLI
 ```
 
 Web UI は Bridge を通じてのみローカル機能を利用できます。任意のファイル、モデルディレクトリ、システム API を直接読み取ることはできません。
+
+### Web UI 更新戦略
+
+- プロンプト、ネガティブプロンプト、歌詞フィールドのフォーカス中は、Swift から状態を受信してもローカル編集値を保持し、不要な全体再描画を遅延させることで、カーソル、選択範囲、IME 変換状態のリセットを防ぎます。
+- 生成タイプとプロンプト／歌詞／出力設定タブは独立した作成パネル renderer を使用し、プレビュー、プレイヤー、Inspector、サイドバーの DOM を置き換えません。
+- 全体状態の変更で完全な再描画が必要な場合は、再生中の `<audio>`、`<video>`、音声ビジュアライザーノードを一度切り離して同じアセット位置へ戻し、再生位置と Web Audio 接続を維持します。
 
 ## プロファイル
 
@@ -71,6 +77,8 @@ Web UI は Bridge を通じてのみローカル機能を利用できます。�
 
 `WorkflowGraph` が lineage と children の問い合わせを提供するため、UI がアセット関係を推測する必要はありません。
 
+開いているワークスペースタブが生成プロジェクトのライフサイクル境界です。Swift は `Project`、`ImageAsset`、`WorkflowOperation`、選択状態を Application Support の JSON スナップショットへアトミック保存し、通常のアプリ終了では削除しません。Web UI はタブ情報を WebKit localStorage に保持します。タブを閉じると Bridge 経由でネイティブ層へ通知し、そのタブのアセットと lineage 索引だけを削除して出力済みメディアは残します。
+
 ## 推論 Runtime
 
 テキストから画像には `Z-Image.swift` commit `28bfcf3148c041a554629247170eb54d9ac46830` を使用します。
@@ -98,13 +106,15 @@ Web UI は Bridge を通じてのみローカル機能を利用できます。�
 - MP4 出力は `generatedVideo` アセットとしてワークスペースに追加され、Web UI のネイティブ `<video>` で再生されます。
 - Python 実装を UI や `AppStore` に結合せず、`GENIMAGE_LTX_RUNTIME` または標準インストール場所によって Runtime を置き換えられます。
 
-音楽は `MiniMaxMusic3GenerationService` が `mlx-minimax-music3 generate` を呼び出して生成します。
+音楽は `MusicGenerationRouter` が `MusicRuntimeAdapter.supports` に従って振り分け、Router にモデル ID を集中してハードコードしません。
 
 - テキストから音楽は `MusicGenerating`、`MusicGenerationRequest`、`MusicGenerationOptions` を使用します。
-- Swift がプロファイル、モデルの完全性、スタイルプロンプト、5～300 秒の長さ（最長 5 分）、ステップ、出力形式を検証します。歌詞は任意で、空欄の場合はインストゥルメンタル用のマーカーとボーカルなしのプロンプトへ変換します。
-- Runtime は一時 WAV を生成し、FFmpeg が MP3 320 kbps、M4A AAC 256 kbps、ADTS AAC 256 kbps、または可逆圧縮 FLAC に変換します。
-- 成功、失敗、キャンセルのいずれでも WAV、プロンプト、歌詞、ログを削除し、完成した圧縮音声だけを `generatedAudio` アセットとして保持します。
-- Web UI はネイティブ `<audio controls>` で再生し、Inspector に実際の長さ、形式、44.1 kHz サンプルレート、チャンネル数を表示します。
-- Runtime は `GENIMAGE_MINIMAX_MUSIC3_RUNTIME` または標準の Application Support 配置で交換でき、モデルは固定 revision から導入して独立した Community License を維持します。
+- `ACEStepMusicGenerationService` は `.mlxSwift` プロファイルを使用し、`ACEStepSwiftRuntime` を直接呼び出して Qwen3 Embedding、条件エンコード、Turbo DiT、Euler sampler、Oobleck VAE を実行します。外部サービスや Process は起動しません。
+- ACE-Step は 10～300 秒、1～20 steps、任意の歌詞、インストゥルメンタル生成に対応します。latent 長は VAE のサンプルレートと hop length から算出し、長時間音声はオーバーラップ付き分割デコードと PCM ストリーム書き込みでピークメモリを抑えます。コードとモデルは MIT License です。
+- 音楽プロファイルは `ProfileMusicConfiguration` を通じて時間の上下限と目標／最長の意味を公開するため、Web UI がモデル ID で分岐する必要はありません。
+- `MiniMaxMusic3GenerationService` は `.externalCLI` プロファイルで `mlx-minimax-music3 generate` を呼び出します。5～300 秒のパラメータは最長時間であり、モデルが音声終了トークンを出力すると早めに自然終了する場合があります。モデルは独立した Community License を維持します。
+- 両 Adapter は一時 WAV を取得し、`AudioOutputEncoder` が MP3 320 kbps、M4A AAC 256 kbps、ADTS AAC 256 kbps、または可逆圧縮 FLAC に変換します。
+- 成功、失敗、キャンセル時に一時ファイルを削除し、完成した圧縮音声だけを実際の長さ、サンプルレート、チャンネル数付き `generatedAudio` アセットとして保持します。
+- ACE-Step の重みはモデルセンターが管理し、ネイティブ Runtime はアプリにコンパイルされるため、独立したインストール先やサービス用環境変数を使用しません。
 
 MLX metallib は `RuntimeSupport/mlx.metallib` から `build.command` によって Release 実行ディレクトリへコピーされます。配布前にはモデルライセンスの確認、16／24／32 GB の負荷試験、App bundle、署名、公証を完了する必要があります。

@@ -1,9 +1,15 @@
-# GenImage Update Notes
+# GenMedia Update Notes
 
 本文件採「最新內容在上」的方式維護。開發期間先更新 `Unreleased`；建立 GitHub Release 時，將標題改為正式版本與日期，再新增下一個空白的 `Unreleased` 區段。
 
 ## Unreleased
 
+- 音樂風格新增「動漫」，並同步提供繁體中文、英文、日文與韓文標籤；Prompt 留空時會使用 `Anime soundtrack` 作為生成風格。
+- ACE-Step 1.5 已使用 App 內建的純 Swift／MLX Runtime，直接執行文字編碼、Turbo DiT、Euler sampler 與 Oobleck VAE，不使用 Python Adapter 或本機 Python 服務。
+- 每個工作區分頁作為持久化生成專案；資產、lineage、操作與選取狀態會在 App 重新啟動後恢復，關閉分頁時才移除工作區索引。
+- Prompt 與歌詞輸入在 Native 狀態更新期間保留游標、選取範圍與輸入法組字；生成類型及創作設定 TAB 改為創作面板區域渲染。
+- 必要的完整 Web UI 更新會保留播放中的音訊、影片與 Web Audio 視覺化節點，避免切換 TAB 時中斷播放。
+- 圖片、影片與音樂輸出統一使用 `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm`、`Music-YYYYMMDD-HHmm`，同分鐘重複時加上流水號。
 - 將實際產生的音訊範例放入 `Outputs/Music/`，供 GitHub 上的專案實例與檢查使用。產生的 macOS `._*` 中繼資料不會納入版本控管。
 - 音訊預覽加入 Web Audio API 即時頻譜視覺化，播放時顯示頻率能量柱狀動畫，並保留原有音訊控制列。
 - 音訊視覺化改用 8192 點 FFT，頻譜以 18 Hz–24 kHz 的對數頻率分配，上限會根據音源取樣率的 Nyquist 頻率自動限制；波形繪製上限為 1,600 點。

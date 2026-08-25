@@ -298,6 +298,19 @@ public enum ModelCatalog {
             isRecommended: true
         ),
         ModelDescriptor(
+            id: "ACE-Step/Ace-Step1.5",
+            displayName: "ACE-Step 1.5 Turbo MLX",
+            publisher: "ACE Studio / StepFun",
+            summary: "Apple Silicon 原生 MLX 文生音樂模型，支援 Prompt、選填歌詞與最長 300 秒純音樂或歌曲生成。",
+            capabilities: [.textToMusic],
+            quantization: .bf16,
+            approximateDownloadGB: 6.8,
+            recommendedMemoryGB: 16,
+            licenseName: "MIT",
+            sourceURL: URL(string: "https://huggingface.co/ACE-Step/Ace-Step1.5"),
+            isRecommended: true
+        ),
+        ModelDescriptor(
             id: "vanch007/MiniMax-Music3-MLX-8bit",
             displayName: "MiniMax Music 3 MLX 8-bit",
             publisher: "vanch007 / MiniMaxAI",
@@ -541,13 +554,33 @@ public enum ModelCatalog {
             isBuiltIn: true
         ),
         InferenceProfile(
+            name: "文生音樂 · ACE-Step 1.5 Turbo MLX",
+            capability: .textToMusic,
+            modelID: "ACE-Step/Ace-Step1.5",
+            modelRevision: "19671f406d603126926c1b7e2adc169acbcade22",
+            architecture: .mlxSwift,
+            defaults: ProfileDefaults(steps: 8, outputCount: 1, durationSeconds: 30),
+            music: ProfileMusicConfiguration(
+                minimumDurationSeconds: 10,
+                maximumDurationSeconds: 300,
+                durationSemantics: .target
+            ),
+            notes: "ACE-Step 1.5 Turbo Apple Silicon 原生 Swift／MLX Profile；支援音樂 Prompt、選填歌詞與純音樂生成，長度 10–300 秒。輸出由 FFmpeg 轉為 MP3、M4A、AAC 或 FLAC。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
             name: "文生音樂 · MiniMax Music 3 MLX 8-bit",
             capability: .textToMusic,
             modelID: "vanch007/MiniMax-Music3-MLX-8bit",
             modelRevision: "57d87a63181336634a9557fd31aacc2ad6762935",
             architecture: .externalCLI,
             defaults: ProfileDefaults(steps: 30, outputCount: 1, durationSeconds: 10),
-            notes: "MiniMax Music 3 原生 MLX 8-bit Profile；依音樂風格 Prompt 與歌詞生成 44.1 kHz 立體聲音訊，建議 64GB 記憶體。推論需外部 mlx-minimax-music3 Runtime 與 FFmpeg。",
+            music: ProfileMusicConfiguration(
+                minimumDurationSeconds: 5,
+                maximumDurationSeconds: 300,
+                durationSemantics: .maximum
+            ),
+            notes: "MiniMax Music 3 原生 MLX 8-bit Profile；依音樂風格 Prompt 與歌詞生成最長 5–300 秒的 44.1 kHz 立體聲音訊，模型可能依歌曲結構提前自然結束。建議 64GB 記憶體；推論需外部 mlx-minimax-music3 Runtime 與 FFmpeg。",
             isBuiltIn: true
         ),
         InferenceProfile(

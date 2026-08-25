@@ -1,4 +1,4 @@
-# GenImage 아키텍처
+# GenMedia 아키텍처
 
 [繁體中文](ARCHITECTURE.md) | [English](ARCHITECTURE.en.md) | [日本語](ARCHITECTURE.ja.md) | 한국어
 
@@ -37,10 +37,16 @@ AppStore / Workflow coordination
         └── ImageUpscaling
                     │
                     ▼
-       MLX Swift / Core ML / External CLI
+       MLX Swift / Core ML / Local REST Service / External CLI
 ```
 
 Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의의 파일, 모델 디렉터리 또는 시스템 API를 직접 읽을 수 없습니다.
+
+### Web UI 업데이트 전략
+
+- 프롬프트, 네거티브 프롬프트 또는 가사 필드에 포커스가 있는 동안에는 Swift 상태를 받아도 로컬 편집 값을 유지하고 불필요한 전체 렌더링을 지연하여 커서, 선택 범위, IME 조합 상태가 초기화되지 않도록 합니다.
+- 생성 유형과 프롬프트/가사/출력 설정 탭은 독립 생성 패널 renderer를 사용하며 미리보기, 플레이어, Inspector 또는 사이드바 DOM을 교체하지 않습니다.
+- 전역 상태 변경으로 전체 렌더링이 꼭 필요하면 재생 중인 `<audio>`, `<video>`, 오디오 시각화 노드를 분리한 뒤 같은 에셋 위치에 다시 연결하여 재생 위치와 Web Audio 연결을 유지합니다.
 
 ## 프로필
 
@@ -71,6 +77,8 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 
 `WorkflowGraph`가 lineage와 children 조회를 제공하므로 UI에서 에셋 관계를 추측할 필요가 없습니다.
 
+열려 있는 작업 공간 탭이 생성 프로젝트의 수명 주기 경계입니다. Swift는 `Project`, `ImageAsset`, `WorkflowOperation`, 선택 상태를 Application Support의 JSON 스냅샷으로 원자 저장하며 일반적인 앱 종료 시 지우지 않습니다. Web UI는 탭 정보를 WebKit localStorage에 보관합니다. 탭을 닫으면 Bridge를 통해 네이티브 계층에 알리고 해당 탭의 에셋 및 lineage 인덱스만 제거하며 출력된 미디어 파일은 유지합니다.
+
 ## 추론 Runtime
 
 텍스트→이미지는 `Z-Image.swift` commit `28bfcf3148c041a554629247170eb54d9ac46830`을 사용합니다.
@@ -98,13 +106,15 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 - MP4 출력은 `generatedVideo` 에셋으로 작업 공간에 추가되며 Web UI의 네이티브 `<video>`로 재생됩니다.
 - Python 구현을 UI나 `AppStore`에 결합하지 않고 `GENIMAGE_LTX_RUNTIME` 또는 표준 설치 위치로 Runtime을 교체할 수 있습니다.
 
-음악은 `MiniMaxMusic3GenerationService`가 `mlx-minimax-music3 generate`를 호출하여 생성합니다.
+음악은 `MusicGenerationRouter`가 `MusicRuntimeAdapter.supports`에 따라 분배하며 Router에 모델 ID를 집중 하드코딩하지 않습니다.
 
 - 텍스트→음악은 `MusicGenerating`, `MusicGenerationRequest`, `MusicGenerationOptions`를 사용합니다.
-- Swift가 프로필, 모델 완전성, 스타일 프롬프트, 5~300초 길이(최대 5분), 스텝, 출력 형식을 검증합니다. 가사는 선택 사항이며 비어 있으면 연주곡 마커와 보컬 없음 프롬프트로 변환합니다.
-- Runtime은 임시 WAV를 생성하고 FFmpeg가 MP3 320 kbps, M4A AAC 256 kbps, ADTS AAC 256 kbps 또는 무손실 FLAC으로 변환합니다.
-- 성공, 실패, 취소 시 모두 WAV, 프롬프트, 가사, 로그를 정리하며 완료된 압축 오디오만 `generatedAudio` 에셋으로 보존합니다.
-- Web UI는 네이티브 `<audio controls>`로 재생하고 Inspector에 실제 길이, 형식, 44.1 kHz 샘플링 레이트, 채널 수를 표시합니다.
-- Runtime은 `GENIMAGE_MINIMAX_MUSIC3_RUNTIME` 또는 표준 Application Support 위치로 교체할 수 있으며, 모델은 고정 revision에서 설치되고 별도의 Community License를 유지합니다.
+- `ACEStepMusicGenerationService`는 `.mlxSwift` 프로필을 사용하고 `ACEStepSwiftRuntime`을 직접 호출하여 Qwen3 Embedding, 조건 인코딩, Turbo DiT, Euler sampler, Oobleck VAE를 실행합니다. 외부 서비스나 Process를 시작하지 않습니다.
+- ACE-Step은 10~300초, 1~20 steps, 선택적 가사, 연주곡 생성을 지원합니다. latent 길이는 VAE 샘플링 레이트와 hop length로 계산하며 긴 오디오는 오버랩 분할 디코딩과 PCM 스트림 쓰기로 최대 메모리 사용량을 제한합니다. 코드와 모델은 MIT License입니다.
+- 음악 프로필은 `ProfileMusicConfiguration`으로 길이 범위와 목표/최대 의미를 제공하므로 Web UI가 모델 ID에 따라 분기할 필요가 없습니다.
+- `MiniMaxMusic3GenerationService`는 `.externalCLI` 프로필로 `mlx-minimax-music3 generate`를 호출합니다. 5~300초 매개변수는 최대 길이이며 모델이 오디오 종료 토큰을 출력하면 더 일찍 자연 종료될 수 있습니다. 모델은 별도의 Community License를 유지합니다.
+- 두 Adapter 모두 임시 WAV를 얻고 `AudioOutputEncoder`가 MP3 320 kbps, M4A AAC 256 kbps, ADTS AAC 256 kbps 또는 무손실 FLAC으로 변환합니다.
+- 성공, 실패 또는 취소 시 임시 파일을 정리하며 완료된 압축 오디오만 실제 길이, 샘플링 레이트, 채널 수와 함께 `generatedAudio` 에셋으로 보존합니다.
+- ACE-Step 가중치는 모델 센터에서 관리하며 네이티브 Runtime은 앱에 컴파일되므로 별도 설치 경로나 서비스 환경 변수를 사용하지 않습니다.
 
 MLX metallib은 `RuntimeSupport/mlx.metallib`에서 `build.command`를 통해 Release 실행 디렉터리로 복사됩니다. 배포 전에는 모델 라이선스 검토, 16/24/32 GB 부하 테스트, App bundle, 서명, 공증을 완료해야 합니다.

@@ -60,6 +60,7 @@ const musicStyles = [
   ["metal", "workspace.musicStyle.metal"],
   ["ambient", "workspace.musicStyle.ambient"],
   ["cinematic", "workspace.musicStyle.cinematic"],
+  ["anime", "workspace.musicStyle.anime"],
   ["lofi", "workspace.musicStyle.lofi"],
 ];
 
@@ -79,7 +80,7 @@ const ETA_MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1_000;
 export function renderWorkspace(state, ui) {
   return `
     <section class="workspace-shell">
-      ${renderWorkspaceTabs(ui)}
+      ${renderWorkspaceTabs(state, ui)}
       <section class="workspace-grid">
         ${renderPreviewPanel(state, ui)}
         ${renderCreationPanel(state, ui)}
@@ -89,7 +90,7 @@ export function renderWorkspace(state, ui) {
   `;
 }
 
-function renderWorkspaceTabs(ui) {
+function renderWorkspaceTabs(state, ui) {
   const tabs = ui.workspaceTabs || [];
   return `
     <div class="workspace-tabs" role="tablist" aria-label="${t("workspace.tabsLabel")}">
@@ -112,7 +113,7 @@ function renderWorkspaceTabs(ui) {
                 data-tab-id="${escapeHTML(tab.id)}"
                 title="${t("workspace.closeTab")}"
                 aria-label="${t("workspace.closeTab")}"
-                ${tabs.length <= 1 ? "disabled" : ""}
+                ${tabs.length <= 1 || isInferenceBusy(state) ? "disabled" : ""}
               >×</button>
             </div>`;
           })
@@ -130,7 +131,7 @@ export function renderQuickTools(state) {
     .join("");
 }
 
-function renderCreationPanel(state, ui) {
+export function renderCreationPanel(state, ui) {
   const recipe = state.recipe;
   const videoOutputSettings = state.videoOutputSettings || {
     width: 1280,
@@ -243,16 +244,20 @@ function renderCreationPanel(state, ui) {
   `;
 }
 
-function hasActiveProfile(state, capability) {
+function activeProfile(state, capability) {
   const activeProfileID = state.activeProfileIDs?.[capability];
-  if (!activeProfileID) return false;
+  if (!activeProfileID) return null;
   const disabledProfileIDs = new Set(state.disabledProfileIDs || []);
-  return state.profiles.some(
+  return state.profiles.find(
     (profile) =>
       profile.id === activeProfileID
       && profile.capability === capability
       && !disabledProfileIDs.has(profile.id),
-  );
+  ) || null;
+}
+
+function hasActiveProfile(state, capability) {
+  return activeProfile(state, capability) !== null;
 }
 
 function renderGenerationTypeSelect(activeGenerationType) {
@@ -288,7 +293,7 @@ function renderCreationTab(state, generationType, promptTab, descriptionBusy) {
     return renderOutputSettings(state.videoOutputSettings, "video");
   }
   if (promptTab === "lyrics") return renderLyricsEditor(state.musicOutputSettings, descriptionBusy);
-  if (promptTab === "musicOutput") return renderMusicOutputSettings(state.musicOutputSettings);
+  if (promptTab === "musicOutput") return renderMusicOutputSettings(state);
   if (generationType === "music") return renderMusicPromptEditor(state.musicOutputSettings);
   return renderPromptEditor(state.recipe, promptTab, descriptionBusy);
 }
@@ -315,7 +320,16 @@ function renderLyricsEditor(settings, disabled) {
   >${escapeHTML(settings.lyrics)}</textarea>`;
 }
 
-function renderMusicOutputSettings(settings) {
+function renderMusicOutputSettings(state) {
+  const settings = state.musicOutputSettings;
+  const musicConfiguration = activeProfile(state, "textToMusic")?.music || {};
+  const minimumDurationSeconds = Number.isFinite(musicConfiguration.minimumDurationSeconds)
+    ? musicConfiguration.minimumDurationSeconds
+    : MUSIC_DURATION_MIN_SECONDS;
+  const maximumDurationSeconds = Number.isFinite(musicConfiguration.maximumDurationSeconds)
+    ? musicConfiguration.maximumDurationSeconds
+    : MUSIC_DURATION_MAX_SECONDS;
+  const maximumDuration = musicConfiguration.durationSemantics === "maximum";
   return `<div class="music-output-panel">
     <section class="output-setting-group music-output-setting-card">
       <div class="output-setting-heading">
@@ -331,11 +345,11 @@ function renderMusicOutputSettings(settings) {
           </select>
         </div>
         ${musicNumberField(
-          t("workspace.duration"),
+          t(maximumDuration ? "workspace.maximumDuration" : "workspace.duration"),
           "durationSeconds",
           settings.durationSeconds,
-          MUSIC_DURATION_MIN_SECONDS,
-          MUSIC_DURATION_MAX_SECONDS,
+          minimumDurationSeconds,
+          maximumDurationSeconds,
         )}
         ${musicNumberField(t("workspace.steps"), "steps", settings.steps, 1, 100)}
         <div class="field-group">
@@ -368,7 +382,9 @@ function renderMusicOutputSettings(settings) {
           </div>
         </div>
       </div>
-      <p class="section-note music-output-note">${t("workspace.musicRuntimeNote")}</p>
+      <p class="section-note music-output-note">${t(
+        maximumDuration ? "workspace.musicMaximumDurationNote" : "workspace.musicTargetDurationNote",
+      )}</p>
     </section>
   </div>`;
 }
@@ -624,6 +640,9 @@ function renderLoRAControl(state) {
 
 function renderPreviewPanel(state, ui) {
   const fixedKindAsset = ui.previewMode === "single" ? selectedAsset(state) : null;
+  const zoomDisabled = ui.generationType === "music"
+    || selectedAsset(state)?.kind === "generatedAudio";
+  const previewUI = zoomDisabled ? { ...ui, zoom: 1 } : ui;
   return `
     <main class="preview-panel">
       <div class="preview-toolbar">
@@ -635,19 +654,19 @@ function renderPreviewPanel(state, ui) {
           ui.previewMode === "grid"
             ? ""
             : `
-              <button class="icon-button compact" data-action="zoomOut">−</button>
-              <input class="zoom-range" type="range" min="0.25" max="2.5" step="0.25" value="${ui.zoom}" data-ui-field="zoom" />
-              <span class="section-note">${Math.round(ui.zoom * 100)}%</span>
-              <button class="icon-button compact" data-action="zoomIn">＋</button>
+              <button class="icon-button compact" data-action="zoomOut" ${zoomDisabled ? "disabled" : ""}>−</button>
+              <input class="zoom-range" type="range" min="0.25" max="2.5" step="0.25" value="${previewUI.zoom}" data-ui-field="zoom" ${zoomDisabled ? "disabled" : ""} />
+              <span class="section-note">${Math.round(previewUI.zoom * 100)}%</span>
+              <button class="icon-button compact" data-action="zoomIn" ${zoomDisabled ? "disabled" : ""}>＋</button>
               <button
                 class="icon-button compact"
                 data-action="fitPreview"
                 title="${t("preview.fit")}"
                 aria-label="${t("preview.fit")}"
+                ${zoomDisabled ? "disabled" : ""}
               >
                 <svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="5" y="5" width="14" height="14" rx="2" />
-                  <path d="M9 2v3M15 2v3M9 22v-3M15 22v-3M2 9h3M2 15h3M22 9h-3M22 15h-3" />
+                  <path d="M9 4H4v5M15 4h5v5M20 15v5h-5M9 20H4v-5" />
                 </svg>
               </button>
               <button
@@ -663,8 +682,8 @@ function renderPreviewPanel(state, ui) {
             `
         }
       </div>
-      <div class="preview-stage" data-scroll-id="preview" data-pan-enabled="${ui.previewMode !== "grid"}">
-        ${renderPreviewContent(state, ui)}
+      <div class="preview-stage" data-scroll-id="preview" data-pan-enabled="${ui.previewMode !== "grid"}" data-zoom-enabled="${!zoomDisabled}">
+        ${renderPreviewContent(state, previewUI)}
       </div>
       ${fixedKindAsset ? `<span class="asset-kind preview-fixed-kind">${kindLabel(fixedKindAsset.kind)}</span>` : ""}
       ${renderFilmstrip(state)}

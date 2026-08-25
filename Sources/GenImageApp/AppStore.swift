@@ -173,12 +173,24 @@ struct MusicOutputSettings: Codable, Hashable, Sendable {
 @MainActor
 final class AppStore: ObservableObject {
     @Published var selectedSection: AppSection = .workspace
-    @Published var projects: [Project]
-    @Published var selectedProjectID: UUID
-    @Published var assets: [ImageAsset]
-    @Published var operations: [WorkflowOperation]
-    @Published var selectedAssetID: UUID?
-    @Published var comparisonAssetID: UUID?
+    @Published var projects: [Project] {
+        didSet { persistProjectWorkspace() }
+    }
+    @Published var selectedProjectID: UUID {
+        didSet { persistProjectWorkspace() }
+    }
+    @Published var assets: [ImageAsset] {
+        didSet { persistProjectWorkspace() }
+    }
+    @Published var operations: [WorkflowOperation] {
+        didSet { persistProjectWorkspace() }
+    }
+    @Published var selectedAssetID: UUID? {
+        didSet { persistProjectWorkspace() }
+    }
+    @Published var comparisonAssetID: UUID? {
+        didSet { persistProjectWorkspace() }
+    }
     @Published var recipe: GenerationRecipe {
         didSet {
             Self.persistRecipeSettings(recipe)
@@ -225,8 +237,10 @@ final class AppStore: ObservableObject {
     private var imageToImageService: Qwen2511ImageToImageService
     private var upscaleService: CoreMLUpscaleService
     private var videoGenerationService: LTXVideoGenerationService
-    private var musicGenerationService: MiniMaxMusic3GenerationService
+    private var musicGenerationService: MusicGenerationRouter
     private let modelInstaller = HuggingFaceModelInstaller()
+    private let projectWorkspaceURL: URL
+    private var projectWorkspacePersistenceEnabled = false
 
     private static let recipeSettingsKey = "GenImage.recipeSettings.v1"
     private static let videoOutputSettingsKey = "GenImage.videoOutputSettings.v1"
@@ -261,6 +275,8 @@ final class AppStore: ObservableObject {
     }
 
     init() {
+        projectWorkspaceURL = ProjectWorkspacePersistence.defaultURL()
+        let restoredWorkspace = try? ProjectWorkspacePersistence.load(from: projectWorkspaceURL)
         let applicationSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
@@ -292,8 +308,15 @@ final class AppStore: ObservableObject {
             outputDirectory: generatedDirectory
         )
         videoGenerationService = LTXVideoGenerationService(outputDirectory: generatedDirectory)
-        musicGenerationService = MiniMaxMusic3GenerationService(outputDirectory: generatedDirectory)
-        let project = Project(name: "示範專案")
+        musicGenerationService = Self.makeMusicGenerationService(outputDirectory: generatedDirectory)
+        let fallbackProject = Project(name: "示範專案")
+        let initialProjects = restoredWorkspace?.projects.isEmpty == false
+            ? restoredWorkspace!.projects
+            : [fallbackProject]
+        let initialProjectIDs = Set(initialProjects.map(\.id))
+        let initialSelectedProjectID = restoredWorkspace.map(\.selectedProjectID)
+            .flatMap { initialProjectIDs.contains($0) ? $0 : nil }
+            ?? initialProjects[0].id
         let configuredModelRoot = ProcessInfo.processInfo.environment["GENIMAGE_MODEL_ROOT"]
             ?? UserDefaults.standard.string(forKey: Self.modelRootKey)
         let modelRootURL = ModelStorage.rootURL(explicitPath: configuredModelRoot)
@@ -326,8 +349,8 @@ final class AppStore: ObservableObject {
             .flatMap { activeID in profileCatalog.first { $0.id == activeID } }
             ?? profileCatalog.first { $0.capability == .textToMusic }
 
-        projects = [project]
-        selectedProjectID = project.id
+        projects = initialProjects
+        selectedProjectID = initialSelectedProjectID
         modelRootPath = modelRootURL.path
         outputDirectoryPath = generatedDirectory.path
         models = catalog
@@ -379,12 +402,52 @@ final class AppStore: ObservableObject {
         Self.persistMusicOutputSettings(initialMusicOutputSettings)
         UserDefaults.standard.set(generatedDirectory.path, forKey: Self.outputDirectoryKey)
 
-        assets = []
-        selectedAssetID = nil
-        comparisonAssetID = nil
-        operations = []
+        let restoredAssets = (restoredWorkspace?.assets ?? []).filter {
+            initialProjectIDs.contains($0.projectID)
+        }
+        let restoredAssetIDs = Set(restoredAssets.map(\.id))
+        assets = restoredAssets
+        selectedAssetID = restoredWorkspace?.selectedAssetID.flatMap {
+            restoredAssetIDs.contains($0) ? $0 : nil
+        }
+        comparisonAssetID = restoredWorkspace?.comparisonAssetID.flatMap {
+            restoredAssetIDs.contains($0) ? $0 : nil
+        }
+        operations = (restoredWorkspace?.operations ?? []).filter {
+            initialProjectIDs.contains($0.projectID)
+        }
+        projectWorkspacePersistenceEnabled = true
+        persistProjectWorkspace()
         startSystemMetricsUpdates()
         checkForUpdates()
+    }
+
+    private func persistProjectWorkspace() {
+        guard projectWorkspacePersistenceEnabled else { return }
+        let snapshot = ProjectWorkspaceSnapshot(
+            projects: projects,
+            selectedProjectID: selectedProjectID,
+            assets: assets,
+            operations: operations,
+            selectedAssetID: selectedAssetID,
+            comparisonAssetID: comparisonAssetID
+        )
+        do {
+            try ProjectWorkspacePersistence.save(snapshot, to: projectWorkspaceURL)
+        } catch {
+            statusMessage = "無法保存開啟中的生成專案：\(error.localizedDescription)"
+        }
+    }
+
+    private static func makeMusicGenerationService(
+        outputDirectory: URL
+    ) -> MusicGenerationRouter {
+        MusicGenerationRouter(
+            adapters: [
+                MiniMaxMusic3GenerationService(outputDirectory: outputDirectory),
+                ACEStepMusicGenerationService(outputDirectory: outputDirectory)
+            ]
+        )
     }
 
     func checkForUpdates() {
@@ -692,7 +755,7 @@ final class AppStore: ObservableObject {
             await upscaleService.setOutputDirectory(outputURL)
         }
         videoGenerationService = LTXVideoGenerationService(outputDirectory: outputURL)
-        musicGenerationService = MiniMaxMusic3GenerationService(outputDirectory: outputURL)
+        musicGenerationService = Self.makeMusicGenerationService(outputDirectory: outputURL)
         statusMessage = "輸出目錄已更新：\(outputURL.path)"
         return true
     }
@@ -926,19 +989,26 @@ final class AppStore: ObservableObject {
             return "Profile「\(profile.name)」的模型不支援「\(profile.capability.title)」。"
         }
 
-        let expectedArchitecture: InferenceArchitecture?
+        let compatibleArchitectures: Set<InferenceArchitecture>?
         switch profile.capability {
         case .textToImage, .imageToText:
-            expectedArchitecture = .mlxSwift
+            compatibleArchitectures = [.mlxSwift]
         case .upscale:
-            expectedArchitecture = .coreML
-        case .imageToImage, .imageToVideo, .textToVideo, .textToMusic:
-            expectedArchitecture = .externalCLI
+            compatibleArchitectures = [.coreML]
+        case .imageToImage, .imageToVideo, .textToVideo:
+            compatibleArchitectures = [.externalCLI]
+        case .textToMusic:
+            compatibleArchitectures = [.mlxSwift, .externalCLI]
         case .controlNet, .lora:
-            expectedArchitecture = nil
+            compatibleArchitectures = nil
         }
-        if let expectedArchitecture, profile.architecture != expectedArchitecture {
-            return "Profile「\(profile.name)」的架構「\(profile.architecture.title)」與目前 Runtime 不相容；需要「\(expectedArchitecture.title)」。"
+        if let compatibleArchitectures,
+           !compatibleArchitectures.contains(profile.architecture) {
+            let architectureNames = compatibleArchitectures
+                .map(\.title)
+                .sorted()
+                .joined(separator: "、")
+            return "Profile「\(profile.name)」的架構「\(profile.architecture.title)」與目前 Runtime 不相容；需要「\(architectureNames)」。"
         }
 
         for configuration in profile.loras {
@@ -1356,6 +1426,19 @@ final class AppStore: ObservableObject {
         statusMessage = message
     }
 
+    private static func formattedMusicDuration(_ durationSeconds: Double) -> String {
+        let totalSeconds = max(0, Int(durationSeconds.rounded()))
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        if minutes > 0, seconds > 0 {
+            return "\(minutes) 分 \(seconds) 秒"
+        }
+        if minutes > 0 {
+            return "\(minutes) 分"
+        }
+        return "\(seconds) 秒"
+    }
+
     func requestMusicGeneration() {
         guard ensureInferenceIdle() else { return }
         guard let profile = activeProfile(for: .textToMusic) else {
@@ -1386,9 +1469,13 @@ final class AppStore: ObservableObject {
 
         let projectID = selectedProjectID
         let recipeID = recipe.id
+        let requestedDuration = "\(options.durationSeconds) 秒"
+        let durationTitle = profile.music?.durationSemantics == .maximum
+            ? "最長 \(requestedDuration)"
+            : requestedDuration
         let job = GenerationJob(
             action: .generateMusic,
-            title: "生成 \(options.durationSeconds) 秒 \(options.format.displayName) 音樂"
+            title: "生成 \(durationTitle) \(options.format.displayName) 音樂"
         )
         jobs.append(job)
         updateJob(job.id) {
@@ -1439,7 +1526,12 @@ final class AppStore: ObservableObject {
                         $0.progress = 1
                         $0.state = .completed
                     }
-                    statusMessage = "文生音樂完成，已輸出 \(options.format.displayName)。"
+                    let actualDuration = asset.mediaDurationSeconds.map(Self.formattedMusicDuration)
+                        ?? "未知"
+                    let requestedLabel = profile.music?.durationSemantics == .maximum
+                        ? "設定最長 \(requestedDuration)"
+                        : "設定 \(requestedDuration)"
+                    statusMessage = "文生音樂完成，\(requestedLabel)，實際生成 \(actualDuration)，已輸出 \(options.format.displayName)。"
                 }
             } catch is CancellationError {
                 await MainActor.run { [weak self] in
@@ -1520,6 +1612,27 @@ final class AppStore: ObservableObject {
         } else {
             statusMessage = "已移除「\(removedAsset.title)」。"
         }
+    }
+
+    func closeWorkspaceProject(assetIDs: [UUID]) {
+        let closedAssetIDs = Set(assetIDs).intersection(Set(assets.map(\.id)))
+        guard !closedAssetIDs.isEmpty else { return }
+
+        operations.removeAll { operation in
+            operation.inputAssetID.map(closedAssetIDs.contains) == true
+                || !closedAssetIDs.isDisjoint(with: operation.outputAssetIDs)
+        }
+        assets.removeAll { closedAssetIDs.contains($0.id) }
+        for index in assets.indices where assets[index].parentAssetID.map(closedAssetIDs.contains) == true {
+            assets[index].parentAssetID = nil
+        }
+        if selectedAssetID.map(closedAssetIDs.contains) == true {
+            selectedAssetID = nil
+        }
+        if comparisonAssetID.map(closedAssetIDs.contains) == true {
+            comparisonAssetID = nil
+        }
+        statusMessage = "已關閉生成專案分頁；\(closedAssetIDs.count) 個結果已從工作區移除，輸出檔案仍保留於磁碟。"
     }
 
     @discardableResult

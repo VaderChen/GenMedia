@@ -10,6 +10,7 @@ import {
   isInferenceBusy,
   refreshJobsPanel,
   refreshJobTimings,
+  renderCreationPanel,
   renderQuickTools,
   renderWorkspace,
 } from "./workspace.js";
@@ -33,8 +34,10 @@ const AUDIO_MAX_WAVEFORM_POINTS = 1_600;
 let state = null;
 let recipeTimer = null;
 let statusMessageTimer = null;
-let composingRecipeField = null;
-let renderDeferredDuringComposition = false;
+let activeEditableField = null;
+let composingEditableField = null;
+let renderDeferredDuringEditing = false;
+let deferredRenderTimer = null;
 let previewPan = null;
 let stateContentSignature = null;
 const pendingOutputs = [];
@@ -61,6 +64,7 @@ const ui = {
   renameWorkspaceTabValue: "",
   pasteDialogOpen: false,
   modelFilter: "all",
+  profileFilter: "all",
   modelSearch: "",
   language: getLocale(),
   theme: getTheme(),
@@ -79,17 +83,9 @@ onState((nextState) => {
   }
   const statusMessageChanged = nextState.statusMessage !== state?.statusMessage;
   const nextContentSignature = contentSignature(nextState);
-  if (state && modelProgressOnlyChanged(state, nextState)) {
-    state = nextState;
-    stateContentSignature = nextContentSignature;
-    refreshModelProgressDOM();
-    updateSystemMetricsDOM();
-    refreshJobsPanel(workspaceStateForActiveTab(state), root);
-    if (statusMessageChanged) scheduleStatusMessageDismiss(nextState.statusMessage);
-    refreshToastDOM();
-    return;
-  }
-  if (state && composingRecipeField) {
+  if (state && activeEditableField) {
+    const contentChanged = contentSignatureWithoutEditableSettings(nextState)
+      !== contentSignatureWithoutEditableSettings(state);
     const localRecipe = state.recipe;
     const localVideoOutputSettings = state.videoOutputSettings;
     const localMusicOutputSettings = state.musicOutputSettings;
@@ -101,10 +97,21 @@ onState((nextState) => {
       musicOutputSettings: localMusicOutputSettings,
     };
     stateContentSignature = nextContentSignature;
-    renderDeferredDuringComposition = true;
+    renderDeferredDuringEditing = renderDeferredDuringEditing || contentChanged;
     if (statusMessageChanged) scheduleStatusMessageDismiss(nextState.statusMessage);
+    refreshModelProgressDOM();
     updateSystemMetricsDOM();
     refreshJobsPanel(workspaceStateForActiveTab(state), root);
+    refreshToastDOM();
+    return;
+  }
+  if (state && modelProgressOnlyChanged(state, nextState)) {
+    state = nextState;
+    stateContentSignature = nextContentSignature;
+    refreshModelProgressDOM();
+    updateSystemMetricsDOM();
+    refreshJobsPanel(workspaceStateForActiveTab(state), root);
+    if (statusMessageChanged) scheduleStatusMessageDismiss(nextState.statusMessage);
     refreshToastDOM();
     return;
   }
@@ -279,22 +286,25 @@ root.addEventListener("click", async (event) => {
       case "toggleCreationPanel":
         ui.creationCollapsed = !ui.creationCollapsed;
         localStorage.setItem("genimage.creationCollapsed", String(ui.creationCollapsed));
-        render();
+        refreshCreationPanelDOM();
         break;
       case "promptTab":
         ui.promptTab = normalizePromptTab(target.dataset.tab, ui.generationType);
         localStorage.setItem("genimage.promptTab", ui.promptTab);
-        render();
+        refreshCreationPanelDOM();
         break;
       case "zoomIn":
+        if (isPreviewZoomDisabled()) break;
         ui.zoom = clampPreviewZoom(ui.zoom + 0.25);
         render();
         break;
       case "zoomOut":
+        if (isPreviewZoomDisabled()) break;
         ui.zoom = clampPreviewZoom(ui.zoom - 0.25);
         render();
         break;
       case "fitPreview":
+        if (isPreviewZoomDisabled()) break;
         ui.zoom = 1;
         render();
         break;
@@ -339,6 +349,10 @@ root.addEventListener("click", async (event) => {
         ui.modelFilter = target.dataset.filter;
         render();
         break;
+      case "profileFilter":
+        ui.profileFilter = target.dataset.filter;
+        render();
+        break;
       case "chooseModelRoot":
         await invoke("chooseModelRoot");
         break;
@@ -354,9 +368,6 @@ root.addEventListener("click", async (event) => {
         break;
       case "installProfileModels":
         await invoke("installProfileModels", { profileID: target.dataset.profileId });
-        break;
-      case "createProfile":
-        await invoke("createProfile", { capability: target.dataset.capability });
         break;
       case "duplicateProfile":
         await invoke("duplicateProfile", { profileID: target.dataset.profileId });
@@ -418,7 +429,7 @@ document.addEventListener("keydown", (event) => {
 root.addEventListener("change", async (event) => {
   if (event.target.dataset.uiField === "generationType") {
     setGenerationType(event.target.value);
-    render();
+    refreshCreationPanelDOM();
     return;
   }
 
@@ -552,32 +563,21 @@ root.addEventListener("input", (event) => {
     return;
   }
 
-  const videoField = event.target.dataset.videoField;
-  if (videoField) {
-    state.videoOutputSettings[videoField] = event.target.value;
-    return;
-  }
-
-  const musicField = event.target.dataset.musicField;
-  if (musicField) {
-    state.musicOutputSettings[musicField] = event.target.value;
-    if (event.isComposing || event.target.tagName !== "TEXTAREA") return;
+  const editableField = editableFieldFor(event.target);
+  if (editableField) {
+    updateEditableFieldValue(editableField, event.target.value);
+    if (
+      event.isComposing
+      || composingEditableField === editableField.key
+      || event.target.tagName !== "TEXTAREA"
+    ) return;
     clearTimeout(recipeTimer);
-    recipeTimer = setTimeout(() => syncMusicOutputSettings().catch(showBridgeError), 240);
-    return;
-  }
-
-  const recipeField = event.target.dataset.recipeField;
-  if (recipeField) {
-    state.recipe[recipeField] = event.target.value;
-    if (event.isComposing || composingRecipeField === recipeField) return;
-    if (event.target.tagName !== "TEXTAREA") return;
-    clearTimeout(recipeTimer);
-    recipeTimer = setTimeout(() => syncRecipe().catch(showBridgeError), 240);
+    recipeTimer = setTimeout(() => syncEditableField(editableField).catch(showBridgeError), 240);
     return;
   }
 
   if (event.target.dataset.uiField === "zoom") {
+    if (isPreviewZoomDisabled()) return;
     ui.zoom = Number(event.target.value);
     render();
     return;
@@ -594,25 +594,39 @@ root.addEventListener("input", (event) => {
   }
 });
 
+root.addEventListener("focusin", (event) => {
+  const editableField = editableFieldFor(event.target);
+  if (!editableField) return;
+  clearTimeout(deferredRenderTimer);
+  deferredRenderTimer = null;
+  activeEditableField = editableField;
+});
+
+root.addEventListener("focusout", (event) => {
+  const editableField = editableFieldFor(event.target);
+  if (!editableField || activeEditableField?.element !== event.target) return;
+  updateEditableFieldValue(editableField, event.target.value);
+  activeEditableField = null;
+  if (composingEditableField !== editableField.key) scheduleDeferredRender();
+});
+
 root.addEventListener("compositionstart", (event) => {
-  const recipeField = event.target.dataset.recipeField;
-  if (!recipeField) return;
-  composingRecipeField = recipeField;
+  const editableField = editableFieldFor(event.target);
+  if (!editableField) return;
+  activeEditableField = editableField;
+  composingEditableField = editableField.key;
   clearTimeout(recipeTimer);
 });
 
 root.addEventListener("compositionend", (event) => {
-  const recipeField = event.target.dataset.recipeField;
-  if (!state || !recipeField || composingRecipeField !== recipeField) return;
+  const editableField = editableFieldFor(event.target);
+  if (!state || !editableField || composingEditableField !== editableField.key) return;
 
-  state.recipe[recipeField] = event.target.value;
-  composingRecipeField = null;
-  if (renderDeferredDuringComposition) {
-    renderDeferredDuringComposition = false;
-    render();
-  }
+  updateEditableFieldValue(editableField, event.target.value);
+  composingEditableField = null;
   clearTimeout(recipeTimer);
-  recipeTimer = setTimeout(() => syncRecipe().catch(showBridgeError), 80);
+  recipeTimer = setTimeout(() => syncEditableField(editableField).catch(showBridgeError), 80);
+  if (!activeEditableField) scheduleDeferredRender();
 });
 
 root.addEventListener("keydown", (event) => {
@@ -641,7 +655,9 @@ document.addEventListener("paste", async (event) => {
 root.addEventListener(
   "wheel",
   (event) => {
-    const stage = event.target.closest(".preview-stage[data-pan-enabled=\"true\"]");
+    const stage = event.target.closest(
+      ".preview-stage[data-pan-enabled=\"true\"][data-zoom-enabled=\"true\"]",
+    );
     if (!stage || !state) return;
     event.preventDefault();
 
@@ -693,9 +709,18 @@ root.addEventListener("pointercancel", stopPreviewPan);
 
 function render() {
   if (!state) return;
+  clearTimeout(deferredRenderTimer);
+  deferredRenderTimer = null;
+  renderDeferredDuringEditing = false;
   previewPan = null;
-  disposeAudioVisualizers();
   const viewState = captureViewState();
+  const preservedMedia = preservePlayingMedia();
+  const preservedAudio = new Set(
+    preservedMedia
+      .filter(({ media }) => media.tagName === "AUDIO")
+      .map(({ media }) => media),
+  );
+  disposeAudioVisualizers(preservedAudio);
   root.innerHTML = `
     <div class="app-shell">
       ${renderSidebar()}
@@ -709,21 +734,53 @@ function render() {
     ${renderToast()}
   `;
   restoreViewState(viewState);
+  restorePlayingMedia(preservedMedia);
   setupAudioVisualizers();
   refreshJobTimings(state, root);
 }
 
-function disposeAudioVisualizers() {
-  audioVisualizerBindings.forEach((binding) => {
-    cancelAnimationFrame(binding.frameID);
-    binding.audio.pause();
-    binding.audio.removeEventListener("play", binding.onPlay);
-    binding.audio.removeEventListener("pause", binding.onPause);
-    binding.audio.removeEventListener("ended", binding.onPause);
-    binding.source?.disconnect();
-    binding.analyser?.disconnect();
+function refreshCreationPanelDOM() {
+  const currentPanel = root.querySelector(".creation-panel");
+  if (!state || ui.route !== "workspace" || !currentPanel) {
+    render();
+    return;
+  }
+
+  const currentScroll = currentPanel.querySelector('[data-scroll-id="creation"]');
+  const scrollPosition = currentScroll
+    ? { top: currentScroll.scrollTop, left: currentScroll.scrollLeft }
+    : null;
+  const template = document.createElement("template");
+  template.innerHTML = renderCreationPanel(workspaceStateForActiveTab(state), ui).trim();
+  const nextPanel = template.content.firstElementChild;
+  if (!nextPanel) {
+    render();
+    return;
+  }
+
+  currentPanel.replaceWith(nextPanel);
+  const nextScroll = nextPanel.querySelector('[data-scroll-id="creation"]');
+  if (nextScroll && scrollPosition) {
+    nextScroll.scrollTop = scrollPosition.top;
+    nextScroll.scrollLeft = scrollPosition.left;
+  }
+}
+
+function disposeAudioVisualizers(preservedAudio = new Set()) {
+  Array.from(audioVisualizerBindings.values()).forEach((binding) => {
+    if (!preservedAudio.has(binding.audio)) disposeAudioVisualizerBinding(binding);
   });
-  audioVisualizerBindings.clear();
+}
+
+function disposeAudioVisualizerBinding(binding) {
+  cancelAnimationFrame(binding.frameID);
+  binding.audio.pause();
+  binding.audio.removeEventListener("play", binding.onPlay);
+  binding.audio.removeEventListener("pause", binding.onPause);
+  binding.audio.removeEventListener("ended", binding.onPause);
+  binding.source?.disconnect();
+  binding.analyser?.disconnect();
+  audioVisualizerBindings.delete(binding.audio);
 }
 
 function setupAudioVisualizers() {
@@ -731,6 +788,7 @@ function setupAudioVisualizers() {
     const audio = container.querySelector("[data-audio-visualizer-audio]");
     const canvas = container.querySelector("[data-audio-visualizer-canvas]");
     if (!audio || !canvas) return;
+    if (audioVisualizerBindings.has(audio)) return;
 
     const binding = {
       audio,
@@ -760,6 +818,69 @@ function setupAudioVisualizers() {
     audioVisualizerBindings.set(audio, binding);
     drawAudioVisualizer(binding);
   });
+}
+
+function preservePlayingMedia() {
+  const occurrenceByIdentity = new Map();
+  const preservedMedia = [];
+  root.querySelectorAll("audio[data-asset-id], video[data-asset-id]").forEach((media) => {
+    const identity = mediaRenderIdentity(media);
+    const occurrence = occurrenceByIdentity.get(identity) || 0;
+    occurrenceByIdentity.set(identity, occurrence + 1);
+    if (media.paused || media.ended) return;
+
+    const host = media.tagName === "AUDIO"
+      ? media.closest("[data-audio-visualizer]")
+      : media;
+    if (!host) return;
+    host.remove();
+    preservedMedia.push({ host, identity, media, occurrence });
+  });
+  return preservedMedia;
+}
+
+function restorePlayingMedia(preservedMedia) {
+  if (!preservedMedia.length) return;
+  const candidatesByIdentity = new Map();
+  root.querySelectorAll("audio[data-asset-id], video[data-asset-id]").forEach((media) => {
+    const identity = mediaRenderIdentity(media);
+    const candidates = candidatesByIdentity.get(identity) || [];
+    candidates.push(media);
+    candidatesByIdentity.set(identity, candidates);
+  });
+
+  preservedMedia.forEach((preserved) => {
+    const replacement = candidatesByIdentity.get(preserved.identity)?.[preserved.occurrence];
+    const replacementHost = replacement?.tagName === "AUDIO"
+      ? replacement.closest("[data-audio-visualizer]")
+      : replacement;
+    if (replacementHost) {
+      replacementHost.replaceWith(preserved.host);
+      return;
+    }
+    if (preserved.media.tagName === "AUDIO") {
+      const binding = audioVisualizerBindings.get(preserved.media);
+      if (binding) disposeAudioVisualizerBinding(binding);
+      else preserved.media.pause();
+    } else {
+      preserved.media.pause();
+    }
+  });
+}
+
+function mediaRenderIdentity(media) {
+  const region = media.closest(".preview-panel")
+    ? "preview"
+    : media.closest(".inspector-panel")
+      ? "inspector"
+      : "other";
+  return [
+    media.tagName,
+    media.dataset.assetId,
+    region,
+    media.controls ? "controls" : "no-controls",
+    media.muted ? "muted" : "audible",
+  ].join(":");
 }
 
 function connectAudioVisualizer(binding) {
@@ -1146,26 +1267,13 @@ async function activateWorkspaceTab(tabID) {
 }
 
 async function closeWorkspaceTab(tabID) {
-  if (ui.workspaceTabs.length <= 1) return;
+  if (ui.workspaceTabs.length <= 1 || isInferenceBusy(state)) return;
   const index = ui.workspaceTabs.findIndex((tab) => tab.id === tabID);
   if (index < 0) return;
 
   const closingTab = ui.workspaceTabs[index];
   const replacementTab = ui.workspaceTabs[index + 1] || ui.workspaceTabs[index - 1];
-  closingTab.assetIDs.forEach((assetID) => {
-    if (!replacementTab.assetIDs.includes(assetID)) replacementTab.assetIDs.push(assetID);
-  });
-  if (!replacementTab.selectedAssetID && closingTab.selectedAssetID) {
-    replacementTab.selectedAssetID = closingTab.selectedAssetID;
-  }
-  replacementTab.selectedAssetIDs ||= [];
-  for (const assetID of closingTab.selectedAssetIDs || []) {
-    if (!replacementTab.selectedAssetIDs.includes(assetID)) {
-      replacementTab.selectedAssetIDs.push(assetID);
-    }
-  }
-  replacementTab.selectionAnchorID = closingTab.selectionAnchorID
-    || replacementTab.selectionAnchorID;
+  await invoke("closeWorkspaceProject", { assetIDs: closingTab.assetIDs });
 
   ui.workspaceTabs.splice(index, 1);
   const closedActiveTab = ui.activeWorkspaceTabID === tabID;
@@ -1260,6 +1368,14 @@ function isImageAssetID(assetID) {
 
 function isImageAsset(asset) {
   return !["generatedVideo", "generatedAudio"].includes(asset.kind);
+}
+
+function isPreviewZoomDisabled() {
+  if (!state || ui.generationType === "music") return true;
+  const workspaceState = workspaceStateForActiveTab(state);
+  return workspaceState.assets.some(
+    (asset) => asset.id === workspaceState.selectedAssetID && asset.kind === "generatedAudio",
+  );
 }
 
 function selectedVideoSourceAssetIDs() {
@@ -1463,7 +1579,7 @@ function renderSidebar() {
 
 function renderRoute() {
   if (ui.route === "models") return renderModels(state, ui);
-  if (ui.route === "profiles") return renderProfiles(state);
+  if (ui.route === "profiles") return renderProfiles(state, ui);
   if (ui.route === "downloads") return renderDownloads(state);
   if (ui.route === "settings") return renderSettings(state, ui);
   return renderWorkspace(workspaceStateForActiveTab(state), ui);
@@ -1577,6 +1693,15 @@ function contentSignature(value) {
     }));
   }
   return JSON.stringify(sortForSignature(content));
+}
+
+function contentSignatureWithoutEditableSettings(value) {
+  return contentSignature({
+    ...value,
+    recipe: {},
+    videoOutputSettings: {},
+    musicOutputSettings: {},
+  });
 }
 
 function sortForSignature(value) {
@@ -1750,6 +1875,49 @@ function syncMusicOutputSettings() {
     seed: String(state.musicOutputSettings.seed),
     format: state.musicOutputSettings.format,
   });
+}
+
+function editableFieldFor(element) {
+  const definitions = [
+    ["recipeField", "recipe", "recipe"],
+    ["videoField", "videoOutputSettings", "video"],
+    ["musicField", "musicOutputSettings", "music"],
+  ];
+  for (const [datasetKey, stateKey, syncKind] of definitions) {
+    const field = element?.dataset?.[datasetKey];
+    if (field) {
+      return {
+        element,
+        field,
+        key: `${stateKey}:${field}`,
+        stateKey,
+        syncKind,
+      };
+    }
+  }
+  return null;
+}
+
+function updateEditableFieldValue(editableField, value) {
+  const settings = state?.[editableField.stateKey];
+  if (settings) settings[editableField.field] = value;
+}
+
+function syncEditableField(editableField) {
+  if (editableField.syncKind === "video") return syncVideoOutputSettings();
+  if (editableField.syncKind === "music") return syncMusicOutputSettings();
+  return syncRecipe();
+}
+
+function scheduleDeferredRender() {
+  if (!renderDeferredDuringEditing) return;
+  clearTimeout(deferredRenderTimer);
+  deferredRenderTimer = setTimeout(() => {
+    deferredRenderTimer = null;
+    if (activeEditableField || composingEditableField) return;
+    renderDeferredDuringEditing = false;
+    render();
+  }, 0);
 }
 
 function normalizeLegacyPromptTab(value) {

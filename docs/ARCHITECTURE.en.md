@@ -1,4 +1,4 @@
-# GenImage Architecture
+# GenMedia Architecture
 
 [繁體中文](ARCHITECTURE.md) | English | [日本語](ARCHITECTURE.ja.md) | [한국어](ARCHITECTURE.ko.md)
 
@@ -37,10 +37,16 @@ AppStore / Workflow coordination
         └── ImageUpscaling
                     │
                     ▼
-       MLX Swift / Core ML / External CLI
+       MLX Swift / Core ML / Local REST Service / External CLI
 ```
 
 The Web UI can access local capabilities only through the bridge. It cannot directly read arbitrary files, model directories, or system APIs.
+
+### Web UI Update Strategy
+
+- While a Prompt, negative Prompt, or lyrics field is focused, incoming Swift state preserves local edits and defers unnecessary full rendering so the caret, selection, and IME composition are not reset.
+- Generation type and Prompt, Lyrics, and output-setting tabs use an independent creation-panel renderer and do not replace the preview, players, Inspector, or sidebar DOM.
+- When global state genuinely requires a full render, playing `<audio>`, `<video>`, and audio-visualizer nodes are detached and reattached at the matching asset position, preserving playback progress and the Web Audio connection.
 
 ## Profiles
 
@@ -71,6 +77,8 @@ Built-in profiles are not modified directly. Users duplicate a profile before sa
 
 `WorkflowGraph` provides lineage and children queries, so the UI does not need to infer asset relationships.
 
+Open workspace tabs define generation-project lifetimes. Swift atomically stores `Project`, `ImageAsset`, `WorkflowOperation`, and selection state as a JSON snapshot under Application Support; ordinary app termination does not clear it. The Web UI keeps tab metadata in WebKit localStorage. Closing a tab notifies the native layer through the bridge to remove that tab's asset and lineage indexes without deleting exported media files.
+
 ## Inference Runtimes
 
 Text-to-image uses `Z-Image.swift` commit `28bfcf3148c041a554629247170eb54d9ac46830`:
@@ -98,13 +106,15 @@ Video generation is handled by `LTXVideoGenerationService`, which invokes `ltx-2
 - MP4 outputs are added to the workspace as `generatedVideo` assets and played with the native Web UI `<video>` element.
 - The runtime can be replaced through `GENIMAGE_LTX_RUNTIME` or standard installation locations without coupling the Python implementation to the UI or `AppStore`.
 
-Music generation is handled by `MiniMaxMusic3GenerationService`, which invokes `mlx-minimax-music3 generate`:
+Music generation is dispatched by `MusicGenerationRouter` through `MusicRuntimeAdapter.supports`, keeping model IDs out of centralized router logic:
 
 - Text-to-music uses `MusicGenerating`, `MusicGenerationRequest`, and `MusicGenerationOptions`.
-- Swift validates the profile, model completeness, style prompt, a 5–300 second duration (up to five minutes), steps, and output format. Lyrics are optional; an empty value is converted to an instrumental marker and a no-vocals prompt.
-- The runtime always creates a temporary WAV, which FFmpeg converts to MP3 at 320 kbps, M4A AAC at 256 kbps, ADTS AAC at 256 kbps, or lossless FLAC.
-- WAV, prompt, lyrics, and log files are cleaned after success, failure, or cancellation; only completed compressed audio is retained as a `generatedAudio` asset.
-- The Web UI plays audio with native `<audio controls>`, while the inspector reports actual duration, format, 44.1 kHz sample rate, and channel count.
-- The runtime can be replaced through `GENIMAGE_MINIMAX_MUSIC3_RUNTIME` or the standard Application Support location. The model is installed from a fixed revision and retains its separate Community License.
+- `ACEStepMusicGenerationService` uses a `.mlxSwift` profile and calls `ACEStepSwiftRuntime` directly for Qwen3 embedding, condition encoding, Turbo DiT, Euler sampling, and Oobleck VAE decoding, without starting an external service or process.
+- ACE-Step supports 10–300 seconds, 1–20 steps, optional lyrics, and instrumental generation. Latent length is derived from the VAE sample rate and hop length; long audio uses overlap-discard tiled decoding and streamed PCM writing to limit peak memory. Its code and model use the MIT License.
+- Music profiles expose duration bounds and target/maximum semantics through `ProfileMusicConfiguration`, so the Web UI does not branch on model IDs.
+- `MiniMaxMusic3GenerationService` uses an `.externalCLI` profile to invoke `mlx-minimax-music3 generate`. Its 5–300 second parameter is a maximum duration, and the model may stop naturally when it emits the audio end token. Its model retains its separate Community License.
+- Both adapters obtain a temporary WAV and use `AudioOutputEncoder` to produce MP3 at 320 kbps, M4A AAC at 256 kbps, ADTS AAC at 256 kbps, or lossless FLAC.
+- Temporary files are cleaned after success, failure, or cancellation. Only completed compressed audio is retained as a `generatedAudio` asset with actual duration, sample rate, and channel count.
+- ACE-Step weights are managed by Model Center, while the native runtime is compiled into the app and uses no separate installation path or service environment variables.
 
 The MLX metallib is copied from `RuntimeSupport/mlx.metallib` into the release executable directory by `build.command`. Before distribution, model license review, 16/24/32 GB stress testing, app bundling, signing, and notarization still need to be completed.

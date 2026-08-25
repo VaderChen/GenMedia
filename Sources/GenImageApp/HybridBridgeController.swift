@@ -107,6 +107,14 @@ final class HybridBridgeController: NSObject, ObservableObject {
             guard let id = uuid(params["assetID"]) else { throw BridgeError.invalidParameters }
             store.removeAsset(id, selecting: uuid(params["replacementAssetID"]))
 
+        case "closeWorkspaceProject":
+            guard let rawAssetIDs = params["assetIDs"] as? [String] else {
+                throw BridgeError.invalidParameters
+            }
+            store.closeWorkspaceProject(
+                assetIDs: rawAssetIDs.compactMap(UUID.init(uuidString:))
+            )
+
         case "openAsset":
             try openAsset(params)
 

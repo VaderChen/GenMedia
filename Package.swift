@@ -11,8 +11,10 @@ let package = Package(
         .executable(name: "GenImage", targets: ["GenImageApp"]),
         .executable(name: "GenImageDoctor", targets: ["GenImageDoctor"]),
         .executable(name: "GenImageMCP", targets: ["GenImageMCP"]),
+        .executable(name: "ACEStepSwiftPoC", targets: ["ACEStepSwiftPoC"]),
         .library(name: "GenImageCore", targets: ["GenImageCore"]),
         .library(name: "GenImageRuntime", targets: ["GenImageRuntime"]),
+        .library(name: "ACEStepSwiftRuntime", targets: ["ACEStepSwiftRuntime"]),
         .library(name: "GenImageMCPServer", targets: ["GenImageMCPServer"])
     ],
     dependencies: [
@@ -25,12 +27,24 @@ let package = Package(
             exact: "2.30.6"
         ),
         .package(
+            url: "https://github.com/ml-explore/mlx-swift.git",
+            exact: "0.30.6"
+        ),
+        .package(
             url: "https://github.com/apple/swift-log.git",
             from: "1.6.4"
         )
     ],
     targets: [
         .target(name: "GenImageCore"),
+        .target(
+            name: "ACEStepSwiftRuntime",
+            dependencies: [
+                .product(name: "ZImage", package: "z-image.swift"),
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift")
+            ]
+        ),
         .executableTarget(
             name: "GenImageApp",
             dependencies: ["GenImageCore", "GenImageRuntime"],
@@ -46,6 +60,7 @@ let package = Package(
             name: "GenImageRuntime",
             dependencies: [
                 "GenImageCore",
+                "ACEStepSwiftRuntime",
                 .product(name: "ZImage", package: "z-image.swift"),
                 .product(name: "MLXVLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
@@ -59,6 +74,14 @@ let package = Package(
         .executableTarget(
             name: "GenImageMCP",
             dependencies: ["GenImageMCPServer"]
+        ),
+        .executableTarget(
+            name: "ACEStepSwiftPoC",
+            dependencies: [
+                "ACEStepSwiftRuntime",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift")
+            ]
         ),
         .testTarget(
             name: "GenImageCoreTests",

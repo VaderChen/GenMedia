@@ -2,38 +2,29 @@
 
 [繁體中文](ROADMAP.md) | [English](ROADMAP.en.md) | [日本語](ROADMAP.ja.md) | 한국어
 
-## 완료: Foundation
+## 완료: 핵심 기능
 
-- Swift Package와 macOS 14 이상 애플리케이션 진입점.
-- HTML/CSS/JavaScript 하이브리드 UI.
-- JSON Bridge와 로컬 이미지 scheme.
-- 텍스트→이미지, 이미지→텍스트, 업스케일의 독립 서비스 인터페이스.
-- 프로필 모델, 전환, 복제, revision, 작업 스냅샷.
-- 작업 대기열, 작업 흐름 분기, 모델 센터, 이미지 미리보기 UI.
-- Core ML Real-ESRGAN 512 타일/4배 업스케일 Runtime과 엔드투엔드 테스트.
-- 네이티브 Z-Image Turbo Q4 텍스트→이미지 Runtime, 진행률, 취소.
-- 네이티브 Qwen3-VL 4-bit 이미지→텍스트 Runtime과 다국어 설명.
-- 텍스트→이미지 출력을 이미지→텍스트 및 업스케일과 연결하는 엔드투엔드 테스트.
-- MLX metallib Release 패키징과 네이티브 MCP 추론 도구.
-- Core 단위 테스트와 JavaScript 구문 검증.
+- Swift Package, macOS 14 이상 App, Apple Silicon 네이티브 MLX/Core ML 추론, 하이브리드 Web UI.
+- 텍스트→이미지, 이미지→텍스트, 이미지→이미지, 텍스트→비디오, 이미지→비디오, 텍스트→음악, 4배 업스케일 독립 서비스와 에셋 lineage.
+- Z-Image Turbo, Qwen3-VL, Qwen 2511, LTX-2.3, ACE-Step 1.5, MiniMax Music 3, Real-ESRGAN 프로필.
+- 음악 Prompt, 선택적 가사, 일반적인 음악 스타일, 5~300초 설정, MP3/M4A/AAC/FLAC 출력.
+- 모델 센터 다운로드, 일시 정지, 이어받기, 디스크 사전 검사, 복구, 삭제, 프로필 종속성 검사, 설치 후 자동 정렬.
+- 작업 대기열, 취소, 진행률, 예상 남은 시간, 생성 시간, 모델 캐시, 수동 메모리 해제.
+- 각 작업 공간 탭을 영구 생성 프로젝트로 취급하고 재실행 후 에셋, 작업, 선택 상태, 프로필 스냅샷 복원.
+- 생성 패널 부분 렌더링, 커서와 IME 보호, 오디오/비디오 연속 재생.
+- `Image-YYYYMMDD-HHmm`, `Video-YYYYMMDD-HHmm`, `Music-YYYYMMDD-HHmm` 출력 이름과 같은 분 충돌 방지 일련번호.
+- Release App bundle, MLX metallib, 네이티브 MCP 추론 도구, 독립 DMG 서명/공증 흐름.
 
-## 다음 단계: Runtime
+## 현재 단계: 안정화와 검증
 
-1. 이어받기, SHA-256, 디스크 사전 검사, 복구, 삭제를 지원하는 실제 `ModelDownloadManager`를 구현합니다.
-2. 애플리케이션 에셋 디렉터리를 만들고 가져온 이미지를 복사하여 임시 파일 권한에 의존하지 않도록 합니다.
-3. 작업, 프로필, 프로젝트 상태를 영구 저장합니다.
-4. 생성 매개변수, 모델 revision, 출력 이미지 메타데이터를 보존합니다.
-5. MLX 모델 언로드 정책과 다중 작업 메모리 조정을 추가합니다.
+1. 16 GB, 24 GB, 32 GB 환경에서 ACE-Step 장시간 오디오의 메모리, 발열, 취소, 복구 테스트를 완료합니다.
+2. 다운로드 중단, 해시 불일치, 디스크 부족, 재시작 복구 테스트 범위를 확장합니다.
+3. 앱 비정상 종료, 에셋 누락, 인덱스 복구 상황에서 다중 탭 프로젝트 일관성을 검증합니다.
+4. Runtime, 모델, LoRA의 라이선스 화면과 배포 manifest를 완성합니다.
 
-## 이후: Caption과 Upscale
+## 이후
 
-1. Z-Image, Qwen3-VL, Real-ESRGAN의 라이선스 화면을 완성합니다.
-2. 프로필 architecture를 기반으로 확장 가능한 Engine Factory를 구축합니다.
-3. 프로필 가져오기/내보내기와 버전 마이그레이션을 추가합니다.
-
-## 출시 전
-
-- 16 GB, 24 GB, 32 GB Apple Silicon에서 메모리 및 발열 부하 테스트.
-- 모델 다운로드 중단 및 디스크 공간 부족 테스트.
-- App Sandbox, 서명, 공증, 라이선스 화면.
-- 작업 취소, 앱 비정상 종료, 재시작 복구.
+1. 프로필 가져오기/내보내기, 버전 마이그레이션, 호환성 검사를 추가합니다.
+2. Apple Silicon 네이티브 MLX 미디어 생성 엔진을 확장합니다.
+3. MCP에 비디오, 음악, 프로젝트 작업 흐름 도구를 추가합니다.
+4. 재현 가능한 모델 및 Runtime 성능 벤치마크를 구축합니다.
