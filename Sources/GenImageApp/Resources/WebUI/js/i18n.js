@@ -8,6 +8,7 @@ export const languages = [
 const messages = {
   "zh-Hant": {
     "workspace.maximumDuration": "最長長度（秒）",
+    "workspace.originalResolution": "原解析度",
     "workspace.musicTargetDurationNote": "所選 Profile 以設定秒數作為目標長度；實際成品長度會在生成完成後顯示。",
     "workspace.musicMaximumDurationNote": "所選 Profile 將設定秒數視為最長長度，模型可能依歌曲結構提前自然結束；實際成品長度會在生成完成後顯示。",
     "nav.workspace": "工作區",
@@ -290,6 +291,7 @@ const messages = {
   },
   en: {
     "workspace.maximumDuration": "Maximum Duration (sec)",
+    "workspace.originalResolution": "Original Resolution",
     "workspace.musicTargetDurationNote": "The selected Profile uses this value as the target duration. The actual output duration is shown after generation.",
     "workspace.musicMaximumDurationNote": "The selected Profile treats this value as a maximum. The model may end naturally earlier based on the song structure; the actual duration is shown after generation.",
     "nav.workspace": "Workspace", "nav.models": "Model Center", "nav.profiles": "Profiles", "nav.downloads": "Downloads", "nav.settings": "Settings",
@@ -316,6 +318,7 @@ const messages = {
   },
   ja: {
     "workspace.maximumDuration": "最長時間（秒）",
+    "workspace.originalResolution": "元の解像度",
     "workspace.musicTargetDurationNote": "選択中のプロファイルは設定値を目標時間として使用します。実際の出力時間は生成完了後に表示されます。",
     "workspace.musicMaximumDurationNote": "選択中のプロファイルは設定値を最長時間として扱います。曲構成に応じてモデルが早めに自然終了する場合があり、実際の時間は生成完了後に表示されます。",
     "nav.workspace": "ワークスペース", "nav.models": "モデルセンター", "nav.profiles": "プロファイル", "nav.downloads": "ダウンロード", "nav.settings": "設定",
@@ -341,6 +344,7 @@ const messages = {
   },
   ko: {
     "workspace.maximumDuration": "최대 길이(초)",
+    "workspace.originalResolution": "원본 해상도",
     "workspace.musicTargetDurationNote": "선택한 프로필은 설정값을 목표 길이로 사용합니다. 실제 출력 길이는 생성 완료 후 표시됩니다.",
     "workspace.musicMaximumDurationNote": "선택한 프로필은 설정값을 최대 길이로 사용합니다. 곡 구조에 따라 모델이 더 일찍 자연 종료될 수 있으며 실제 길이는 생성 완료 후 표시됩니다.",
     "nav.workspace": "작업 공간", "nav.models": "모델 센터", "nav.profiles": "프로필", "nav.downloads": "다운로드", "nav.settings": "설정",

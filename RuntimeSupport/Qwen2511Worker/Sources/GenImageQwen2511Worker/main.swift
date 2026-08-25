@@ -19,6 +19,8 @@ private struct WorkerRequest: Decodable {
     var outputPath: String
     var prompt: String
     var negativePrompt: String
+    var width: Int
+    var height: Int
     var steps: Int
     var seed: UInt64
 }
@@ -164,11 +166,18 @@ private enum GenImageQwen2511Worker {
         )
 
         let input = try decodeRGB(inputURL)
+        let fittedInput = fitSourceToOutputAspect(
+            input,
+            targetWidth: request.width,
+            targetHeight: request.height
+        )
         emitProgress(stage: "generating", value: 0.15)
         let output = try await generator.generate(
-            image: input,
+            image: fittedInput,
             prompt: request.prompt,
             negativePrompt: request.negativePrompt.isEmpty ? " " : request.negativePrompt,
+            width: request.width,
+            height: request.height,
             steps: request.steps,
             trueCFGScale: 4,
             seed: request.seed,
@@ -231,6 +240,55 @@ private enum GenImageQwen2511Worker {
             rgb[index * 3 + 2] = rgba[index * 4 + 2]
         }
         return (rgb, width, height)
+    }
+
+    private static func fitSourceToOutputAspect(
+        _ image: (rgb: [UInt8], width: Int, height: Int),
+        targetWidth: Int,
+        targetHeight: Int
+    ) -> (rgb: [UInt8], width: Int, height: Int) {
+        guard image.width > 0, image.height > 0, targetWidth > 0, targetHeight > 0 else {
+            return image
+        }
+
+        let sourceRatio = Double(image.width) / Double(image.height)
+        let targetRatio = Double(targetWidth) / Double(targetHeight)
+        let fittedWidth: Int
+        let fittedHeight: Int
+        if sourceRatio >= targetRatio {
+            fittedWidth = targetWidth
+            fittedHeight = max(1, Int((Double(targetWidth) / sourceRatio).rounded()))
+        } else {
+            fittedHeight = targetHeight
+            fittedWidth = max(1, Int((Double(targetHeight) * sourceRatio).rounded()))
+        }
+
+        guard fittedWidth != targetWidth || fittedHeight != targetHeight else {
+            return image
+        }
+
+        let resized = PILLanczosResize.resize(
+            rgb: image.rgb,
+            width: image.width,
+            height: image.height,
+            outWidth: fittedWidth,
+            outHeight: fittedHeight
+        )
+        var canvas = [UInt8](repeating: 0, count: targetWidth * targetHeight * 3)
+        let offsetX = (targetWidth - fittedWidth) / 2
+        let offsetY = (targetHeight - fittedHeight) / 2
+        for y in 0..<targetHeight {
+            let sourceY = min(max(y - offsetY, 0), fittedHeight - 1)
+            for x in 0..<targetWidth {
+                let sourceX = min(max(x - offsetX, 0), fittedWidth - 1)
+                let sourceIndex = (sourceY * fittedWidth + sourceX) * 3
+                let targetIndex = (y * targetWidth + x) * 3
+                canvas[targetIndex] = resized[sourceIndex]
+                canvas[targetIndex + 1] = resized[sourceIndex + 1]
+                canvas[targetIndex + 2] = resized[sourceIndex + 2]
+            }
+        }
+        return (canvas, targetWidth, targetHeight)
     }
 
     private static func encodePNG(pixels: [UInt8], width: Int, height: Int) throws -> Data {

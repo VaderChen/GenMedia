@@ -1,0 +1,31 @@
+--- a/Sources/QwenImageEdit/Pipeline.swift
++++ b/Sources/QwenImageEdit/Pipeline.swift
+@@ -220,6 +220,8 @@
+         image: (rgb: [UInt8], width: Int, height: Int),
+         prompt: String,
+         negativePrompt: String = " ",
++        width: Int? = nil,
++        height: Int? = nil,
+         steps: Int = 20,
+         trueCFGScale: Float = 4.0,
+         seed: UInt64 = 0,
+@@ -229,6 +231,7 @@
+     ) async throws -> (pixels: [UInt8], width: Int, height: Int) {
+         try await generate(
+             images: [image], prompt: prompt, negativePrompt: negativePrompt,
++            width: width, height: height,
+             steps: steps, trueCFGScale: trueCFGScale, seed: seed, stepCache: stepCache,
+             progress: progress)
+     }
+@@ -246,9 +249,11 @@
+         images: [(rgb: [UInt8], width: Int, height: Int)],
+         prompt: String,
+         negativePrompt: String = " ",
++        width: Int? = nil,
++        height: Int? = nil,
+         steps: Int = 20,
+         trueCFGScale: Float = 4.0,
+         seed: UInt64 = 0,
+         stepCache: StepCacheMode = .off,
+         progress: ((Int, Int) -> Void)? = nil,
+         isolation: isolated (any Actor)? = #isolation

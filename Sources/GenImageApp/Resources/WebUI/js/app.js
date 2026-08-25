@@ -13,6 +13,8 @@ import {
   renderCreationPanel,
   renderQuickTools,
   renderWorkspace,
+  selectedSourceImage,
+  sourceImageDimensions,
 } from "./workspace.js";
 
 const root = document.querySelector("#app");
@@ -311,20 +313,6 @@ root.addEventListener("click", async (event) => {
         ui.zoom = 1;
         render();
         break;
-      case "aspectRatio": {
-        const outputKind = target.dataset.outputKind === "video" ? "video" : "image";
-        const settings = outputKind === "video" ? state.videoOutputSettings : state.recipe;
-        const ratioWidth = Number(target.dataset.ratioWidth);
-        const ratioHeight = Number(target.dataset.ratioHeight);
-        const dimensions = outputKind === "video"
-          ? defaultVideoDimensionsForAspect(ratioWidth, ratioHeight)
-          : dimensionsForAspect("width", settings.width, ratioWidth, ratioHeight);
-        settings.width = dimensions.width;
-        settings.height = dimensions.height;
-        render();
-        await (outputKind === "video" ? syncVideoOutputSettings() : syncRecipe());
-        break;
-      }
       case "randomizeSeed":
         await invoke(
           target.dataset.outputKind === "music"
@@ -462,6 +450,34 @@ root.addEventListener("change", async (event) => {
     ui.language = event.target.value;
     setLocale(ui.language);
     render();
+    return;
+  }
+
+  if (event.target.matches("[data-aspect-ratio-select]")) {
+    try {
+      const outputKind = event.target.dataset.outputKind === "video" ? "video" : "image";
+      const settings = outputKind === "video" ? state.videoOutputSettings : state.recipe;
+      const option = event.target.selectedOptions[0];
+      let dimensions;
+      if (option?.value === "original") {
+        const sourceAsset = selectedSourceImage(workspaceStateForActiveTab(state));
+        if (!sourceAsset) return;
+        dimensions = sourceImageDimensions(sourceAsset);
+      } else {
+        const ratioWidth = Number(option?.dataset.ratioWidth);
+        const ratioHeight = Number(option?.dataset.ratioHeight);
+        if (!Number.isFinite(ratioWidth) || !Number.isFinite(ratioHeight) || ratioWidth <= 0 || ratioHeight <= 0) return;
+        dimensions = outputKind === "video"
+          ? defaultVideoDimensionsForAspect(ratioWidth, ratioHeight)
+          : dimensionsForAspect("width", settings.width, ratioWidth, ratioHeight);
+      }
+      settings.width = dimensions.width;
+      settings.height = dimensions.height;
+      render();
+      await (outputKind === "video" ? syncVideoOutputSettings() : syncRecipe());
+    } catch (error) {
+      showBridgeError(error);
+    }
     return;
   }
 

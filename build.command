@@ -89,6 +89,28 @@ ensure_zimage_runtime_patch() {
   fi
 }
 
+ensure_qwen_image_edit_runtime_patch() {
+  local checkout="$SCRIPT_DIR/RuntimeSupport/Qwen2511Worker/.build/checkouts/qwen-image-edit-swift"
+  local pipeline="$checkout/Sources/QwenImageEdit/Pipeline.swift"
+  local api_patch="$SCRIPT_DIR/Patches/Qwen-Image-Edit-Output-Size.patch"
+  local target_patch="$SCRIPT_DIR/Patches/Qwen-Image-Edit-Target-Size.patch"
+
+  [[ -d "$checkout" && -f "$api_patch" && -f "$target_patch" && -f "$pipeline" ]] || return 0
+  if ! /usr/bin/grep -q 'width: Int? = nil' "$pipeline"; then
+    print "正在套用 Qwen Image Edit 輸出解析度修正…"
+    if ! /usr/bin/patch -p1 -d "$checkout" < "$api_patch"; then
+      print -u2 "錯誤：無法套用 Qwen Image Edit 輸出解析度修正。"
+      exit 1
+    fi
+  fi
+  if ! /usr/bin/grep -q 'let (tw, th): (Int, Int)' "$pipeline"; then
+    if ! /usr/bin/patch -p1 -d "$checkout" < "$target_patch"; then
+      print -u2 "錯誤：無法套用 Qwen Image Edit 目標尺寸修正。"
+      exit 1
+    fi
+  fi
+}
+
 PACKAGE_APP=true
 case "${1:-}" in
   --no-app)
@@ -133,6 +155,8 @@ swift build -c release
 
 QWEN_WORKER_PACKAGE="$SCRIPT_DIR/RuntimeSupport/Qwen2511Worker"
 print "正在編譯 Qwen Image Edit 2511 Runtime Worker…"
+swift package --package-path "$QWEN_WORKER_PACKAGE" resolve
+ensure_qwen_image_edit_runtime_patch
 swift build --package-path "$QWEN_WORKER_PACKAGE" -c release
 QWEN_WORKER_BIN_DIR="$(swift build --package-path "$QWEN_WORKER_PACKAGE" -c release --show-bin-path)"
 QWEN_WORKER="$QWEN_WORKER_BIN_DIR/GenImageQwen2511Worker"
