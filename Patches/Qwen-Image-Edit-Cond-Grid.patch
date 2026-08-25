@@ -1,0 +1,25 @@
+--- a/Sources/QwenImageEdit/Pipeline.swift
++++ b/Sources/QwenImageEdit/Pipeline.swift
+@@ -321,9 +321,19 @@
+         // Span note: the cond-latent graph has no eval of its own — its compute realizes at
+         // denoise step 0's eval, so this row times CPU preprocessing + graph build only.
+         let cSpan = prof.begin("vae-encode", "cond", note: "lazy — realizes at denoise step 0")
+-        for image in images {
+-            let (vw, vh) = QwenVLPromptEncoder.calculateDimensions(
+-                targetArea: 1024 * 1024, ratio: Double(image.width) / Double(image.height))
++        for (imageIndex, image) in images.enumerated() {
++            // The content image's cond grid MUST match the target grid: RoPE is centered
++            // (scale_rope), so a cond grid larger than the target only lines up over its
++            // middle — the model would edit a centre crop instead of the whole frame.
++            // With no explicit output size the two already agree (both 1024²-area at the
++            // content ratio); with one, the content image follows it.
++            let (vw, vh): (Int, Int)
++            if imageIndex == 0, width != nil, height != nil {
++                (vw, vh) = (tw, th)
++            } else {
++                (vw, vh) = QwenVLPromptEncoder.calculateDimensions(
++                    targetArea: 1024 * 1024, ratio: Double(image.width) / Double(image.height))
++            }
+             let resized = PILLanczosResize.resize(
+                 rgb: image.rgb, width: image.width, height: image.height,
+                 outWidth: vw, outHeight: vh)
