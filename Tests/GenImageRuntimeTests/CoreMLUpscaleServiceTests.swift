@@ -12,7 +12,7 @@ struct CoreMLUpscaleServiceTests {
 
     @Test func rejectsNonUpscaleProfilesBeforeLoadingModel() async {
         let projectID = UUID()
-        let asset = ImageAsset(
+        let asset = MediaAsset(
             projectID: projectID,
             kind: .imported,
             title: "fixture",

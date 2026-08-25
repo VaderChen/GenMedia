@@ -48,6 +48,18 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 - 생성 유형과 프롬프트/가사/출력 설정 탭은 독립 생성 패널 renderer를 사용하며 미리보기, 플레이어, Inspector 또는 사이드바 DOM을 교체하지 않습니다.
 - 전역 상태 변경으로 전체 렌더링이 꼭 필요하면 재생 중인 `<audio>`, `<video>`, 오디오 시각화 노드를 분리한 뒤 같은 에셋 위치에 다시 연결하여 재생 위치와 Web Audio 연결을 유지합니다.
 
+## 내부 구조 정리
+
+이번 정리는 코드 경계와 책임만 변경하며 기존 생성 기능, 사용자 흐름, Web Bridge 프로토콜은 변경하지 않습니다.
+
+- `ApplicationSupport`가 `Models`, `Runtime`, `Workspace`, `Pasted`, `Generated`의 Application Support 경로를 한곳에서 정의하고, 실행 시 이전 `GenMedia` 작업 공간 데이터를 현재 위치로 가져옵니다.
+- `OutputGeometry`가 크기 제한, 16배수 정렬, 비율 변환, 이미지→이미지 생성 계획을 담당합니다. Web UI의 `js/geometry.js`가 이를 미러링하여 Native, MCP, UI의 계산 결과를 일치시킵니다.
+- `AppStore`는 타입 선언, 저장 속성, 초기화만 유지하고 Persistence, Paths, Selection, Profiles, OutputSettings, Assets, ImageGeneration, MediaGeneration, Jobs, ModelInstallation을 책임별 `AppStore+*.swift` 확장으로 분리했습니다.
+- Web UI는 사이드바와 라우팅, 작업 공간 탭, 크기 계산, 전체 렌더링 보호를 `chrome.js`, `workspace-tabs.js`, `geometry.js`, `render-preservation.js`로 분리하고 `app.js`는 Bridge와 애플리케이션 조정을 담당합니다.
+- `SubprocessRuntime`가 외부 Worker, 비디오·음악 CLI, FFmpeg의 실행 파일 검색, 환경, 로그, 진행률, 정체 감지, 취소, 종료 처리를 공통화합니다.
+- 의존 패키지 소스 수정은 `Patches/manifest.txt`에 정의하고 `scripts/apply-runtime-patches.command`가 적용 및 검증합니다. pin 불일치나 수정 실패 시 수정되지 않은 소스로 계속하지 않고 빌드를 중단합니다.
+- 운영용 ACE-Step 단계 타입은 더 이상 PoC 이름을 사용하지 않습니다. 진단 전용 DiT probe를 운영 생성 단계와 분리하여 실험 코드와 앱 실행 경로를 명확히 했습니다.
+
 ## 프로필
 
 `InferenceProfile`에는 다음 정보가 포함됩니다.
@@ -65,7 +77,7 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 
 ## 에셋과 작업 흐름
 
-`ImageAsset.parentAssetID`는 에셋의 원본을 나타냅니다. parent가 없는 에셋은 독립 작업의 루트 노드입니다.
+`MediaAsset.parentAssetID`는 미디어 원본을 나타냅니다. parent가 없는 에셋은 독립 작업의 루트 노드입니다.
 
 - 독립 텍스트→이미지: 생성된 이미지에 parent가 없습니다.
 - 독립 이미지→텍스트: 먼저 루트 이미지를 가져오고 설명 결과를 Recipe에 기록합니다.
@@ -77,7 +89,7 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 
 `WorkflowGraph`가 lineage와 children 조회를 제공하므로 UI에서 에셋 관계를 추측할 필요가 없습니다.
 
-열려 있는 작업 공간 탭이 생성 프로젝트의 수명 주기 경계입니다. Swift는 `Project`, `ImageAsset`, `WorkflowOperation`, 선택 상태를 Application Support의 JSON 스냅샷으로 원자 저장하며 일반적인 앱 종료 시 지우지 않습니다. Web UI는 탭 정보를 WebKit localStorage에 보관합니다. 탭을 닫으면 Bridge를 통해 네이티브 계층에 알리고 해당 탭의 에셋 및 lineage 인덱스만 제거하며 출력된 미디어 파일은 유지합니다.
+열려 있는 작업 공간 탭이 생성 프로젝트의 수명 주기 경계입니다. Swift는 `Project`, `MediaAsset`, `WorkflowOperation`, 선택 상태를 Application Support의 JSON 스냅샷으로 원자 저장하며 일반적인 앱 종료 시 지우지 않습니다. Web UI는 탭 정보를 WebKit localStorage에 보관합니다. 탭을 닫으면 Bridge를 통해 네이티브 계층에 알리고 해당 탭의 에셋 및 lineage 인덱스만 제거하며 출력된 미디어 파일은 유지합니다.
 
 ## 추론 Runtime
 

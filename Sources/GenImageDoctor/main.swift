@@ -127,7 +127,7 @@ struct GenImageDoctor {
         let inputURL = URL(fileURLWithPath: arguments[1])
         let outputDirectory = URL(fileURLWithPath: arguments[2], isDirectory: true)
         let projectID = UUID()
-        let asset = ImageAsset(
+        let asset = MediaAsset(
             projectID: projectID,
             kind: .imported,
             title: inputURL.deletingPathExtension().lastPathComponent,
@@ -221,7 +221,7 @@ struct GenImageDoctor {
         let modelURL = URL(fileURLWithPath: arguments[0], isDirectory: true)
         let inputURL = URL(fileURLWithPath: arguments[1])
         let languageCode = arguments.count > 2 ? arguments[2] : "zh-Hant"
-        let asset = ImageAsset(
+        let asset = MediaAsset(
             projectID: UUID(),
             kind: .imported,
             title: inputURL.deletingPathExtension().lastPathComponent,

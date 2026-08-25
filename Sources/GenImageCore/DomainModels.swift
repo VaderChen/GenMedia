@@ -408,10 +408,14 @@ public struct GenerationRecipe: Identifiable, Codable, Hashable, Sendable {
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw RecipeValidationError.emptyPrompt
         }
-        guard (64...4096).contains(width), (64...4096).contains(height) else {
+        guard OutputGeometry.supportedRange.contains(width),
+              OutputGeometry.supportedRange.contains(height)
+        else {
             throw RecipeValidationError.invalidDimensions
         }
-        guard width.isMultiple(of: 16), height.isMultiple(of: 16) else {
+        guard width.isMultiple(of: OutputGeometry.alignment),
+              height.isMultiple(of: OutputGeometry.alignment)
+        else {
             throw RecipeValidationError.dimensionsMustBeMultiplesOf16
         }
         guard (1...100).contains(steps) else {
@@ -519,7 +523,12 @@ public enum MusicStyle: String, CaseIterable, Codable, Hashable, Sendable, Ident
     }
 }
 
-public struct ImageAsset: Identifiable, Codable, Hashable, Sendable {
+/// 工作區裡的一份產出，圖片、影片與音訊共用同一個型別。
+///
+/// 型別原本叫 `ImageAsset`，但音樂生成一直也是回傳它 —— 名字說的是圖片，實際載的是所有媒體。
+/// `pixelWidth` 與 `pixelHeight` 對音訊沒有意義（記為 0），`mediaDurationSeconds` 之後的欄位則
+/// 只有時間性媒體會填；欄位名稱維持不變，因為它們就是持久化 JSON 與 Web UI 的鍵名。
+public struct MediaAsset: Identifiable, Codable, Hashable, Sendable {
     public let id: UUID
     public var projectID: UUID
     public var parentAssetID: UUID?

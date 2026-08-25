@@ -1,15 +1,15 @@
 import Foundation
 
 public struct WorkflowGraph: Sendable {
-    public private(set) var assets: [ImageAsset]
+    public private(set) var assets: [MediaAsset]
     public private(set) var operations: [WorkflowOperation]
 
-    public init(assets: [ImageAsset] = [], operations: [WorkflowOperation] = []) {
+    public init(assets: [MediaAsset] = [], operations: [WorkflowOperation] = []) {
         self.assets = assets
         self.operations = operations
     }
 
-    public mutating func append(asset: ImageAsset) {
+    public mutating func append(asset: MediaAsset) {
         assets.append(asset)
     }
 
@@ -17,18 +17,18 @@ public struct WorkflowGraph: Sendable {
         operations.append(operation)
     }
 
-    public func asset(id: UUID) -> ImageAsset? {
+    public func asset(id: UUID) -> MediaAsset? {
         assets.first { $0.id == id }
     }
 
-    public func children(of assetID: UUID) -> [ImageAsset] {
+    public func children(of assetID: UUID) -> [MediaAsset] {
         assets
             .filter { $0.parentAssetID == assetID }
             .sorted { $0.createdAt < $1.createdAt }
     }
 
-    public func lineage(of assetID: UUID) -> [ImageAsset] {
-        var result: [ImageAsset] = []
+    public func lineage(of assetID: UUID) -> [MediaAsset] {
+        var result: [MediaAsset] = []
         var currentID: UUID? = assetID
         var visited = Set<UUID>()
 

@@ -15,7 +15,7 @@ struct WebAsset: Encodable {
     let createdAt: Date
     let previewURL: String?
 
-    init(asset: ImageAsset) {
+    init(asset: MediaAsset) {
         id = asset.id
         parentAssetID = asset.parentAssetID
         kind = asset.kind

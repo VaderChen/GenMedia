@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import GenImageCore
 
@@ -20,7 +19,7 @@ public final class MiniMaxMusic3GenerationService: MusicRuntimeAdapter, Sendable
     public func generate(
         request: MusicGenerationRequest,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> ImageAsset {
+    ) async throws -> MediaAsset {
         progress(0.001)
         try request.options.validate()
         guard request.profile.capability == .textToMusic else {
@@ -67,58 +66,44 @@ public final class MiniMaxMusic3GenerationService: MusicRuntimeAdapter, Sendable
         let runtimeLyrics = trimmedLyrics.isEmpty ? "[instrumental]" : request.options.lyrics
         try runtimePrompt.write(to: promptURL, atomically: true, encoding: .utf8)
         try runtimeLyrics.write(to: lyricsURL, atomically: true, encoding: .utf8)
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        let logHandle = try FileHandle(forWritingTo: logURL)
-        defer { try? logHandle.close() }
+        let log = try RuntimeLog(at: logURL)
+        defer { log.close() }
 
-        let process = Process()
-        process.executableURL = runtimeExecutable
-        process.arguments = [
-            "generate",
-            "--model", request.modelURL.path,
-            "--prompt-file", promptURL.path,
-            "--lyrics-file", lyricsURL.path,
-            "--duration", String(request.options.durationSeconds),
-            "--seed", String(request.options.seed),
-            "--steps", String(request.options.steps),
-            "--output", waveURL.path
-        ]
-        process.environment = Self.runtimeEnvironment()
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = logHandle
-        process.standardError = logHandle
-
+        // Runtime 不回報進度，只能以經過時間估算；超過上限就視為卡住。
         let startedAt = Date()
         let estimatedRuntime = max(90, Double(request.options.durationSeconds) * 15)
         let maximumRuntime = max(30 * 60, Double(request.options.durationSeconds) * 60)
-        do {
-            try process.run()
-            while process.isRunning {
-                try Task.checkCancellation()
-                try await Task.sleep(for: .milliseconds(500))
-                let elapsed = Date().timeIntervalSince(startedAt)
-                if elapsed >= maximumRuntime {
-                    Self.forceTerminate(process)
-                    throw MiniMaxMusic3RuntimeError.runtimeTimedOut
-                }
-                let estimatedProgress = min(0.90, max(0.01, elapsed / estimatedRuntime * 0.90))
-                progress(estimatedProgress)
+        let status = try await RuntimeProcess.run(
+            executable: runtimeExecutable,
+            arguments: [
+                "generate",
+                "--model", request.modelURL.path,
+                "--prompt-file", promptURL.path,
+                "--lyrics-file", lyricsURL.path,
+                "--duration", String(request.options.durationSeconds),
+                "--seed", String(request.options.seed),
+                "--steps", String(request.options.steps),
+                "--output", waveURL.path
+            ],
+            environment: RuntimeExecutable.environment(),
+            log: log,
+            pollInterval: .milliseconds(500)
+        ) {
+            let elapsed = Date().timeIntervalSince(startedAt)
+            if elapsed >= maximumRuntime {
+                throw MiniMaxMusic3RuntimeError.runtimeTimedOut
             }
-        } catch {
-            Self.forceTerminate(process)
-            throw error
+            progress(min(0.90, max(0.01, elapsed / estimatedRuntime * 0.90)))
         }
-        process.waitUntilExit()
-        try? logHandle.synchronize()
 
-        guard process.terminationStatus == 0 else {
+        guard status == 0 else {
             throw MiniMaxMusic3RuntimeError.runtimeFailed(
-                status: process.terminationStatus,
-                message: Self.logMessage(in: logURL)
+                status: status,
+                message: log.message(fallback: "Runtime 未提供錯誤訊息。")
             )
         }
         guard FileManager.default.fileExists(atPath: waveURL.path),
-              Self.fileSize(at: waveURL) > 0 else {
+              RuntimeLog.fileSize(at: waveURL) > 0 else {
             throw MiniMaxMusic3RuntimeError.waveOutputMissing(waveURL)
         }
         progress(0.92)
@@ -128,13 +113,13 @@ public final class MiniMaxMusic3GenerationService: MusicRuntimeAdapter, Sendable
             format: request.options.format
         )
         guard FileManager.default.fileExists(atPath: outputURL.path),
-              Self.fileSize(at: outputURL) > 0 else {
+              RuntimeLog.fileSize(at: outputURL) > 0 else {
             throw MiniMaxMusic3RuntimeError.encodedOutputMissing(outputURL)
         }
 
         progress(1)
         completed = true
-        return ImageAsset(
+        return MediaAsset(
             projectID: request.projectID,
             kind: .generatedAudio,
             title: "生成音樂",
@@ -196,64 +181,24 @@ public final class MiniMaxMusic3GenerationService: MusicRuntimeAdapter, Sendable
                     .appendingPathComponent("Helpers/mlx-minimax-music3")
             )
         }
-        let home = fileManager.homeDirectoryForCurrentUser
         candidates.append(
-            home.appendingPathComponent(
-                "Library/Application Support/GenImage/Runtime/minimax-music3/.venv/bin/mlx-minimax-music3"
-            )
+            ApplicationSupport.directory(.runtime, fileManager: fileManager)
+                .appendingPathComponent("minimax-music3/.venv/bin/mlx-minimax-music3")
         )
+        let home = fileManager.homeDirectoryForCurrentUser
         candidates.append(home.appendingPathComponent(".local/bin/mlx-minimax-music3"))
         candidates.append(URL(fileURLWithPath: "/opt/homebrew/bin/mlx-minimax-music3"))
         candidates.append(URL(fileURLWithPath: "/usr/local/bin/mlx-minimax-music3"))
-        for directory in (environment["PATH"] ?? "").split(separator: ":") {
-            candidates.append(
-                URL(fileURLWithPath: String(directory), isDirectory: true)
-                    .appendingPathComponent("mlx-minimax-music3")
+        candidates.append(
+            contentsOf: RuntimeExecutable.pathCandidates(
+                for: "mlx-minimax-music3",
+                environment: environment
             )
-        }
-        guard let executable = candidates.first(where: {
-            fileManager.isExecutableFile(atPath: $0.path)
-        }) else {
+        )
+        guard let executable = RuntimeExecutable.locate(candidates) else {
             throw MiniMaxMusic3RuntimeError.runtimeNotFound(candidates.map(\.path))
         }
         return executable
-    }
-
-    private static func runtimeEnvironment() -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        let commonPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
-        let currentPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
-        environment["PATH"] = (currentPaths + commonPaths)
-            .reduce(into: [String]()) { paths, path in
-                if !paths.contains(path) { paths.append(path) }
-            }
-            .joined(separator: ":")
-        environment["PYTHONUNBUFFERED"] = "1"
-        return environment
-    }
-
-    private static func forceTerminate(_ process: Process) {
-        guard process.isRunning else { return }
-        process.terminate()
-        if process.isRunning {
-            Darwin.kill(process.processIdentifier, SIGKILL)
-        }
-        process.waitUntilExit()
-    }
-
-    private static func fileSize(at url: URL) -> Int64 {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attributes[.size] as? NSNumber else { return 0 }
-        return size.int64Value
-    }
-
-    private static func logMessage(in logURL: URL) -> String {
-        guard let data = try? Data(contentsOf: logURL), !data.isEmpty else {
-            return "Runtime 未提供錯誤訊息。"
-        }
-        return String(data: data.suffix(8_192), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? "Runtime 執行失敗。"
     }
 }
 

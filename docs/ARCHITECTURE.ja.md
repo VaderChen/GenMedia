@@ -48,6 +48,18 @@ Web UI は Bridge を通じてのみローカル機能を利用できます。�
 - 生成タイプとプロンプト／歌詞／出力設定タブは独立した作成パネル renderer を使用し、プレビュー、プレイヤー、Inspector、サイドバーの DOM を置き換えません。
 - 全体状態の変更で完全な再描画が必要な場合は、再生中の `<audio>`、`<video>`、音声ビジュアライザーノードを一度切り離して同じアセット位置へ戻し、再生位置と Web Audio 接続を維持します。
 
+## 内部構造の整理
+
+今回の整理はコードの境界と責務だけを変更するもので、既存の生成機能、利用手順、Web Bridge プロトコルは変更しません。
+
+- `ApplicationSupport` が `Models`、`Runtime`、`Workspace`、`Pasted`、`Generated` の Application Support パスを一元定義し、起動時に旧 `GenMedia` のワークスペースデータを引き継ぎます。
+- `OutputGeometry` がサイズの上下限、16 の倍数への整列、比率変換、画像から画像の生成計画を管理します。Web UI の `js/geometry.js` はその鏡像であり、Native、MCP、UI の計算結果を統一します。
+- `AppStore` は型宣言、保存プロパティ、初期化だけを保持し、Persistence、Paths、Selection、Profiles、OutputSettings、Assets、ImageGeneration、MediaGeneration、Jobs、ModelInstallation を責務ごとの `AppStore+*.swift` へ分離しました。
+- Web UI はサイドバーとルーティング、ワークスペースタブ、サイズ計算、全体再描画の保護を `chrome.js`、`workspace-tabs.js`、`geometry.js`、`render-preservation.js` に分離し、`app.js` は Bridge とアプリケーション調整を担当します。
+- `SubprocessRuntime` が外部 Worker、動画・音楽 CLI、FFmpeg の実行ファイル検索、環境、ログ、進捗、停滞検出、キャンセル、終了処理を共通化します。
+- 依存パッケージのソース修正は `Patches/manifest.txt` に記述し、`scripts/apply-runtime-patches.command` が適用と検証を行います。ピンの不一致や修正失敗時は、未修正のソースで続行せずビルドを停止します。
+- 本番用 ACE-Step の段階型は PoC 名称を使わなくなりました。診断専用の DiT probe は本番生成段階から分離し、実験コードとアプリの実行経路を明確にしています。
+
 ## プロファイル
 
 `InferenceProfile` には次の情報が含まれます。
@@ -65,7 +77,7 @@ Web UI は Bridge を通じてのみローカル機能を利用できます。�
 
 ## アセットとワークフロー
 
-`ImageAsset.parentAssetID` はアセットの生成元を示します。parent を持たないアセットは独立ジョブのルートノードです。
+`MediaAsset.parentAssetID` はメディアの生成元を示します。parent を持たないアセットは独立ジョブのルートノードです。
 
 - 単独のテキストから画像：生成画像に parent はありません。
 - 単独の画像からテキスト：最初にルート画像を読み込み、説明結果を Recipe に書き込みます。
@@ -77,7 +89,7 @@ Web UI は Bridge を通じてのみローカル機能を利用できます。�
 
 `WorkflowGraph` が lineage と children の問い合わせを提供するため、UI がアセット関係を推測する必要はありません。
 
-開いているワークスペースタブが生成プロジェクトのライフサイクル境界です。Swift は `Project`、`ImageAsset`、`WorkflowOperation`、選択状態を Application Support の JSON スナップショットへアトミック保存し、通常のアプリ終了では削除しません。Web UI はタブ情報を WebKit localStorage に保持します。タブを閉じると Bridge 経由でネイティブ層へ通知し、そのタブのアセットと lineage 索引だけを削除して出力済みメディアは残します。
+開いているワークスペースタブが生成プロジェクトのライフサイクル境界です。Swift は `Project`、`MediaAsset`、`WorkflowOperation`、選択状態を Application Support の JSON スナップショットへアトミック保存し、通常のアプリ終了では削除しません。Web UI はタブ情報を WebKit localStorage に保持します。タブを閉じると Bridge 経由でネイティブ層へ通知し、そのタブのアセットと lineage 索引だけを削除して出力済みメディアは残します。
 
 ## 推論 Runtime
 

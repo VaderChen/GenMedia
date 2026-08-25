@@ -45,79 +45,6 @@ ensure_metal_toolchain() {
   print "Xcode Metal Toolchain 安裝完成。"
 }
 
-ensure_zimage_runtime_patch() {
-  local checkout="$SCRIPT_DIR/.build/checkouts/Z-Image.swift"
-  local marker="$checkout/Sources/ZImage/Model/Transformer/ZImageTransformer2D.swift"
-  local weights_mapper="$checkout/Sources/ZImage/Weights/ZImageWeightsMapper.swift"
-  local pipeline="$checkout/Sources/ZImage/Pipeline/ZImagePipeline.swift"
-  local patch_file="$SCRIPT_DIR/Patches/Z-Image-Giniiki-mlx4.patch"
-  local pad_token_patch="$SCRIPT_DIR/Patches/Z-Image-Quantized-Pad-Tokens.patch"
-  local dtype_patch="$SCRIPT_DIR/Patches/Z-Image-Quantized-DType.patch"
-  local warm_cache_patch="$SCRIPT_DIR/Patches/Z-Image-Warm-Cache.patch"
-
-  [[ -d "$checkout" && -f "$patch_file" && -f "$pad_token_patch" && -f "$dtype_patch" && -f "$warm_cache_patch" && -f "$marker" && -f "$weights_mapper" && -f "$pipeline" ]] || return 0
-  if ! /usr/bin/grep -q 'private func denseWeight' "$marker"; then
-    print "正在套用 Z-Image MLX 量化相容性修正…"
-    if ! /usr/bin/patch -p1 -d "$checkout" < "$patch_file"; then
-      print -u2 "錯誤：無法套用 Z-Image MLX 量化相容性修正。"
-      exit 1
-    fi
-  fi
-
-  if ! /usr/bin/grep -q 'public func loadPadTokens' "$marker"; then
-    print "正在套用 Z-Image packed pad token 修正…"
-    if ! /usr/bin/patch -p1 -d "$checkout" < "$pad_token_patch"; then
-      print -u2 "錯誤：無法套用 Z-Image packed pad token 修正。"
-      exit 1
-    fi
-  fi
-
-  if ! /usr/bin/grep -q 'loadQuantizedComponent("transformer", dtype: dtype)' "$weights_mapper"; then
-    print "正在套用 Z-Image 量化 dtype 修正…"
-    if ! /usr/bin/patch -p1 -d "$checkout" < "$dtype_patch"; then
-      print -u2 "錯誤：無法套用 Z-Image 量化 dtype 修正。"
-      exit 1
-    fi
-  fi
-
-  if ! /usr/bin/grep -q 'public func trimCache()' "$pipeline"; then
-    print "正在套用 Z-Image 暖機快取修正…"
-    if ! /usr/bin/patch -p1 -d "$checkout" < "$warm_cache_patch"; then
-      print -u2 "錯誤：無法套用 Z-Image 暖機快取修正。"
-      exit 1
-    fi
-  fi
-}
-
-ensure_qwen_image_edit_runtime_patch() {
-  local checkout="$SCRIPT_DIR/RuntimeSupport/Qwen2511Worker/.build/checkouts/qwen-image-edit-swift"
-  local pipeline="$checkout/Sources/QwenImageEdit/Pipeline.swift"
-  local api_patch="$SCRIPT_DIR/Patches/Qwen-Image-Edit-Output-Size.patch"
-  local target_patch="$SCRIPT_DIR/Patches/Qwen-Image-Edit-Target-Size.patch"
-  local cond_patch="$SCRIPT_DIR/Patches/Qwen-Image-Edit-Cond-Grid.patch"
-
-  [[ -d "$checkout" && -f "$api_patch" && -f "$target_patch" && -f "$cond_patch" && -f "$pipeline" ]] || return 0
-  if ! /usr/bin/grep -q 'width: Int? = nil' "$pipeline"; then
-    print "正在套用 Qwen Image Edit 輸出解析度修正…"
-    if ! /usr/bin/patch -p1 -d "$checkout" < "$api_patch"; then
-      print -u2 "錯誤：無法套用 Qwen Image Edit 輸出解析度修正。"
-      exit 1
-    fi
-  fi
-  if ! /usr/bin/grep -q 'let (tw, th): (Int, Int)' "$pipeline"; then
-    if ! /usr/bin/patch -p1 -d "$checkout" < "$target_patch"; then
-      print -u2 "錯誤：無法套用 Qwen Image Edit 目標尺寸修正。"
-      exit 1
-    fi
-  fi
-  if ! /usr/bin/grep -q 'for (imageIndex, image) in images.enumerated()' "$pipeline"; then
-    if ! /usr/bin/patch -p1 -d "$checkout" < "$cond_patch"; then
-      print -u2 "錯誤：無法套用 Qwen Image Edit 條件網格修正。"
-      exit 1
-    fi
-  fi
-}
-
 PACKAGE_APP=true
 case "${1:-}" in
   --no-app)
@@ -153,17 +80,20 @@ fi
 
 ensure_metal_toolchain
 
+QWEN_WORKER_PACKAGE="$SCRIPT_DIR/RuntimeSupport/Qwen2511Worker"
+
 print "正在準備 Swift 套件依賴…"
 swift package resolve
-ensure_zimage_runtime_patch
+swift package --package-path "$QWEN_WORKER_PACKAGE" resolve
+
+# 相依套件的原始碼修正貼在 .build/checkouts/ 內，每次 resolve 之後都要重跑。
+# 清單在 Patches/manifest.txt；任何一項無法套用或驗證不過都會中止建置。
+"$SCRIPT_DIR/scripts/apply-runtime-patches.command"
 
 print "正在編譯 GenImage Release 版本…"
 swift build -c release
 
-QWEN_WORKER_PACKAGE="$SCRIPT_DIR/RuntimeSupport/Qwen2511Worker"
 print "正在編譯 Qwen Image Edit 2511 Runtime Worker…"
-swift package --package-path "$QWEN_WORKER_PACKAGE" resolve
-ensure_qwen_image_edit_runtime_patch
 swift build --package-path "$QWEN_WORKER_PACKAGE" -c release
 QWEN_WORKER_BIN_DIR="$(swift build --package-path "$QWEN_WORKER_PACKAGE" -c release --show-bin-path)"
 QWEN_WORKER="$QWEN_WORKER_BIN_DIR/GenImageQwen2511Worker"

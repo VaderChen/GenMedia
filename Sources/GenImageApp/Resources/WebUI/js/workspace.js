@@ -5,6 +5,7 @@ import {
   kindLabel,
   percent,
 } from "./format.js";
+import { resolutionBounds, sourceImageDimensions } from "./geometry.js";
 import { t } from "./i18n.js";
 
 const toolMeta = {
@@ -542,16 +543,6 @@ function closestAspectRatio(width, height) {
   return aspectRatios.reduce((best, ratio) =>
     Math.abs(ratio.width / ratio.height - value) < Math.abs(best.width / best.height - value) ? ratio : best,
   );
-}
-
-function resolutionBounds(dimension, ratio) {
-  const ratioValue = dimension === "width"
-    ? ratio.width / ratio.height
-    : ratio.height / ratio.width;
-  return {
-    min: Math.max(64, Math.ceil((64 * ratioValue) / 16) * 16),
-    max: Math.min(4096, Math.floor((4096 * ratioValue) / 16) * 16),
-  };
 }
 
 function resolutionSlider(label, field, value, bounds, ratio, outputKind) {
@@ -1229,18 +1220,6 @@ function selectedAsset(state) {
 export function selectedSourceImage(state) {
   const asset = selectedAsset(state);
   return asset && !["generatedVideo", "generatedAudio"].includes(asset.kind) ? asset : null;
-}
-
-export function sourceImageDimensions(asset) {
-  const sourceWidth = Math.max(1, Number(asset.pixelWidth));
-  const sourceHeight = Math.max(1, Number(asset.pixelHeight));
-  const quantize = (value) => Math.min(4096, Math.max(64, Math.round(value / 16) * 16));
-  if (sourceWidth >= sourceHeight) {
-    const width = quantize(sourceWidth);
-    return { width, height: quantize(width * sourceHeight / sourceWidth) };
-  }
-  const height = quantize(sourceHeight);
-  return { width: quantize(height * sourceWidth / sourceHeight), height };
 }
 
 function buildLineage(assets, start) {

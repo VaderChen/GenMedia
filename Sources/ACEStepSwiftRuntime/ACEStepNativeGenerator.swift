@@ -73,7 +73,7 @@ public enum ACEStepNativeGenerator {
         let conditionURL = temporaryDirectory.appendingPathComponent("condition.safetensors")
 
         progress(0.02)
-        _ = try ConditioningPoC.run(
+        _ = try ACEStepConditioningStage.run(
             modelRoot: modelRoot,
             prompt: prompt,
             lyrics: lyrics,
@@ -86,7 +86,7 @@ public enum ACEStepNativeGenerator {
         try Task.checkCancellation()
         progress(0.30)
 
-        let generated = try GeneratedAudioPoC.run(
+        let generated = try ACEStepAudioGenerationStage.run(
             modelRoot: modelRoot,
             conditionURL: conditionURL,
             outputURL: outputURL,

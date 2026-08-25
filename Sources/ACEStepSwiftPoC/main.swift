@@ -408,12 +408,6 @@ private enum ModelRootResolver {
         )
         candidates.append(
             home.appendingPathComponent(
-                "Library/Application Support/GenMedia/Models/ace-step-1.5-turbo",
-                isDirectory: true
-            )
-        )
-        candidates.append(
-            home.appendingPathComponent(
                 "Library/Application Support/GenImage/Models/ace-step-1.5-turbo",
                 isDirectory: true
             )
@@ -741,7 +735,7 @@ private enum ACEStepSwiftPoC {
             if let outputURL = arguments.vaeOutputURL {
                 TextOutput.section("純 Swift VAE 解碼")
                 TextOutput.warning("載入並轉換 Oobleck VAE 完整 decoder 權重")
-                let report = try VAEDecodePoC.run(
+                let report = try ACEStepVAEDecodeStage.run(
                     modelRoot: modelRoot,
                     outputURL: outputURL,
                     latentFrames: arguments.latentFrames
@@ -768,7 +762,7 @@ private enum ACEStepSwiftPoC {
                let conditionOutputURL = arguments.conditionOutputURL {
                 TextOutput.section("純 Swift ACE-Step 條件編碼")
                 TextOutput.warning("依序載入 Qwen3、silence latent 與 ACE condition encoder 完整權重")
-                let report = try ConditioningPoC.run(
+                let report = try ACEStepConditioningStage.run(
                     modelRoot: modelRoot,
                     prompt: prompt,
                     lyrics: arguments.lyrics,
@@ -799,7 +793,7 @@ private enum ACEStepSwiftPoC {
             } else if let prompt = arguments.prompt {
                 TextOutput.section("純 Swift Qwen3 Embedding")
                 TextOutput.warning("載入 Qwen3-Embedding-0.6B 完整權重")
-                let report = try QwenEmbeddingPoC.run(
+                let report = try ACEStepTextEmbedder.run(
                     modelRoot: modelRoot,
                     prompt: prompt,
                     lyrics: arguments.lyrics,
@@ -828,7 +822,7 @@ private enum ACEStepSwiftPoC {
                     ?? arguments.conditionOutputURL {
                 TextOutput.section("純 Swift ACE-Step DiT 前向")
                 TextOutput.warning("載入 ACE-Step Turbo DiT 完整 24 層權重")
-                let report = try DiTForwardPoC.run(
+                let report = try ACEStepDiTForwardProbe.run(
                     modelRoot: modelRoot,
                     conditionURL: conditionInputURL,
                     outputURL: ditOutputURL,
@@ -848,7 +842,7 @@ private enum ACEStepSwiftPoC {
                     ?? arguments.conditionOutputURL {
                 TextOutput.section("純 Swift ACE-Step 端到端生成")
                 TextOutput.warning("執行 Turbo diffusion 並以 Oobleck VAE 解碼")
-                let report = try GeneratedAudioPoC.run(
+                let report = try ACEStepAudioGenerationStage.run(
                     modelRoot: modelRoot,
                     conditionURL: conditionInputURL,
                     outputURL: generatedAudioURL,

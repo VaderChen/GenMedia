@@ -19,17 +19,14 @@ private struct WorkerRequest: Decodable {
     var outputPath: String
     var prompt: String
     var negativePrompt: String
-    var width: Int
-    var height: Int
-    var steps: Int
-    var seed: UInt64
-}
-
-private struct OutputPlan {
+    /// The canvas to denoise and the size to write. Both are decided by GenImageCore's
+    /// OutputGeometry — the Worker executes the plan, it does not make one.
     var generationWidth: Int
     var generationHeight: Int
     var outputWidth: Int
     var outputHeight: Int
+    var steps: Int
+    var seed: UInt64
 }
 
 private struct WorkerEvent: Encodable {
@@ -63,10 +60,6 @@ private enum WorkerError: LocalizedError {
 
 @main
 private enum GenImageQwen2511Worker {
-    /// diffusers' Qwen-Image-Edit canvas area — the size both the reference pipeline and
-    /// the training recipe use for the target and the conditioning latents alike.
-    private static let nativeGenerationArea = 1024 * 1024
-
     static func main() async {
         do {
             let requestURL = try requestURL(from: CommandLine.arguments)
@@ -177,19 +170,18 @@ private enum GenImageQwen2511Worker {
         )
 
         let input = try decodeRGB(inputURL)
-        let plan = outputPlan(width: request.width, height: request.height)
-        let fittedInput = padSourceToOutputAspect(
+        let fittedInput = padSourceToGenerationAspect(
             input,
-            targetWidth: plan.generationWidth,
-            targetHeight: plan.generationHeight
+            canvasWidth: request.generationWidth,
+            canvasHeight: request.generationHeight
         )
         emitProgress(stage: "generating", value: 0.15)
         let output = try await generator.generate(
             image: fittedInput,
             prompt: request.prompt,
             negativePrompt: request.negativePrompt.isEmpty ? " " : request.negativePrompt,
-            width: plan.generationWidth,
-            height: plan.generationHeight,
+            width: request.generationWidth,
+            height: request.generationHeight,
             steps: request.steps,
             trueCFGScale: 4,
             seed: request.seed,
@@ -199,8 +191,10 @@ private enum GenImageQwen2511Worker {
                 emitProgress(stage: "denoising", value: fraction)
             }
         )
+        let outputWidth = max(1, request.outputWidth)
+        let outputHeight = max(1, request.outputHeight)
         let pixels: [UInt8]
-        if output.width == plan.outputWidth, output.height == plan.outputHeight {
+        if output.width == outputWidth, output.height == outputHeight {
             pixels = output.pixels
         } else {
             emitProgress(stage: "resizing", value: 0.97)
@@ -208,55 +202,22 @@ private enum GenImageQwen2511Worker {
                 rgb: output.pixels,
                 width: output.width,
                 height: output.height,
-                outWidth: plan.outputWidth,
-                outHeight: plan.outputHeight
+                outWidth: outputWidth,
+                outHeight: outputHeight
             )
         }
         try encodePNG(
             pixels: pixels,
-            width: plan.outputWidth,
-            height: plan.outputHeight
+            width: outputWidth,
+            height: outputHeight
         ).write(to: outputURL, options: .atomic)
         emit(
             WorkerEvent(
                 type: "completed",
                 value: 1,
-                width: plan.outputWidth,
-                height: plan.outputHeight
+                width: outputWidth,
+                height: outputHeight
             )
-        )
-    }
-
-    /// The DiT denoises a latent grid of `width/16 × height/16` tokens and was trained at a
-    /// ~1024² canvas (≈4096 tokens). The conditioning grid has to match the target grid or
-    /// the centred RoPE positions only overlap over the middle of the source, so a small
-    /// output would force a small conditioning grid too — and far below the trained token
-    /// count the denoise degrades and then collapses into striping. Generate at
-    /// the model's own canvas area in the requested aspect and resample the decode down to
-    /// the requested size instead; requests at or above that area are generated as asked.
-    private static func outputPlan(width: Int, height: Int) -> OutputPlan {
-        let outputWidth = max(1, width)
-        let outputHeight = max(1, height)
-        // The Runtime floors the generation canvas to a multiple of 16.
-        let quantizedWidth = max(outputWidth / 16, 1) * 16
-        let quantizedHeight = max(outputHeight / 16, 1) * 16
-        guard quantizedWidth * quantizedHeight < nativeGenerationArea else {
-            return OutputPlan(
-                generationWidth: quantizedWidth,
-                generationHeight: quantizedHeight,
-                outputWidth: outputWidth,
-                outputHeight: outputHeight
-            )
-        }
-        let (generationWidth, generationHeight) = QwenVLPromptEncoder.calculateDimensions(
-            targetArea: nativeGenerationArea,
-            ratio: Double(outputWidth) / Double(outputHeight)
-        )
-        return OutputPlan(
-            generationWidth: max(generationWidth, 16),
-            generationHeight: max(generationHeight, 16),
-            outputWidth: outputWidth,
-            outputHeight: outputHeight
         )
     }
 
@@ -300,58 +261,54 @@ private enum GenImageQwen2511Worker {
         return (rgb, width, height)
     }
 
-    /// Extend the source to the output aspect ratio so nothing is cropped, keeping the
-    /// source's own scale (capped) rather than pre-shrinking to the output size — the
-    /// pipeline resizes this canvas to the target once, and the VL branch still sees a
-    /// detailed image even when the requested output is small.
-    private static func padSourceToOutputAspect(
+    /// Extend the source to the generation canvas' aspect ratio so nothing is cropped, keeping
+    /// the source's own scale (capped) rather than pre-shrinking to the canvas size — the
+    /// pipeline resizes this once, and the VL branch still sees a detailed image even when the
+    /// canvas is small.
+    private static func padSourceToGenerationAspect(
         _ image: (rgb: [UInt8], width: Int, height: Int),
-        targetWidth: Int,
-        targetHeight: Int
+        canvasWidth: Int,
+        canvasHeight: Int
     ) -> (rgb: [UInt8], width: Int, height: Int) {
-        guard image.width > 0, image.height > 0, targetWidth > 0, targetHeight > 0 else {
+        guard image.width > 0, image.height > 0, canvasWidth > 0, canvasHeight > 0 else {
             return image
         }
 
-        // The Runtime floors the output to a multiple of 16; mirror that here so the
-        // canvas matches the grid the pipeline actually generates.
-        let outputWidth = max(targetWidth / 16, 1) * 16
-        let outputHeight = max(targetHeight / 16, 1) * 16
         let sourceRatio = Double(image.width) / Double(image.height)
-        let targetRatio = Double(outputWidth) / Double(outputHeight)
-        var canvasWidth: Int
-        var canvasHeight: Int
+        let targetRatio = Double(canvasWidth) / Double(canvasHeight)
+        var paddedWidth: Int
+        var paddedHeight: Int
         if sourceRatio >= targetRatio {
-            canvasWidth = image.width
-            canvasHeight = max(1, Int((Double(image.width) / targetRatio).rounded()))
+            paddedWidth = image.width
+            paddedHeight = max(1, Int((Double(image.width) / targetRatio).rounded()))
         } else {
-            canvasHeight = image.height
-            canvasWidth = max(1, Int((Double(image.height) * targetRatio).rounded()))
+            paddedHeight = image.height
+            paddedWidth = max(1, Int((Double(image.height) * targetRatio).rounded()))
         }
 
         // An extreme aspect change on a very large source would otherwise balloon the
-        // intermediate buffer; anything above the output size (or the VL branch's needs)
+        // intermediate buffer; anything above the canvas size (or the VL branch's needs)
         // is discarded by the pipeline's own resize anyway.
-        let canvasLimit = max(outputWidth, outputHeight, 1024)
-        let longestSide = max(canvasWidth, canvasHeight)
+        let canvasLimit = max(canvasWidth, canvasHeight, 1024)
+        let longestSide = max(paddedWidth, paddedHeight)
         if longestSide > canvasLimit {
             let scale = Double(canvasLimit) / Double(longestSide)
-            canvasWidth = max(1, Int((Double(canvasWidth) * scale).rounded()))
-            canvasHeight = max(1, Int((Double(canvasHeight) * scale).rounded()))
+            paddedWidth = max(1, Int((Double(paddedWidth) * scale).rounded()))
+            paddedHeight = max(1, Int((Double(paddedHeight) * scale).rounded()))
         }
 
         let fittedWidth: Int
         let fittedHeight: Int
         if sourceRatio >= targetRatio {
-            fittedWidth = canvasWidth
-            fittedHeight = max(1, Int((Double(canvasWidth) / sourceRatio).rounded()))
+            fittedWidth = paddedWidth
+            fittedHeight = max(1, Int((Double(paddedWidth) / sourceRatio).rounded()))
         } else {
-            fittedHeight = canvasHeight
-            fittedWidth = max(1, Int((Double(canvasHeight) * sourceRatio).rounded()))
+            fittedHeight = paddedHeight
+            fittedWidth = max(1, Int((Double(paddedHeight) * sourceRatio).rounded()))
         }
 
         guard fittedWidth != image.width || fittedHeight != image.height
-            || canvasWidth != image.width || canvasHeight != image.height
+            || paddedWidth != image.width || paddedHeight != image.height
         else { return image }
 
         let resized = fittedWidth == image.width && fittedHeight == image.height
@@ -363,25 +320,25 @@ private enum GenImageQwen2511Worker {
                 outWidth: fittedWidth,
                 outHeight: fittedHeight
             )
-        guard fittedWidth != canvasWidth || fittedHeight != canvasHeight else {
+        guard fittedWidth != paddedWidth || fittedHeight != paddedHeight else {
             return (resized, fittedWidth, fittedHeight)
         }
 
-        var canvas = [UInt8](repeating: 0, count: canvasWidth * canvasHeight * 3)
-        let offsetX = (canvasWidth - fittedWidth) / 2
-        let offsetY = (canvasHeight - fittedHeight) / 2
-        for y in 0..<canvasHeight {
+        var canvas = [UInt8](repeating: 0, count: paddedWidth * paddedHeight * 3)
+        let offsetX = (paddedWidth - fittedWidth) / 2
+        let offsetY = (paddedHeight - fittedHeight) / 2
+        for y in 0..<paddedHeight {
             let sourceY = min(max(y - offsetY, 0), fittedHeight - 1)
-            for x in 0..<canvasWidth {
+            for x in 0..<paddedWidth {
                 let sourceX = min(max(x - offsetX, 0), fittedWidth - 1)
                 let sourceIndex = (sourceY * fittedWidth + sourceX) * 3
-                let targetIndex = (y * canvasWidth + x) * 3
+                let targetIndex = (y * paddedWidth + x) * 3
                 canvas[targetIndex] = resized[sourceIndex]
                 canvas[targetIndex + 1] = resized[sourceIndex + 1]
                 canvas[targetIndex + 2] = resized[sourceIndex + 2]
             }
         }
-        return (canvas, canvasWidth, canvasHeight)
+        return (canvas, paddedWidth, paddedHeight)
     }
 
     private static func encodePNG(pixels: [UInt8], width: Int, height: Int) throws -> Data {

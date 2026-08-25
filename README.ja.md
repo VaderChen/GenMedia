@@ -60,10 +60,12 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 
 - プロファイルは「使用中、利用可能、ダウンロード中、利用不可」の順に並びます。モデルと LoRA の依存関係が揃ったプロファイルは淡い緑色の枠で表示され、ダウンロード完了時に直ちに再整列されます。
 - キャンセル時はまず `cancelling` になり、Runtime Task の終了後に `cancelled` へ移行して生成・メモリ関連の操作を再び有効にします。ETA は進捗 35% かつ開始 15 秒後から数値表示し、安定したサンプルが不足する場合は全体経過時間を使用します。
-- Z-Image MLX 互換レイヤーは `quantize_config.json`、affine／mxfp4、packed pad token、FP16 から BF16 への読み込みを処理します。`build.command` は Swift Package 解決後に `Patches/` の修正を自動適用します。andrevp Z-Image Turbo MLX 4-bit は実際の画像生成で検証済みです。
+- Z-Image MLX 互換レイヤーは `quantize_config.json`、affine／mxfp4、packed pad token、FP16 から BF16 への読み込みを処理します。andrevp Z-Image Turbo MLX 4-bit は実際の画像生成で検証済みです。
+- 依存パッケージへのソース修正は `Patches/manifest.txt` に列挙し、Swift Package 解決後に `scripts/apply-runtime-patches.command` が適用します（`build.command` から自動実行）。依存パッケージのバージョンが manifest と異なる、修正ファイルが無い、適用に失敗した、適用後に想定した目印が見つからない場合はビルドを中止し、未修正のソースのまま進むことはありません。`scripts/apply-runtime-patches.command --verify` で確認のみ実行できます。
 - テキストから画像の完了後もモデル重みと暖機 buffer を保持します。5 分間アイドルになると再利用可能な MLX 一時 buffer だけを整理し、モデルはアンロードしません。側面のメモリ解放、モデル切り替え、またはプロファイル切り替え時の RAM 90% 超過保護でのみ不要な Runtime を解放します。
 - ダウンロードでは配布元のファイル名を保持し、生成出力は `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm`、`Music-YYYYMMDD-HHmm` を使用します。同じ分に重複する場合は連番を追加します。出力ディレクトリは設定画面で変更できます。
 - 開いている各ワークスペースタブを生成プロジェクトとして扱います。アセットと lineage は Application Support にアトミック保存され、アプリ再起動後も復元されます。タブを明示的に閉じた場合のみプロジェクトのワークスペース索引を削除し、出力済みメディアはディスクに保持します。
+- アプリのデータはすべて `~/Library/Application Support/GenImage/`（`Models`、`Runtime`、`Workspace`、`Pasted`、`Generated`）に置き、`GenImageCore/ApplicationSupport.swift` が唯一の定義元です。ワークスペース索引は以前 `GenMedia/` に書かれており、起動時に現在のルートへ引き取ります。同名の項目は既存のものを残し、上書きも統合もしません。`Runtime/` 配下の Python venv が起動 script に絶対パスを埋め込んでいるため、アプリ名に合わせた `GenMedia` へは改名せず `GenImage` のままにしています。
 - プロンプトと歌詞の編集中は、カーソル、選択範囲、IME の変換状態をネイティブ状態更新から保護します。生成タイプ、プロンプト、歌詞、出力設定のタブは作成パネルだけを再描画します。避けられない全体更新でも、再生中の音声・動画ノードを再利用して再生を中断しません。
 - ワークスペースのフィルムストリップには画像読み込みボタンがあり、Finder から PNG、JPEG、WebP、GIF、TIFF、HEIC、HEIF を 1 枚以上ドロップできます。音楽生成中はメディアソースの混在を防ぐため画像読み込みを無効にします。画像生成で入力画像を選択するとメインボタンは画像から画像のプロファイルを使用し、未選択時はテキストから画像のプロファイルを使用します。
 - 画像と動画の比率項目はドロップダウンになっています。画像から画像では入力画像を選択した場合だけ「元の解像度」を表示し、入力画像のサイズを Runtime が扱える 16 の倍数へ変換します。
@@ -114,13 +116,17 @@ MCP のエンドツーエンド検証は完了しています。`genimage_genera
 
 ## プロジェクト構成
 
+今回の内部整理はコードの分割と責務だけを変更するもので、既存の生成機能、利用手順、Web Bridge プロトコルは変更しません。
+
 ```text
 Sources/
 ├── GenImageCore/
+│   ├── ApplicationSupport.swift  # アプリデータ配置の唯一の定義
 │   ├── DomainModels.swift        # アセット、レシピ、ジョブ、モデル、プロファイル
 │   ├── InferenceServices.swift   # 画像、テキスト、動画、音楽の推論インターフェース
 │   ├── ModelCatalog.swift        # 組み込みモデルとプロファイル
 │   ├── OutputFileNaming.swift    # 画像・動画・音楽の出力名
+│   ├── OutputGeometry.swift      # 出力サイズ演算の唯一の定義（js/geometry.js が鏡像）
 │   ├── ProjectWorkspacePersistence.swift # 開いている生成プロジェクトの永続化
 │   └── WorkflowGraph.swift       # アセットの系譜と分岐関係
 ├── GenImageRuntime/
@@ -131,15 +137,19 @@ Sources/
 │   ├── MusicGenerationRouter.swift
 │   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── SubprocessRuntime.swift   # 外部 Runtime 子プロセスの共通処理
 │   ├── AudioOutputEncoder.swift
 │   └── CoreMLUpscaleService.swift
 └── GenImageApp/
-    ├── AppStore.swift            # アプリケーション状態とジョブ調整
+    ├── AppStore.swift            # 型宣言、格納プロパティ、init
+    ├── AppStore+*.swift          # 責務ごとに分割した振る舞い（Persistence、Profiles、Jobs など 10 ファイル）
     ├── HybridBridgeController.swift
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # ローカル画像、動画、音声を安全に WebUI へ提供
     └── Resources/WebUI/          # HTML/CSS/JavaScript フロントエンド
-Patches/                           # ビルド時に適用する Z-Image MLX 互換修正
+Patches/                           # ビルド時に適用する依存パッケージのソース修正と manifest.txt
+scripts/
+└── apply-runtime-patches.command  # manifest に従って依存パッケージ修正を適用・検証
 ```
 
 ## 現在の状態

@@ -60,10 +60,12 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 
 - 프로필은 사용 중, 사용 가능, 다운로드 중, 사용 불가 순으로 정렬됩니다. 모델과 LoRA 종속성이 모두 준비된 프로필에는 연한 녹색 테두리가 표시되며 다운로드가 끝나면 즉시 다시 정렬됩니다.
 - 취소 시 먼저 `cancelling` 상태로 전환되고 Runtime Task가 끝나면 `cancelled`로 변경되어 생성 및 메모리 버튼이 다시 활성화됩니다. ETA는 진행률 35% 및 실행 15초 이후 숫자로 표시되며 안정적인 샘플이 부족하면 전체 경과 시간을 사용합니다.
-- Z-Image MLX 호환 계층은 `quantize_config.json`, affine/mxfp4, packed pad token, FP16에서 BF16으로의 로딩을 처리합니다. `build.command`는 Swift Package 해석 후 `Patches/`의 Runtime 수정 사항을 자동 적용합니다. andrevp Z-Image Turbo MLX 4-bit는 실제 이미지 생성으로 검증했습니다.
+- Z-Image MLX 호환 계층은 `quantize_config.json`, affine/mxfp4, packed pad token, FP16에서 BF16으로의 로딩을 처리합니다. andrevp Z-Image Turbo MLX 4-bit는 실제 이미지 생성으로 검증했습니다.
+- 의존 패키지에 대한 소스 수정은 `Patches/manifest.txt`에 나열하며 Swift Package 해석 후 `scripts/apply-runtime-patches.command`가 적용합니다(`build.command`가 자동 호출). 의존 패키지 버전이 manifest와 다르거나, 수정 파일이 없거나, 적용에 실패하거나, 적용 후 예상한 표시를 찾지 못하면 빌드를 중단하며 수정되지 않은 소스로 계속 진행하지 않습니다. `scripts/apply-runtime-patches.command --verify`로 검사만 할 수 있습니다.
 - 텍스트→이미지 작업이 끝난 뒤에도 모델 가중치와 워밍업 buffer를 유지합니다. 5분 동안 유휴 상태가 되면 재사용 가능한 MLX 임시 buffer만 정리하고 모델은 언로드하지 않습니다. 사이드바의 메모리 해제, 모델 전환 또는 프로필 전환 시 RAM 90% 초과 보호가 동작할 때만 불필요한 Runtime을 해제합니다.
 - 다운로드는 원본 파일명을 유지합니다. 생성 결과는 `Image-YYYYMMDD-HHmm`, `Video-YYYYMMDD-HHmm` 또는 `Music-YYYYMMDD-HHmm`을 사용하며 같은 분에 중복되면 일련번호를 추가합니다. 설정에서 출력 디렉터리를 변경할 수 있습니다.
 - 열려 있는 각 작업 공간 탭을 생성 프로젝트로 취급합니다. 에셋과 lineage는 Application Support에 원자적으로 저장되며 앱을 다시 실행해도 복원됩니다. 탭을 명시적으로 닫을 때만 해당 프로젝트의 작업 공간 인덱스를 제거하고 출력된 미디어 파일은 디스크에 유지합니다.
+- 앱 데이터는 모두 `~/Library/Application Support/GenImage/`(`Models`, `Runtime`, `Workspace`, `Pasted`, `Generated`)에 있으며 `GenImageCore/ApplicationSupport.swift`가 유일한 정의처입니다. 작업 공간 인덱스는 예전에 `GenMedia/`에 기록되었고 실행 시 현재 루트로 가져옵니다. 이름이 같은 항목은 기존 것을 유지하며 덮어쓰거나 병합하지 않습니다. `Runtime/` 아래 Python venv가 실행 스크립트에 절대 경로를 새겨 두기 때문에 앱 이름에 맞춘 `GenMedia`로 바꾸지 않고 `GenImage`를 유지합니다.
 - 프롬프트와 가사를 편집하는 동안 커서, 선택 범위, IME 조합 상태를 네이티브 상태 업데이트로부터 보존합니다. 생성 유형, 프롬프트, 가사, 출력 설정 탭은 생성 패널만 다시 렌더링합니다. 불가피한 전체 업데이트에서도 재생 중인 오디오와 비디오 노드를 재사용하여 재생이 끊기지 않도록 합니다.
 - 작업 공간 필름스트립에 이미지 가져오기 버튼이 있으며 Finder에서 PNG, JPEG, WebP, GIF, TIFF, HEIC, HEIF 파일을 하나 이상 끌어 놓을 수 있습니다. 음악 생성 중에는 미디어 소스가 섞이지 않도록 이미지 가져오기를 비활성화합니다. 이미지 생성에서 원본 이미지를 선택하면 기본 버튼이 이미지→이미지 프로필을 사용하고, 선택하지 않으면 텍스트→이미지 프로필을 사용합니다.
 - 이미지와 비디오 비율 항목은 드롭다운으로 제공됩니다. 이미지→이미지에서는 원본 이미지를 선택한 뒤에만 `원본 해상도`가 표시되며, 원본 크기를 Runtime에서 사용할 수 있는 16의 배수로 변환합니다.
@@ -114,13 +116,17 @@ MCP 엔드투엔드 검증을 완료했습니다. `genimage_generate_image`는 �
 
 ## 프로젝트 구조
 
+이번 내부 리팩터링은 코드 경계와 책임만 변경하며 기존 생성 기능, 사용자 흐름, Web Bridge 프로토콜은 변경하지 않습니다.
+
 ```text
 Sources/
 ├── GenImageCore/
+│   ├── ApplicationSupport.swift  # 앱 데이터 위치의 유일한 정의
 │   ├── DomainModels.swift        # 에셋, 레시피, 작업, 모델, 프로필
 │   ├── InferenceServices.swift   # 이미지, 텍스트, 비디오, 음악 추론 인터페이스
 │   ├── ModelCatalog.swift        # 기본 제공 모델과 프로필
 │   ├── OutputFileNaming.swift    # 이미지, 비디오 및 음악 출력 이름
+│   ├── OutputGeometry.swift      # 출력 크기 연산의 유일한 정의(js/geometry.js가 미러)
 │   ├── ProjectWorkspacePersistence.swift # 열린 생성 프로젝트 영속화
 │   └── WorkflowGraph.swift       # 에셋 계보와 분기 관계
 ├── GenImageRuntime/
@@ -131,15 +137,19 @@ Sources/
 │   ├── MusicGenerationRouter.swift
 │   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── SubprocessRuntime.swift   # 외부 Runtime 서브프로세스 공통 처리
 │   ├── AudioOutputEncoder.swift
 │   └── CoreMLUpscaleService.swift
 └── GenImageApp/
-    ├── AppStore.swift            # 애플리케이션 상태와 작업 조정
+    ├── AppStore.swift            # 타입 선언, 저장 속성, init
+    ├── AppStore+*.swift          # 책임별로 분리한 동작(Persistence, Profiles, Jobs 등 10개 파일)
     ├── HybridBridgeController.swift
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # 로컬 이미지, 비디오, 오디오를 WebUI에 안전하게 제공
     └── Resources/WebUI/          # HTML/CSS/JavaScript 프런트엔드
-Patches/                           # 빌드 시 적용되는 Z-Image MLX 호환성 수정
+Patches/                           # 빌드 시 적용되는 의존 패키지 소스 수정과 manifest.txt
+scripts/
+└── apply-runtime-patches.command  # manifest에 따라 의존 패키지 수정 적용 및 검증
 ```
 
 ## 현재 상태
