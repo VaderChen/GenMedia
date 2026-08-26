@@ -34,7 +34,10 @@ struct MCPServerTests {
         #expect(names.contains("genimage_profiles_list"))
         #expect(names.contains("genimage_upscale_image"))
         #expect(names.contains("genimage_generate_image"))
+        #expect(names.contains("genimage_edit_image"))
         #expect(names.contains("genimage_describe_image"))
+        #expect(names.contains("genimage_generate_subtitle"))
+        #expect(names.count == 7)
     }
 
     @Test func unknownMethodsReturnJSONRPCError() async throws {
@@ -48,5 +51,31 @@ struct MCPServerTests {
         let error = response?["error"] as? [String: Any]
 
         #expect(error?["code"] as? Int == -32601)
+    }
+
+    @Test func httpTransportRespondsWithoutAppBridge() async throws {
+        let server = MCPHTTPServer()
+        let port: UInt16 = 12_381
+        let endpoint = try server.start(port: port)
+        defer { server.stop() }
+
+        try await Task.sleep(for: .milliseconds(150))
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0",
+            "id": "http-tools",
+            "method": "tools/list"
+        ])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let httpResponse = try #require(response as? HTTPURLResponse)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let result = try #require(object["result"] as? [String: Any])
+        let tools = result["tools"] as? [[String: Any]] ?? []
+
+        #expect(httpResponse.statusCode == 200)
+        #expect(tools.count == 7)
     }
 }

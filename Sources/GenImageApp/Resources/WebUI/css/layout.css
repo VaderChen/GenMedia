@@ -299,8 +299,8 @@
 
 .card-grid {
   display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(235px, 1fr));
 }
 
 @media (max-width: 1220px) {

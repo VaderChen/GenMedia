@@ -3,6 +3,17 @@ import { themes } from "./themes.js";
 import { escapeHTML } from "./format.js";
 
 export function renderSettings(state, ui) {
+  const mcpService = state.mcpService || {
+    isEnabled: false,
+    isRunning: false,
+    endpointURL: null,
+    errorMessage: null,
+  };
+  const mcpStatus = mcpService.isRunning
+    ? t("settings.mcpRunning")
+    : mcpService.isEnabled
+      ? t("settings.mcpStarting")
+      : t("settings.mcpDisabled");
   return `
     <section class="page">
       <header class="page-header">
@@ -72,12 +83,32 @@ export function renderSettings(state, ui) {
         </section>
 
         <section class="settings-card vertical mcp-settings-card">
-          <div>
-            <h2>${t("settings.mcp")}</h2>
-            <p>${t("settings.mcpNote")}</p>
+          <div class="mcp-setting-header">
+            <div>
+              <h2>${t("settings.mcp")}</h2>
+              <p>${t("settings.mcpNote")}</p>
+            </div>
+            <label class="switch-control">
+              <input
+                type="checkbox"
+                role="switch"
+                data-setting="mcpEnabled"
+                ${mcpService.isEnabled ? "checked" : ""}
+              />
+              <span class="switch-track" aria-hidden="true"><span></span></span>
+              <strong>${mcpStatus}</strong>
+            </label>
           </div>
-          <label>${t("settings.mcpCommand")}</label>
-          <code class="command-box">swift run GenImageMCP</code>
+          ${mcpService.isEnabled ? `
+            <div class="mcp-endpoint-block">
+              <label>${t("settings.mcpEndpoint")}</label>
+              <code class="command-box">${escapeHTML(mcpService.endpointURL || t("settings.mcpStarting"))}</code>
+              <p>${t("settings.mcpEndpointNote")}</p>
+            </div>
+          ` : ""}
+          ${mcpService.errorMessage
+            ? `<p class="mcp-service-error">${escapeHTML(t("settings.mcpError", { message: mcpService.errorMessage }))}</p>`
+            : ""}
           <p>${t("settings.mcpTools")}</p>
         </section>
       </div>

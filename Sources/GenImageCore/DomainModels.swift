@@ -3,11 +3,13 @@ import Foundation
 public enum ModelCapability: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     case textToImage
     case imageToText
+    case textToText
     case upscale
     case imageToImage
     case imageToVideo
     case textToVideo
     case textToMusic
+    case videoToText
     case controlNet
     case lora
 
@@ -17,11 +19,13 @@ public enum ModelCapability: String, CaseIterable, Codable, Hashable, Sendable, 
         switch self {
         case .textToImage: "文生圖"
         case .imageToText: "圖生文"
+        case .textToText: "文生文"
         case .upscale: "Upscale"
         case .imageToImage: "圖生圖"
         case .imageToVideo: "圖生影"
         case .textToVideo: "文生影"
         case .textToMusic: "文生音樂"
+        case .videoToText: "字幕生成"
         case .controlNet: "ControlNet"
         case .lora: "LoRA"
         }
@@ -31,11 +35,13 @@ public enum ModelCapability: String, CaseIterable, Codable, Hashable, Sendable, 
         switch self {
         case .textToImage: "text.below.photo"
         case .imageToText: "photo.badge.magnifyingglass"
+        case .textToText: "text.bubble"
         case .upscale: "arrow.up.left.and.arrow.down.right"
         case .imageToImage: "photo.on.rectangle.angled"
         case .imageToVideo: "photo.badge.play"
         case .textToVideo: "text.badge.play"
         case .textToMusic: "music.note"
+        case .videoToText: "captions.bubble"
         case .controlNet: "point.3.connected.trianglepath.dotted"
         case .lora: "slider.horizontal.3"
         }
@@ -450,11 +456,14 @@ public enum RecipeValidationError: LocalizedError, Sendable {
     }
 }
 
-public enum AssetKind: String, Codable, Hashable, Sendable {
+public enum AssetKind: String, CaseIterable, Codable, Hashable, Sendable {
     case imported
+    case importedVideo
+    case importedAudio
     case generated
     case generatedVideo
     case generatedAudio
+    case generatedSubtitle
     case edited
     case upscaled
 
@@ -462,10 +471,30 @@ public enum AssetKind: String, Codable, Hashable, Sendable {
         switch self {
         case .imported, .generated, .edited, .upscaled:
             true
-        case .generatedVideo, .generatedAudio:
+        case .importedVideo, .importedAudio, .generatedVideo, .generatedAudio, .generatedSubtitle:
             false
         }
     }
+
+    public var isTimedMedia: Bool {
+        switch self {
+        case .importedVideo, .importedAudio, .generatedVideo, .generatedAudio:
+            true
+        case .imported, .generated, .generatedSubtitle, .edited, .upscaled:
+            false
+        }
+    }
+}
+
+public enum SubtitleFormat: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+    case srt
+    case vtt
+
+    public var id: String { rawValue }
+
+    public var fileExtension: String { rawValue }
+
+    public var displayName: String { rawValue.uppercased() }
 }
 
 public enum AudioOutputFormat: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
@@ -542,6 +571,9 @@ public struct MediaAsset: Identifiable, Codable, Hashable, Sendable {
     public var sampleRate: Int?
     public var channelCount: Int?
     public var audioFormat: AudioOutputFormat?
+    public var subtitleFormat: SubtitleFormat?
+    public var languageCode: String?
+    public var textContent: String?
     public var recipeID: UUID?
     public var createdAt: Date
 
@@ -559,6 +591,9 @@ public struct MediaAsset: Identifiable, Codable, Hashable, Sendable {
         sampleRate: Int? = nil,
         channelCount: Int? = nil,
         audioFormat: AudioOutputFormat? = nil,
+        subtitleFormat: SubtitleFormat? = nil,
+        languageCode: String? = nil,
+        textContent: String? = nil,
         recipeID: UUID? = nil,
         createdAt: Date = .now
     ) {
@@ -575,6 +610,9 @@ public struct MediaAsset: Identifiable, Codable, Hashable, Sendable {
         self.sampleRate = sampleRate
         self.channelCount = channelCount
         self.audioFormat = audioFormat
+        self.subtitleFormat = subtitleFormat
+        self.languageCode = languageCode
+        self.textContent = textContent
         self.recipeID = recipeID
         self.createdAt = createdAt
     }
@@ -582,20 +620,24 @@ public struct MediaAsset: Identifiable, Codable, Hashable, Sendable {
 
 public enum WorkflowAction: String, Codable, Hashable, Sendable {
     case importImage
+    case importMedia
     case describe
     case generate
     case generateVideo
     case generateMusic
+    case generateSubtitles
     case imageToImage
     case upscale
 
     public var title: String {
         switch self {
         case .importImage: "匯入"
+        case .importMedia: "匯入媒體"
         case .describe: "圖生文"
         case .generate: "文生圖"
         case .generateVideo: "生成影片"
         case .generateMusic: "生成音樂"
+        case .generateSubtitles: "生成字幕"
         case .imageToImage: "圖生圖"
         case .upscale: "Upscale"
         }
@@ -604,10 +646,12 @@ public enum WorkflowAction: String, Codable, Hashable, Sendable {
     public var symbolName: String {
         switch self {
         case .importImage: "square.and.arrow.down"
+        case .importMedia: "film.stack"
         case .describe: "text.viewfinder"
         case .generate: "sparkles"
         case .generateVideo: "play.rectangle"
         case .generateMusic: "music.note"
+        case .generateSubtitles: "captions.bubble"
         case .imageToImage: "photo.on.rectangle.angled"
         case .upscale: "arrow.up.left.and.arrow.down.right"
         }

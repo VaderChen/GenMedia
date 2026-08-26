@@ -4,7 +4,15 @@
 
 ## Unreleased
 
-- 本輪為內部架構整理，對外功能、使用流程與 Web Bridge 協定維持不變；以下變更集中在責任邊界、資料路徑一致性、可測試性與建置可靠性。
+- Qwen3-VL、Qwen3.5 與 Qwen3.8 多模態模型同時歸類為圖生文與文生文，模型中心篩選與 Profile 各自對應兩種能力；下載流程同步取得並驗證 Processor、影像／影片前處理、Tokenizer、Chat Template 與完整權重索引。
+- `mlx-swift-lm` 更新為支援 Qwen3.5 的 revision `7da33441c7c08b010ff1aa8da9dc3d82277272f5`，並由 `MLX-Swift-LM-Qwen35-Text-Only.patch` 修正 Qwen3.5 多模態 Runtime 的純文字輸入。
+- 設定頁新增 MCP Switch；啟動後揭露 localhost API `http://127.0.0.1:12181/mcp`。HTTP transport 與獨立 stdio server 共用同一工具核心，stdio 仍自行持有推論服務並可在 GenMedia.app 未執行時工作。
+- 新增影片／音訊字幕生成：`SubtitleGenerationRouter` 依 Profile 選擇多語言 Whisper Large v3 Turbo、中文 Paraformer Large 或日文 Parakeet 0.6B Core ML Adapter，輸出 SRT／WebVTT；可選用 Qwen3.5／Qwen3.8 MLX 將同一時間軸翻譯為繁中、簡中、英、日、韓文。
+- 新增命名 workspace 的建立、切換與確認刪除；每個 workspace 維護自己的生成專案分頁集合，切換時只替換對應 tabs 與選取狀態。
+- 資產種類新增 `importedVideo`、`importedAudio` 與 `generatedSubtitle`，讓多媒體匯入、字幕 parent lineage 與圖片／時間性媒體判斷有明確型別。
+- 新增 12 項不需模型權重的測試，涵蓋 SRT 時間碼與邊界、`AssetKind` 全 case 分類、字幕 Adapter 選擇、16 kHz 單聲道換算、ASR 暫存輸出路徑與 MCP HTTP transport；原有 43 項加上新增項目共 55 項。
+- 獨立 stdio MCP server 新增第七個工具 `genimage_generate_subtitle`，直接在 MCP 行程內執行 Core ML ASR 與可選 MLX 翻譯，不依賴 GenMedia.app 啟動。
+- 除上述字幕與 workspace 能力外，本輪其餘項目為內部架構整理；既有生成流程與 Web Bridge 協定維持相容，變更集中在責任邊界、資料路徑一致性、可測試性與建置可靠性。
 - `ImageAsset` 更名為 `MediaAsset`：圖片、影片與音訊一直共用這個型別，音樂生成也是回傳它，名稱與實際用途不符。63 處引用一併更新；欄位名稱不動，因此持久化 JSON 與 Web UI 的鍵名不變，既有資料不需遷移。
 - `ACEStepSwiftRuntime` 內沿用 PoC 名稱的階段型別更名：`ConditioningPoC` → `ACEStepConditioningStage`、`GeneratedAudioPoC` → `ACEStepAudioGenerationStage`、`VAEDecodePoC` → `ACEStepVAEDecodeStage`、`QwenEmbeddingPoC` → `ACEStepTextEmbedder`。這四個是音樂生成的正式路徑（ACEStepMusicGenerationService → ACEStepNativeGenerator → 這裡），名稱看起來像實驗殘留，容易在清理時被誤刪。
 - `DiTForwardPoC` 更名為 `ACEStepDiTForwardProbe`，並在檔頭註明它只供 `ACEStepSwiftPoC` 診斷使用；沒有搬進該執行檔，是因為它依賴的 DiT 型別都是 internal，搬出去得為了一個診斷工具把它們改成 public。
@@ -23,10 +31,10 @@
 - Swift 的 `private` 只到檔案範圍，因此 54 個跨檔案共用的成員改為 internal（仍侷限於 GenImageApp target），其餘 22 個維持 `private`；主檔開頭記錄了這個約定與檔案分工。
 - Web UI 新增 `js/render-preservation.js`：全量重繪時的游標、選取範圍、捲動位置、播放中的音訊／影片節點與 Web Audio 視覺化圖，全部收斂到單一進入點 `withPreservedView(root, paint)`，取代原本散在 `render()` 內、順序錯了就會出錯的八次呼叫。
 - Web UI 另拆出 `js/workspace-tabs.js`（分頁簿記與待落地輸出的分頁路由）與 `js/chrome.js`（側邊欄、路由、更新橫幅、系統資源列、對話框與 toast）；兩者都不讀取模組層級可變狀態，`state` 與 `ui` 一律由呼叫端傳入。`app.js` 由 2,182 行降至 1,360 行。
-- 相依套件原始碼修正改由 `Patches/manifest.txt` 宣告、`scripts/apply-runtime-patches.command` 統一套用，取代 `build.command` 內兩組手寫的 grep／patch 流程（7 個 patch 原本各有一段重複邏輯）。
+- 相依套件原始碼修正改由 `Patches/manifest.txt` 宣告、`scripts/apply-runtime-patches.command` 統一套用，取代 `build.command` 內兩組手寫的 grep／patch 流程；目前共管理 8 個 patch。
 - 修正流程改為絕不安靜失敗：checkout 不存在、修正檔遺失、`Package.resolved` 版本與 manifest 不符、套用失敗、或套用後找不到預期標記，一律中止建置。舊流程在這些情況會直接以未修正的原始碼繼續編譯。
 - `patch` 改用 `-i` 讀取檔案並加上 `-N -t -F 0`：不再互動詢問（舊流程用 stdin 餵 patch，遇到 `Assume -R?` 會把修正檔內容當成回答而可能反向套用），也禁止模糊比對避免貼到錯誤位置；成功後清除殘留的 `.orig` 備份。
-- 新增 `scripts/apply-runtime-patches.command --verify`，可在不修改任何檔案的情況下確認 7 項修正是否都已套用。
+- 新增 `scripts/apply-runtime-patches.command --verify`，可在不修改任何檔案的情況下確認 8 項修正是否都已套用。
 - 輸出尺寸運算集中到 `GenImageCore/OutputGeometry.swift` 與 Web UI 的 `js/geometry.js`：對齊倍數、上下限、比例換算、來源尺寸換算與圖生圖生成畫布策略各只有一份定義，兩份實作互為鏡像並在檔頭互相標註。
 - 圖生圖的尺寸策略由 Worker 移到 `Qwen2511ImageToImageService`：Worker 改為接收 `generationWidth`、`generationHeight`、`outputWidth`、`outputHeight` 並直接執行，不再自行決定生成畫布。MCP 走同一條服務路徑，因此同樣套用該策略。
 - 影片輸出寬高改用就近對齊（原本無條件捨去），與 Web UI 滑桿一致；`GenerationRecipe`、`VideoGenerationRequest` 與 MCP 參數驗證改用 `OutputGeometry` 的上下限與倍數定義。

@@ -175,6 +175,7 @@ struct MusicOutputSettings: Codable, Hashable, Sendable {
 /// 這個檔案只保留型別宣告、儲存屬性與 init；其餘行為依職責拆進 `AppStore+*.swift`：
 ///
 ///   Persistence        設定的讀寫與還原驗證
+///   Workspaces         工作區的建立與切換
 ///   Paths              模型根目錄、輸出目錄與系統資源監看
 ///   Selection          由選取狀態衍生的唯讀資料
 ///   Profiles           Profile 的選用、相容性檢查與增刪改
@@ -182,6 +183,7 @@ struct MusicOutputSettings: Codable, Hashable, Sendable {
 ///   Assets             工作區資產的匯入、選取與移除
 ///   ImageGeneration    圖生文、文生圖、圖生圖與 Upscale
 ///   MediaGeneration    影片與音樂生成
+///   SubtitleGeneration 多媒體語音辨識與字幕輸出
 ///   Jobs               生成工作的進度、取消與記憶體釋放
 ///   ModelInstallation  模型的安裝、暫停、移除與修復
 ///
@@ -255,6 +257,7 @@ final class AppStore: ObservableObject {
     var upscaleService: CoreMLUpscaleService
     var videoGenerationService: LTXVideoGenerationService
     var musicGenerationService: MusicGenerationRouter
+    var subtitleGenerationService: SubtitleGenerationRouter
     let modelInstaller = HuggingFaceModelInstaller()
     private let projectWorkspaceURL: URL
     private var projectWorkspacePersistenceEnabled = false
@@ -322,6 +325,7 @@ final class AppStore: ObservableObject {
         )
         videoGenerationService = LTXVideoGenerationService(outputDirectory: generatedDirectory)
         musicGenerationService = Self.makeMusicGenerationService(outputDirectory: generatedDirectory)
+        subtitleGenerationService = SubtitleGenerationRouter(outputDirectory: generatedDirectory)
         let fallbackProject = Project(name: "示範專案")
         let initialProjects = restoredWorkspace?.projects.isEmpty == false
             ? restoredWorkspace!.projects

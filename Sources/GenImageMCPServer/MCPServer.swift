@@ -1,6 +1,6 @@
 import Foundation
 
-public final class MCPServer {
+public final class MCPServer: @unchecked Sendable {
     public static let protocolVersion = "2025-06-18"
     private let tools: MCPToolRegistry
 

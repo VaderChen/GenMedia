@@ -274,6 +274,135 @@ public struct VideoGenerationLoRA: Sendable, Hashable {
     }
 }
 
+public struct TimedTranscriptSegment: Codable, Hashable, Sendable, Identifiable {
+    public var id: UUID
+    public var start: Double
+    public var end: Double
+    public var text: String
+    public var confidence: Double?
+
+    public init(
+        id: UUID = UUID(),
+        start: Double,
+        end: Double,
+        text: String,
+        confidence: Double? = nil
+    ) {
+        self.id = id
+        self.start = start
+        self.end = end
+        self.text = text
+        self.confidence = confidence
+    }
+}
+
+public struct TranscriptResult: Codable, Hashable, Sendable {
+    public var text: String
+    public var languageCode: String
+    public var durationSeconds: Double
+    public var segments: [TimedTranscriptSegment]
+
+    public init(
+        text: String,
+        languageCode: String,
+        durationSeconds: Double,
+        segments: [TimedTranscriptSegment]
+    ) {
+        self.text = text
+        self.languageCode = languageCode
+        self.durationSeconds = durationSeconds
+        self.segments = segments
+    }
+}
+
+public struct TextGenerationRequest: Sendable, Hashable {
+    public var prompt: String
+    public var profile: InferenceProfile
+    public var modelURL: URL
+    public var maximumOutputTokens: Int?
+
+    public init(
+        prompt: String,
+        profile: InferenceProfile,
+        modelURL: URL,
+        maximumOutputTokens: Int? = nil
+    ) {
+        self.prompt = prompt
+        self.profile = profile
+        self.modelURL = modelURL
+        self.maximumOutputTokens = maximumOutputTokens
+    }
+}
+
+public enum SubtitleTranslationLanguage: String, CaseIterable, Codable, Hashable, Sendable {
+    case traditionalChinese = "zh-Hant"
+    case simplifiedChinese = "zh-Hans"
+    case english = "en"
+    case japanese = "ja"
+    case korean = "ko"
+
+    public var promptName: String {
+        switch self {
+        case .traditionalChinese: "Traditional Chinese"
+        case .simplifiedChinese: "Simplified Chinese"
+        case .english: "English"
+        case .japanese: "Japanese"
+        case .korean: "Korean"
+        }
+    }
+}
+
+public struct SubtitleTranslationConfiguration: Sendable, Hashable {
+    public var targetLanguage: SubtitleTranslationLanguage
+    public var profile: InferenceProfile
+    public var modelURL: URL
+
+    public init(
+        targetLanguage: SubtitleTranslationLanguage,
+        profile: InferenceProfile,
+        modelURL: URL
+    ) {
+        self.targetLanguage = targetLanguage
+        self.profile = profile
+        self.modelURL = modelURL
+    }
+}
+
+public struct SubtitleGenerationRequest: Sendable, Hashable {
+    public var projectID: UUID
+    public var sourceAsset: MediaAsset
+    public var profile: InferenceProfile
+    public var modelURL: URL
+    public var format: SubtitleFormat
+    public var translation: SubtitleTranslationConfiguration?
+
+    public init(
+        projectID: UUID,
+        sourceAsset: MediaAsset,
+        profile: InferenceProfile,
+        modelURL: URL,
+        format: SubtitleFormat,
+        translation: SubtitleTranslationConfiguration? = nil
+    ) {
+        self.projectID = projectID
+        self.sourceAsset = sourceAsset
+        self.profile = profile
+        self.modelURL = modelURL
+        self.format = format
+        self.translation = translation
+    }
+}
+
+public struct SubtitleGenerationResult: Sendable, Hashable {
+    public var asset: MediaAsset
+    public var transcript: TranscriptResult
+
+    public init(asset: MediaAsset, transcript: TranscriptResult) {
+        self.asset = asset
+        self.transcript = transcript
+    }
+}
+
 public protocol TextToImageGenerating: Sendable {
     func generate(
         request: TextToImageRequest,
@@ -286,6 +415,15 @@ public protocol ImageDescribing: Sendable {
         request: ImageDescriptionRequest,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> String
+}
+
+public protocol TextGenerating: Sendable {
+    func generateText(
+        request: TextGenerationRequest,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> String
+
+    func unload() async
 }
 
 public protocol ImageToImageGenerating: Sendable {
@@ -314,6 +452,26 @@ public protocol MusicGenerating: Sendable {
         request: MusicGenerationRequest,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> MediaAsset
+}
+
+public protocol MediaTranscribing: Sendable {
+    func supports(profile: InferenceProfile) -> Bool
+
+    func transcribe(
+        request: SubtitleGenerationRequest,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> TranscriptResult
+
+    func unload() async
+}
+
+public protocol SubtitleGenerating: Sendable {
+    func generate(
+        request: SubtitleGenerationRequest,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> SubtitleGenerationResult
+
+    func unload() async
 }
 
 public struct InferenceServices: Sendable {

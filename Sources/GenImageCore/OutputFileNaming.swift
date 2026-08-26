@@ -51,6 +51,21 @@ public enum OutputFileNaming {
         )
     }
 
+    public static func subtitleURL(
+        in directory: URL,
+        pathExtension: String,
+        date: Date = .now,
+        fileManager: FileManager = .default
+    ) -> URL {
+        uniqueURL(
+            prefix: "Subtitle",
+            in: directory,
+            pathExtension: pathExtension,
+            date: date,
+            fileManager: fileManager
+        )
+    }
+
     private static func uniqueURL(
         prefix: String,
         in directory: URL,

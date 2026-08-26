@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import Foundation
 import GenImageCore
@@ -16,11 +17,13 @@ private enum SourceImageAction {
 @MainActor
 final class HybridBridgeController: NSObject, ObservableObject {
     let store = AppStore()
+    let mcpService = LocalMCPServiceController()
     let assetSchemeHandler = AssetSchemeHandler()
     let webUISchemeHandler = WebUISchemeHandler()
 
     private weak var webView: WKWebView?
     private var storeCancellable: AnyCancellable?
+    private var mcpServiceCancellable: AnyCancellable?
     private var pendingPush: Task<Void, Never>?
     private var pasteKeyMonitor: Any?
     private var sharingPicker: NSSharingServicePicker?
@@ -29,6 +32,11 @@ final class HybridBridgeController: NSObject, ObservableObject {
     override init() {
         super.init()
         storeCancellable = store.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in
+                self?.scheduleStatePush()
+            }
+        }
+        mcpServiceCancellable = mcpService.objectWillChange.sink { [weak self] _ in
             Task { @MainActor in
                 self?.scheduleStatePush()
             }
@@ -77,7 +85,7 @@ final class HybridBridgeController: NSObject, ObservableObject {
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(WebAppState(store: store))
+            let data = try encoder.encode(WebAppState(store: store, mcpService: mcpService))
             guard let json = String(data: data, encoding: .utf8) else { return }
             webView.evaluateJavaScript("window.GenImageNative?.receiveState(\(json));")
         } catch {
@@ -114,6 +122,24 @@ final class HybridBridgeController: NSObject, ObservableObject {
             store.closeWorkspaceProject(
                 assetIDs: rawAssetIDs.compactMap(UUID.init(uuidString:))
             )
+
+        case "createWorkspace":
+            guard let name = params["name"] as? String else {
+                throw BridgeError.invalidParameters
+            }
+            store.createWorkspace(name: name)
+
+        case "deleteWorkspace":
+            guard let id = uuid(params["workspaceID"]) else {
+                throw BridgeError.invalidParameters
+            }
+            store.deleteWorkspace(id)
+
+        case "selectWorkspace":
+            guard let id = uuid(params["workspaceID"]) else {
+                throw BridgeError.invalidParameters
+            }
+            store.selectWorkspace(id)
 
         case "openAsset":
             try openAsset(params)
@@ -193,6 +219,29 @@ final class HybridBridgeController: NSObject, ObservableObject {
         case "generateMusic":
             store.requestMusicGeneration()
 
+        case "generateSubtitles":
+            guard let rawFormat = params["format"] as? String,
+                  let format = SubtitleFormat(rawValue: rawFormat) else {
+                throw BridgeError.invalidParameters
+            }
+            let targetLanguage: SubtitleTranslationLanguage?
+            if let rawTargetLanguage = params["targetLanguageCode"] as? String,
+               !rawTargetLanguage.isEmpty {
+                guard let parsedTargetLanguage = SubtitleTranslationLanguage(
+                    rawValue: rawTargetLanguage
+                ) else {
+                    throw BridgeError.invalidParameters
+                }
+                targetLanguage = parsedTargetLanguage
+            } else {
+                targetLanguage = nil
+            }
+            performSubtitleGeneration(
+                sourceAssetID: uuid(params["sourceAssetID"]),
+                format: format,
+                targetLanguage: targetLanguage
+            )
+
         case "describe":
             performSourceImageAction(.describe)
 
@@ -204,6 +253,9 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
         case "importImage":
             importImage(then: nil)
+
+        case "importSubtitleMedia":
+            importSubtitleMedia(then: nil)
 
         case "pasteImage":
             try importPastedImage(params)
@@ -235,6 +287,12 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
         case "chooseOutputDirectory":
             chooseOutputDirectory()
+
+        case "setMCPServiceEnabled":
+            guard let enabled = params["enabled"] as? Bool else {
+                throw BridgeError.invalidParameters
+            }
+            mcpService.setEnabled(enabled)
 
         case "revealOutputDirectory":
             store.revealOutputDirectory()
@@ -435,6 +493,37 @@ final class HybridBridgeController: NSObject, ObservableObject {
         }
     }
 
+    private func performSubtitleGeneration(
+        sourceAssetID: UUID?,
+        format: SubtitleFormat,
+        targetLanguage: SubtitleTranslationLanguage?
+    ) {
+        if let sourceAssetID,
+           store.subtitleSourceAsset(id: sourceAssetID) != nil {
+            store.requestSubtitleGeneration(
+                sourceAssetID: sourceAssetID,
+                format: format,
+                targetLanguage: targetLanguage
+            )
+            return
+        }
+        if let selectedSource = store.selectedSubtitleSource {
+            store.requestSubtitleGeneration(
+                sourceAssetID: selectedSource.id,
+                format: format,
+                targetLanguage: targetLanguage
+            )
+            return
+        }
+        importSubtitleMedia { [weak self] assetID in
+            self?.store.requestSubtitleGeneration(
+                sourceAssetID: assetID,
+                format: format,
+                targetLanguage: targetLanguage
+            )
+        }
+    }
+
     private func importImage(then action: SourceImageAction?) {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image]
@@ -474,6 +563,58 @@ final class HybridBridgeController: NSObject, ObservableObject {
             store.requestVideoGeneration(sourceAssetIDs: importedAssetIDs)
         case .upscale: store.upscaleSelected()
         default: break
+        }
+    }
+
+    private func importSubtitleMedia(then completion: ((UUID) -> Void)?) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.movie, .audio]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "選擇包含聲音的影片或音訊檔案"
+        panel.prompt = "匯入"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let media = AVURLAsset(url: url)
+                let audioTracks = try await media.loadTracks(withMediaType: .audio)
+                guard !audioTracks.isEmpty else {
+                    throw BridgeError.assetActionFailed("來源媒體沒有可辨識的聲音軌。")
+                }
+                let videoTracks = try await media.loadTracks(withMediaType: .video)
+                let durationTime = try await media.load(.duration)
+                let rawDuration = CMTimeGetSeconds(durationTime)
+                let duration = rawDuration.isFinite ? max(0, rawDuration) : 0
+
+                let pixelWidth: Int
+                let pixelHeight: Int
+                if let videoTrack = videoTracks.first {
+                    let naturalSize = try await videoTrack.load(.naturalSize)
+                    let preferredTransform = try await videoTrack.load(.preferredTransform)
+                    let transformed = CGRect(
+                        origin: .zero,
+                        size: naturalSize
+                    ).applying(preferredTransform).standardized
+                    pixelWidth = max(0, Int(transformed.width.rounded()))
+                    pixelHeight = max(0, Int(transformed.height.rounded()))
+                } else {
+                    pixelWidth = 0
+                    pixelHeight = 0
+                }
+
+                let assetID = store.importMedia(
+                    url: url,
+                    kind: videoTracks.isEmpty ? .importedAudio : .importedVideo,
+                    pixelWidth: pixelWidth,
+                    pixelHeight: pixelHeight,
+                    durationSeconds: duration
+                )
+                completion?(assetID)
+            } catch {
+                store.statusMessage = "無法匯入字幕來源媒體：\(error.localizedDescription)"
+            }
         }
     }
 

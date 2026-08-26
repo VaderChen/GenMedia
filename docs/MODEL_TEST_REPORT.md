@@ -45,7 +45,7 @@ SwiftPM 執行需要 `mlx.metallib`。相容檔案已存放於 `RuntimeSupport`�
 - 量化：4-bit affine、group size 64。
 - 模型、tokenizer、chat template、preprocessor 設定完整。
 
-`mlx-swift-lm 2.30.6` 的 Qwen3-VL Runtime 已接入：
+`mlx-swift-lm` revision `7da33441c7c08b010ff1aa8da9dc3d82277272f5` 的 Qwen 多模態 Runtime 已接入：
 
 - 本機 4-bit 模型載入成功。
 - Z-Image 生成的 PNG 可直接作為輸入。
@@ -57,7 +57,7 @@ SwiftPM 執行需要 `mlx.metallib`。相容檔案已存放於 `RuntimeSupport`�
 標準 JSON-RPC 2.0 stdio MCP server 已完成以下煙霧與端到端測試：
 
 - `initialize` 回傳協定版本 `2025-06-18`。
-- `tools/list` 可列出模型、Profile、Upscale、文生圖與圖生文五項工具。
+- `tools/list` 可列出模型、Profile、Upscale、文生圖、圖生圖、圖生文與字幕生成七項工具。
 - `genimage_generate_image` 已直接呼叫原生 Z-Image Runtime，並確認輸出 PNG 尺寸與格式。
 - `genimage_describe_image` 已直接呼叫原生 Qwen3-VL Runtime，並輸出繁體中文描述。
 - `genimage_upscale_image` 使用本機 Real-ESRGAN Core ML 模型完成 4× 輸出。

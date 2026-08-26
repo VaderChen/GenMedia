@@ -30,10 +30,12 @@ extension AppStore {
         let textToImageService = textToImageService
         let imageToImageService = imageToImageService
         let upscaleService = upscaleService
+        let subtitleGenerationService = subtitleGenerationService
         Task {
             await textToImageService.setOutputDirectory(outputURL)
             await imageToImageService.setOutputDirectory(outputURL)
             await upscaleService.setOutputDirectory(outputURL)
+            await subtitleGenerationService.setOutputDirectory(outputURL)
         }
         videoGenerationService = LTXVideoGenerationService(outputDirectory: outputURL)
         musicGenerationService = Self.makeMusicGenerationService(outputDirectory: outputURL)

@@ -9,6 +9,7 @@ dist/
 # Local model weights and generated assets must not enter source control.
 Models/
 Generated/
+Outputs/
 *.safetensors
 *.ckpt
 

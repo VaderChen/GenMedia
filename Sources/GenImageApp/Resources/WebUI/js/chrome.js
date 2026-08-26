@@ -1,9 +1,10 @@
+import { renderAutomaticFlow } from "./automatic-flow.js";
 import { renderDownloads } from "./downloads.js";
 import { escapeHTML, gigabytes, percent, phaseLabel } from "./format.js";
 import { RECOMMENDED_MINIMUM_SIDE } from "./geometry.js";
 import { t } from "./i18n.js";
-import { renderModels } from "./models.js";
-import { renderProfiles } from "./profiles.js";
+import { renderModelDetails, renderModels } from "./models.js";
+import { renderProfileDetails, renderProfiles } from "./profiles.js";
 import { renderSettings } from "./settings.js";
 import { workspaceStateForActiveTab } from "./workspace-tabs.js";
 import { isInferenceBusy, renderQuickTools, renderWorkspace } from "./workspace.js";
@@ -13,6 +14,12 @@ import { isInferenceBusy, renderQuickTools, renderWorkspace } from "./workspace.
 // 全部是純畫面函式，`state` 與 `ui` 由呼叫端傳入，不讀取任何模組層級的可變狀態，也不觸發重繪。
 
 export function renderSidebar(state, ui) {
+  const selectedWorkspace = state.workspaces?.find(
+    (workspace) => workspace.id === state.selectedWorkspaceID,
+  );
+  const workspaceName = selectedWorkspace?.isDefault
+    ? t("workspace.defaultWorkspace")
+    : state.projectName;
   return `
     <aside class="sidebar">
       <div class="brand">
@@ -21,7 +28,7 @@ export function renderSidebar(state, ui) {
       </div>
       <nav class="sidebar-nav">
         ${navButton(ui, "workspace", "▦", t("nav.workspace"))}
-        ${navButton(ui, "models", "⬡", t("nav.models"))}
+        ${navButton(ui, "automaticFlow", "⎇", t("nav.automaticFlow"))}
         ${navButton(ui, "profiles", "⇄", t("nav.profiles"))}
         ${ui.profileHintVisible ? `
           <div class="profile-nav-hint" role="status">
@@ -30,6 +37,7 @@ export function renderSidebar(state, ui) {
             <button class="profile-nav-hint-dismiss" data-action="dismissProfileHint" aria-label="${t("profile.dismissHint")}" title="${t("profile.dismissHint")}">×</button>
           </div>
         ` : ""}
+        ${navButton(ui, "models", "⬡", t("nav.models"))}
         ${navButton(ui, "downloads", "⇩", t("nav.downloads"))}
         ${navButton(ui, "settings", "⚙", t("nav.settings"))}
       </nav>
@@ -43,7 +51,7 @@ export function renderSidebar(state, ui) {
       <div class="sidebar-project">
         <div class="sidebar-project-copy">
           <span>${t("sidebar.currentProject")}</span>
-          <strong>${escapeHTML(state.projectName)}</strong>
+          <strong>${escapeHTML(workspaceName)}</strong>
           <span>${t("sidebar.assetsJobs", { assets: state.assets.length, jobs: state.jobs.filter((job) => ["queued", "running", "cancelling"].includes(job.state)).length })}</span>
         </div>
         <button
@@ -70,6 +78,7 @@ function navButton(ui, route, icon, title) {
 }
 
 export function renderRoute(state, ui) {
+  if (ui.route === "automaticFlow") return renderAutomaticFlow();
   if (ui.route === "models") return renderModels(state, ui);
   if (ui.route === "profiles") return renderProfiles(state, ui);
   if (ui.route === "downloads") return renderDownloads(state);
@@ -170,6 +179,49 @@ export function renderWorkspaceTabRenameDialog(ui) {
   </div>`;
 }
 
+export function renderWorkspaceCreateDialog(ui) {
+  if (!ui.workspaceCreateDialogOpen) return "";
+  return `<div class="dialog-backdrop">
+    <section class="paste-dialog" role="dialog" aria-modal="true" aria-labelledby="create-workspace-dialog-title">
+      <h2 id="create-workspace-dialog-title">${t("workspace.createWorkspace")}</h2>
+      <label class="dialog-field">${t("workspace.workspaceName")}
+        <input
+          class="field"
+          data-ui-field="workspaceName"
+          value="${escapeHTML(ui.workspaceCreateName)}"
+          maxlength="80"
+        />
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary-button" data-action="workspaceCreateCancel">${t("common.cancel")}</button>
+        <button
+          class="primary-button"
+          data-action="workspaceCreateSave"
+          ${ui.workspaceCreateName.trim() ? "" : "disabled"}
+        >${t("workspace.createAction")}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
+export function renderWorkspaceDeleteDialog(state, ui) {
+  const workspace = state.workspaces?.find(
+    (item) => item.id === ui.workspaceDeleteTargetID,
+  );
+  if (!workspace) return "";
+  const name = workspace.isDefault ? t("workspace.defaultWorkspace") : workspace.name;
+  return `<div class="dialog-backdrop">
+    <section class="paste-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-workspace-dialog-title">
+      <h2 id="delete-workspace-dialog-title">${t("workspace.deleteWorkspaceTitle")}</h2>
+      <p>${escapeHTML(t("workspace.deleteWorkspaceMessage", { name }))}</p>
+      <div class="dialog-actions">
+        <button class="secondary-button" data-action="workspaceDeleteCancel">${t("common.cancel")}</button>
+        <button class="danger-button" data-action="workspaceDeleteConfirm">${t("workspace.deleteAction")}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
 export function renderSmallOutputWarningDialog(ui) {
   if (!ui.smallOutputWarning) return "";
   const { width, height } = ui.smallOutputWarning;
@@ -184,6 +236,53 @@ export function renderSmallOutputWarningDialog(ui) {
       <div class="dialog-actions">
         <button class="secondary-button" data-action="smallOutputCancel">${t("common.cancel")}</button>
         <button class="primary-button" data-action="smallOutputContinue">${t("imageToImage.smallOutputContinue")}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
+export function renderInfoDialog(state, ui) {
+  const selection = ui.infoDialog;
+  if (!selection) return "";
+
+  if (selection.kind === "model") {
+    const item = state.models.find(({ descriptor }) => descriptor.id === selection.id);
+    if (!item) return "";
+    return detailDialog(
+      "model-info-dialog-title",
+      item.descriptor.displayName,
+      renderModelDetails(item.descriptor),
+    );
+  }
+
+  if (selection.kind === "profile") {
+    const profile = state.profiles.find((candidate) => candidate.id === selection.id);
+    if (!profile) return "";
+    const isActive = state.activeProfileIDs?.[profile.capability] === profile.id;
+    return detailDialog(
+      "profile-info-dialog-title",
+      profile.name,
+      renderProfileDetails(profile, isActive, state.models),
+    );
+  }
+  return "";
+}
+
+function detailDialog(titleID, title, content) {
+  return `<div class="dialog-backdrop">
+    <section class="detail-dialog" role="dialog" aria-modal="true" aria-labelledby="${titleID}">
+      <header class="detail-dialog-header">
+        <h2 id="${titleID}">${escapeHTML(title)}</h2>
+        <button
+          class="icon-button detail-dialog-close"
+          data-action="closeInfoDialog"
+          title="${t("common.close")}"
+          aria-label="${t("common.close")}"
+        >×</button>
+      </header>
+      <div class="detail-dialog-body">${content}</div>
+      <div class="dialog-actions">
+        <button class="secondary-button" data-action="closeInfoDialog">${t("common.close")}</button>
       </div>
     </section>
   </div>`;

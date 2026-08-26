@@ -6,10 +6,10 @@ GenMedia 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App�
 
 - Swift 負責模型、Profile、工作佇列、檔案與 MLX／Core ML 推論。
 - `WKWebView` 內嵌 HTML、CSS 與 JavaScript UI，不需要網路或 npm runtime。
-- 文生圖、圖生文、圖生圖、文生影、圖生影、文生音樂與 Upscale 都可獨立執行，也可以透過資產來源關係串接。
+- 文生圖、圖生文、圖生圖、文生影、圖生影、文生音樂、字幕生成與 Upscale 都可獨立執行，也可以透過資產來源關係串接。
 - 每次操作保存 Profile 快照，模型或架構更新後仍可追蹤當時的版本。
 - 獨立設定頁支援繁體中文、英文、日文、韓文及六套可持久保存的配色。
-- 標準 JSON-RPC 2.0 stdio MCP server 可供其他 Agent 或自動化工具呼叫。
+- 設定頁可用 Switch 啟動只綁定本機的 MCP HTTP API；另保留可在 App 未啟動時獨立運作的 JSON-RPC 2.0 stdio server。
 
 ## 預覽
 
@@ -55,6 +55,16 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 ```
 
 `ltx-2-mlx` 預設會使用其 Gemma 文字編碼器設定；已有本機 Gemma 模型時可透過 `GENIMAGE_LTX_GEMMA_MODEL` 指定模型目錄或 Hugging Face ID。App 的 DMG 目前不內含 Python Runtime、Gemma 權重或 FFmpeg，正式散佈時應將其視為選用外部元件，並分別確認 Runtime 與模型授權。
+
+### 字幕生成
+
+字幕流程可匯入影片或音訊，抽取音訊軌後由 `SubtitleGenerationRouter` 選擇原生 Core ML ASR Adapter，保留片段時間軸並輸出 SRT 或 WebVTT。支援多語言 Whisper Large v3 Turbo、中文 Paraformer Large 與日文 Parakeet 0.6B；來源語言可自動偵測或由 Profile 指定。
+
+辨識完成後可選用本機 Qwen3.5／Qwen3.8 MLX 文生文模型，將同一批時間軸翻譯為繁體中文、簡體中文、英文、日文或韓文。字幕會以 `generatedSubtitle` 資產保存於目前工作區，並以來源影片或音訊為 parent。
+
+`GenImageASRPoC` 是獨立的 WhisperKit 驗證工具，用來在不修改主 App 工作區的情況下檢查媒體解碼、語言辨識與時間碼輸出；主 App 的正式字幕流程使用相同的純 Swift／Core ML 邊界。詳見 [ASR 字幕 PoC](docs/ASR_POC.md)。
+
+Qwen3-VL、Qwen3.5 與 Qwen3.8 屬於多模態模型，因此模型中心會同時歸類為「圖生文」與「文生文」，並各自提供對應 Profile。受管理的模型下載會一併取得 `processor_config.json`、影像／影片前處理設定、Tokenizer、Chat Template 與完整權重索引，完成必要檔案驗證後才標記為已安裝。
 
 ### Civitai LoRA
 
@@ -117,10 +127,13 @@ GENIMAGE_MODEL_ROOT="/path/to/models" swift run GenImageDoctor
 啟動標準 MCP stdio server：
 
 ```bash
-.build/arm64-apple-macosx/release/GenImageMCP
+MCP_BIN_DIR="$(swift build -c release --show-bin-path)"
+"$MCP_BIN_DIR/GenImageMCP"
 ```
 
-MCP 支援 `initialize`、`ping`、`tools/list`、`tools/call`，工具包含本機模型、Profile、原生 Z-Image 文生圖、Qwen3-VL 圖生文與 Core ML Upscale。
+MCP 支援 `initialize`、`ping`、`tools/list`、`tools/call`，工具包含本機模型、Profile、原生 Z-Image 文生圖、Qwen 圖生圖／圖生文、Core ML Upscale 與獨立字幕生成。
+
+若從 App 使用，在「設定 → MCP 整合」開啟 Switch 後會顯示 `http://127.0.0.1:12181/mcp`；該端點只接受本機 HTTP POST JSON-RPC。HTTP 與 stdio 共用同一套 MCP 工具核心，但 stdio 執行檔仍可在 GenMedia.app 未開啟時獨立工作。
 
 已完成 MCP 端到端實測：`genimage_generate_image` 可使用本機 Z-Image Turbo Q4 輸出 PNG；`genimage_describe_image` 可用 Qwen3-VL 輸出繁體中文描述；`genimage_upscale_image` 可使用本機 Real-ESRGAN Core ML 模型輸出 4× 圖片。
 
@@ -133,11 +146,12 @@ Sources/
 ├── GenImageCore/
 │   ├── ApplicationSupport.swift  # Application Support 資料位置的唯一定義
 │   ├── DomainModels.swift        # 資產、配方、工作、模型與 Profile
-│   ├── InferenceServices.swift   # 圖片、文字、影片與音樂推論服務介面
+│   ├── InferenceServices.swift   # 圖片、文字、影片、音樂與字幕推論介面
 │   ├── ModelCatalog.swift        # 內建模型及 Profile
-│   ├── OutputFileNaming.swift    # 圖片、影片與音樂輸出命名
+│   ├── OutputFileNaming.swift    # 圖片、影片、音樂與字幕輸出命名
 │   ├── OutputGeometry.swift      # 輸出尺寸運算的唯一定義（WebUI 端由 js/geometry.js 鏡像）
 │   ├── ProjectWorkspacePersistence.swift # 開啟中生成專案持久化
+│   ├── SubtitleDocument.swift    # SRT／WebVTT 文件輸出
 │   └── WorkflowGraph.swift       # 資產來源與分支關係
 ├── GenImageRuntime/
 │   ├── ZImageTextToImageService.swift
@@ -147,24 +161,42 @@ Sources/
 │   ├── MusicGenerationRouter.swift
 │   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── MediaAudioPreparer.swift
+│   ├── WhisperSubtitleTranscriber.swift
+│   ├── ParaformerChineseSubtitleTranscriber.swift
+│   ├── ParakeetJapaneseSubtitleTranscriber.swift
+│   ├── SubtitleGenerationRouter.swift
+│   ├── QwenTextGenerationService.swift
 │   ├── SubprocessRuntime.swift   # 外部 Runtime 子行程的共用執行流程
 │   ├── AudioOutputEncoder.swift
 │   └── CoreMLUpscaleService.swift
-└── GenImageApp/
+├── GenImageApp/
     ├── AppStore.swift            # 型別宣告、儲存屬性與 init
-    ├── AppStore+*.swift          # 依職責拆分的行為（Persistence、Profiles、Jobs 等 10 個檔案）
+    ├── AppStore+SubtitleGeneration.swift
+    ├── AppStore+Workspaces.swift
+    ├── AppStore+*.swift          # 其他依職責拆分的 AppStore 行為
     ├── HybridBridgeController.swift
+    ├── LocalMCPServiceController.swift # App 內 MCP HTTP Switch 與狀態
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # 安全提供本機圖片、影片與音訊給 Web UI
-    └── Resources/WebUI/          # HTML/CSS/JavaScript 前端
-Patches/                           # 建置時套用的相依套件原始碼修正與 manifest.txt
+    └── Resources/WebUI/
+        ├── js/automatic-flow.js  # 自動流程頁面骨架
+        └── …                     # 其他 HTML/CSS/JavaScript 前端
+├── GenImageASRPoC/
+    └── main.swift                # 獨立 ASR 驗證工具
+└── GenImageMCPServer/
+    ├── MCPServer.swift           # 獨立 stdio JSON-RPC server 核心
+    └── MCPHTTPServer.swift       # App Switch 使用的 localhost HTTP transport
+Patches/
+├── MLX-Swift-LM-Qwen35-Text-Only.patch # Qwen3.5 純文字輸入相容修正
+└── manifest.txt                  # 建置時套用的相依套件修正清單
 scripts/
 └── apply-runtime-patches.command  # 依 manifest 套用與驗證相依套件修正
 ```
 
 ## 目前狀態
 
-App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL 圖生文、Qwen 2511 圖生圖、LTX-2.3 MLX 文生影／圖生影、ACE-Step 1.5 Turbo MLX 與 MiniMax Music 3 MLX 8-bit 文生音樂，以及 Core ML Real-ESRGAN Upscale。影片以 MP4 加入工作區；音樂可輸出 MP3、M4A、AAC 或 FLAC，並保存實際時長、取樣率、聲道、Profile 快照與 lineage。
+App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL／Qwen3.5／Qwen3.8 多模態圖生文與文生文、Qwen 2511 圖生圖、LTX-2.3 MLX 文生影／圖生影、ACE-Step 1.5 Turbo MLX 與 MiniMax Music 3 MLX 8-bit 文生音樂、Whisper／Paraformer／Parakeet 字幕生成，以及 Core ML Real-ESRGAN Upscale。影片以 MP4 加入工作區；音樂可輸出 MP3、M4A、AAC 或 FLAC；字幕可輸出 SRT 或 WebVTT，並保存語言、時間軸、Profile 快照與 lineage。
 
 更多資訊：
 
@@ -173,6 +205,7 @@ App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL 圖生文�
 - [Web Bridge](docs/WEB_BRIDGE.md)
 - [開發路線](docs/ROADMAP.md)
 - [MCP 介面](docs/MCP.md)
+- [ASR 字幕 PoC](docs/ASR_POC.md)
 - [本機模型測試](docs/MODEL_TEST_REPORT.md)
 
 ## 授權

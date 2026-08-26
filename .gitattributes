@@ -1,0 +1,2 @@
+# 保留 GitHub 上的輸出範例，但排除 GitHub 自動產生的 Source ZIP／tar.gz。
+/Outputs export-ignore

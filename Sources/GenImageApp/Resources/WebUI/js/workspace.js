@@ -11,10 +11,12 @@ import { t } from "./i18n.js";
 const toolMeta = {
   textToImage: { titleKey: "cap.textToImage" },
   imageToText: { titleKey: "cap.imageToText" },
+  textToText: { titleKey: "cap.textToText" },
   imageToImage: { titleKey: "cap.imageToImage" },
   textToVideo: { titleKey: "cap.textToVideo" },
   imageToVideo: { titleKey: "cap.imageToVideo" },
   textToMusic: { titleKey: "cap.textToMusic" },
+  videoToText: { titleKey: "cap.videoToText" },
   upscale: { titleKey: "cap.upscale" },
 };
 
@@ -44,6 +46,9 @@ const creationTabsByGenerationType = {
     { id: "lyrics", labelKey: "workspace.lyrics" },
     { id: "musicOutput", labelKey: "workspace.musicOutput" },
   ],
+  subtitle: [
+    { id: "subtitleOutput", labelKey: "workspace.subtitleSettings" },
+  ],
 };
 
 const musicStyles = [
@@ -63,6 +68,15 @@ const musicStyles = [
   ["cinematic", "workspace.musicStyle.cinematic"],
   ["anime", "workspace.musicStyle.anime"],
   ["lofi", "workspace.musicStyle.lofi"],
+];
+
+const subtitleTargetLanguages = [
+  ["source", "workspace.subtitleTargetOriginal"],
+  ["zh-Hant", "language.traditionalChinese"],
+  ["zh-Hans", "language.simplifiedChinese"],
+  ["en", "language.english"],
+  ["ja", "language.japanese"],
+  ["ko", "language.korean"],
 ];
 
 const MUSIC_DURATION_MIN_SECONDS = 5;
@@ -93,9 +107,18 @@ export function renderWorkspace(state, ui) {
 
 function renderWorkspaceTabs(state, ui) {
   const tabs = ui.workspaceTabs || [];
+  const workspaces = state.workspaces || [];
+  const workspaceControlsDisabled = isInferenceBusy(state);
+  const workspaceDeleteDisabled = workspaceControlsDisabled || workspaces.length <= 1;
   return `
-    <div class="workspace-tabs" role="tablist" aria-label="${t("workspace.tabsLabel")}">
-      <div class="workspace-tab-list">
+    <div class="workspace-tabs">
+      <button
+        class="icon-button workspace-icon-button workspace-add-tab"
+        data-action="workspaceAddTab"
+        title="${t("workspace.addTab")}"
+        aria-label="${t("workspace.addTab")}"
+      >${workspaceControlIcon("add")}</button>
+      <div class="workspace-tab-list" role="tablist" aria-label="${t("workspace.tabsLabel")}">
         ${tabs
           .map((tab, index) => {
             const active = tab.id === ui.activeWorkspaceTabID;
@@ -120,13 +143,50 @@ function renderWorkspaceTabs(state, ui) {
           })
           .join("")}
       </div>
-      <button class="workspace-add-tab" data-action="workspaceAddTab" title="${t("workspace.addTab")}" aria-label="${t("workspace.addTab")}">＋</button>
+      <div class="workspace-tabs-spacer"></div>
+      <div class="workspace-selector-control">
+        <select
+          class="field workspace-selector"
+          data-ui-field="workspaceID"
+          aria-label="${t("workspace.selectorLabel")}"
+          title="${t("workspace.selectorLabel")}"
+          ${workspaceControlsDisabled ? "disabled" : ""}
+        >
+          ${workspaces.map((workspace) => `
+            <option value="${escapeHTML(workspace.id)}" ${workspace.id === state.selectedWorkspaceID ? "selected" : ""}>
+              ${escapeHTML(workspace.isDefault ? t("workspace.defaultWorkspace") : workspace.name)}
+            </option>
+          `).join("")}
+        </select>
+        <button
+          class="icon-button workspace-icon-button workspace-create-button"
+          data-action="createWorkspace"
+          title="${t("workspace.createWorkspace")}"
+          aria-label="${t("workspace.createWorkspace")}"
+          ${workspaceControlsDisabled ? "disabled" : ""}
+        >${workspaceControlIcon("add")}</button>
+        <button
+          class="icon-button workspace-icon-button workspace-delete-button"
+          data-action="deleteWorkspace"
+          title="${t("workspace.deleteWorkspace")}"
+          aria-label="${t("workspace.deleteWorkspace")}"
+          ${workspaceDeleteDisabled ? "disabled" : ""}
+        >${workspaceControlIcon("delete")}</button>
+      </div>
     </div>
   `;
 }
 
+function workspaceControlIcon(kind) {
+  const content = kind === "delete"
+    ? `<path d="M8 8v9M12 8v9M16 8v9"></path>
+       <path d="M5.5 5.5h13M9 5.5V3.8h6v1.7M7 5.5l.8 15h8.4l.8-15"></path>`
+    : `<path d="M12 6v12M6 12h12"></path>`;
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${content}</svg>`;
+}
+
 export function renderQuickTools(state) {
-  return ["imageToText", "textToImage", "imageToImage", "textToVideo", "imageToVideo", "textToMusic", "upscale"]
+  return ["imageToText", "textToText", "textToImage", "imageToImage", "textToVideo", "imageToVideo", "textToMusic", "videoToText", "upscale"]
     .filter((capability) => hasActiveProfile(state, capability))
     .map((capability) => renderQuickTool(state, capability))
     .join("");
@@ -162,10 +222,11 @@ export function renderCreationPanel(state, ui) {
     ? ui.promptTab
     : creationTabs[0].id;
   const toggleLabel = collapsed ? t("workspace.expandCreation") : t("workspace.collapseCreation");
-  const showGenerateText = hasActiveProfile(state, "imageToText");
+  const showGenerateText = generationType === "image" && hasActiveProfile(state, "imageToText");
   const showGenerateImage = generationType === "image";
   const showGenerateVideo = generationType === "video";
   const showGenerateMusic = generationType === "music";
+  const showGenerateSubtitles = generationType === "subtitle";
   const imageGenerationAction = selectedSourceImage(state) ? "imageToImage" : "generate";
   const imageGenerationLabel = imageGenerationAction === "imageToImage"
     ? t("cap.imageToImage")
@@ -216,6 +277,15 @@ export function renderCreationPanel(state, ui) {
               >♫ ${t("workspace.generateMusic")}</button>`
             : ""
         }
+        ${
+          showGenerateSubtitles
+            ? `<button
+                class="secondary-button creation-generate-button creation-generate-subtitles"
+                data-action="generateSubtitles"
+                ${inferenceDisabledAttribute}
+              >CC ${t("workspace.generateSubtitles")}</button>`
+            : ""
+        }
       </div>
 
       ${
@@ -237,10 +307,17 @@ export function renderCreationPanel(state, ui) {
             ${promptTab === "imageOutput" ? renderInlineAspectRatios(recipe, "image", selectedSourceImage(state)) : ""}
             ${promptTab === "videoOutput" ? renderInlineAspectRatios(videoOutputSettings, "video") : ""}
           </div>
-          <button class="ghost-button compact" data-action="applyProfileDefaults">${t("workspace.applyDefaults")}</button>
+          ${generationType === "subtitle" ? "" : `<button class="ghost-button compact" data-action="applyProfileDefaults">${t("workspace.applyDefaults")}</button>`}
         </div>
         <div class="prompt-tab-panel" role="tabpanel">
-          ${renderCreationTab(state, generationType, promptTab, descriptionBusy)}
+          ${renderCreationTab(
+            state,
+            generationType,
+            promptTab,
+            descriptionBusy,
+            ui.subtitleFormat,
+            ui.subtitleTargetLanguage,
+          )}
         </div>
       </div>
       `
@@ -265,11 +342,25 @@ function hasActiveProfile(state, capability) {
   return activeProfile(state, capability) !== null;
 }
 
+function isProfileInstalled(state, profile) {
+  if (!profile) return false;
+  const modelIDs = [profile.modelID, ...(profile.loras || []).map(({ modelID }) => modelID)]
+    .filter((modelID, index, values) => modelID && values.indexOf(modelID) === index);
+  return modelIDs.length > 0 && modelIDs.every((modelID) =>
+    state.models.some(({ descriptor, installation }) =>
+      descriptor.id === modelID && installation.phase === "installed"));
+}
+
+export function canTranslateSubtitles(state) {
+  return isProfileInstalled(state, activeProfile(state, "textToText"));
+}
+
 function renderGenerationTypeSelect(activeGenerationType) {
   const options = [
     ["image", "workspace.imageGeneration"],
     ["video", "workspace.videoGeneration"],
     ["music", "workspace.musicGeneration"],
+    ["subtitle", "workspace.subtitleGeneration"],
   ];
   return `<select
     class="field generation-type-select"
@@ -292,15 +383,74 @@ function promptTabButton(tab, label, activeTab) {
   >${label}</button>`;
 }
 
-function renderCreationTab(state, generationType, promptTab, descriptionBusy) {
+function renderCreationTab(
+  state,
+  generationType,
+  promptTab,
+  descriptionBusy,
+  subtitleFormat,
+  subtitleTargetLanguage,
+) {
   if (promptTab === "imageOutput") return renderOutputSettings(state.recipe, "image");
   if (promptTab === "videoOutput") {
     return renderOutputSettings(state.videoOutputSettings, "video");
   }
   if (promptTab === "lyrics") return renderLyricsEditor(state.musicOutputSettings, descriptionBusy);
   if (promptTab === "musicOutput") return renderMusicOutputSettings(state);
+  if (promptTab === "subtitleOutput") {
+    return renderSubtitleSettings(state, subtitleFormat, subtitleTargetLanguage);
+  }
   if (generationType === "music") return renderMusicPromptEditor(state.musicOutputSettings);
   return renderPromptEditor(state.recipe, promptTab, descriptionBusy);
+}
+
+function renderSubtitleSettings(state, subtitleFormat, subtitleTargetLanguage) {
+  const sourceAsset = selectedSubtitleSource(state);
+  const translationAvailable = canTranslateSubtitles(state);
+  const selectedTargetLanguage = translationAvailable ? subtitleTargetLanguage : "source";
+  const translationUnavailableTitle = translationAvailable
+    ? ""
+    : `title="${escapeHTML(t("workspace.subtitleTranslationUnavailable"))}"`;
+  const sourceSummary = sourceAsset
+    ? [kindLabel(sourceAsset.kind), formatDuration((sourceAsset.mediaDurationSeconds || 0) * 1_000)]
+        .filter(Boolean)
+        .join(" · ")
+    : t("workspace.subtitleSourceEmpty");
+  return `
+    <div class="subtitle-settings-panel">
+      <section class="output-setting-group subtitle-settings-card">
+        <div class="subtitle-source-setting">
+          <div class="subtitle-source-copy">
+            <span>${t("workspace.subtitleSource")}</span>
+            <strong>${sourceAsset ? escapeHTML(sourceAsset.title) : t("workspace.subtitleSourceEmpty")}</strong>
+            <small>${escapeHTML(sourceSummary)}</small>
+          </div>
+        </div>
+        <label class="field-group subtitle-target-language-setting">
+          <span>${t("workspace.subtitleTargetLanguage")}</span>
+          <select
+            class="field"
+            data-ui-field="subtitleTargetLanguage"
+            ${translationAvailable ? "" : "disabled"}
+            ${translationUnavailableTitle}
+          >
+            ${subtitleTargetLanguages.map(([value, labelKey]) => `
+              <option value="${value}" ${selectedTargetLanguage === value ? "selected" : ""}>
+                ${t(labelKey)}
+              </option>
+            `).join("")}
+          </select>
+        </label>
+        <label class="field-group subtitle-format-setting">
+          <span>${t("workspace.subtitleFormat")}</span>
+          <select class="field" data-ui-field="subtitleFormat">
+            <option value="srt" ${subtitleFormat === "srt" ? "selected" : ""}>SRT</option>
+            <option value="vtt" ${subtitleFormat === "vtt" ? "selected" : ""}>VTT</option>
+          </select>
+        </label>
+      </section>
+    </div>
+  `;
 }
 
 function renderMusicPromptEditor(settings) {
@@ -644,7 +794,8 @@ function renderLoRAControl(state) {
 function renderPreviewPanel(state, ui) {
   const fixedKindAsset = ui.previewMode === "single" ? selectedAsset(state) : null;
   const zoomDisabled = ui.generationType === "music"
-    || selectedAsset(state)?.kind === "generatedAudio";
+    || isAudioAsset(selectedAsset(state))
+    || isSubtitleAsset(selectedAsset(state));
   const previewUI = zoomDisabled ? { ...ui, zoom: 1 } : ui;
   return `
     <main class="preview-panel">
@@ -689,7 +840,7 @@ function renderPreviewPanel(state, ui) {
         ${renderPreviewContent(state, previewUI)}
       </div>
       ${fixedKindAsset ? `<span class="asset-kind preview-fixed-kind">${kindLabel(fixedKindAsset.kind)}</span>` : ""}
-      ${renderFilmstrip(state, ui.generationType === "music")}
+      ${renderFilmstrip(state, ui.generationType)}
     </main>
   `;
 }
@@ -760,10 +911,18 @@ function comparisonPane(title, asset, width) {
 
 function renderArtwork(asset, controls = false, showKind = true) {
   const hasMedia = Boolean(asset.previewURL);
-  const isVideo = asset.kind === "generatedVideo";
-  const isAudio = asset.kind === "generatedAudio";
+  const isVideo = isVideoAsset(asset);
+  const isAudio = isAudioAsset(asset);
+  const isSubtitle = isSubtitleAsset(asset);
   const media = hasMedia
-      ? isAudio
+      ? isSubtitle
+        ? controls && asset.textContent
+          ? `<div class="subtitle-document-preview">
+              <span class="subtitle-document-icon" aria-hidden="true">CC</span>
+              <pre>${escapeHTML(asset.textContent)}</pre>
+            </div>`
+          : `<span class="subtitle-placeholder" aria-label="${escapeHTML(asset.title)}">CC</span>`
+      : isAudio
         ? controls
         ? `<div class="audio-player" data-audio-visualizer data-asset-id="${escapeHTML(asset.id)}">
             <canvas class="audio-visualizer" data-audio-visualizer-canvas aria-hidden="true"></canvas>
@@ -787,16 +946,62 @@ function renderArtwork(asset, controls = false, showKind = true) {
           ${controls ? "controls" : "muted"}
         ></video>`
       : `<img src="${escapeHTML(asset.previewURL)}" data-asset-id="${escapeHTML(asset.id)}" alt="${escapeHTML(asset.title)}" draggable="false" />`
-    : `<span class="placeholder-icon">${asset.kind === "upscaled" ? "↗" : asset.kind === "generated" ? "✦" : asset.kind === "generatedAudio" ? "♫" : "▧"}</span>`;
+    : `<span class="placeholder-icon">${asset.kind === "upscaled" ? "↗" : asset.kind === "generated" ? "✦" : isAudio ? "♫" : isSubtitle ? "CC" : "▧"}</span>`;
   return `
-    <div class="asset-artwork ${asset.kind} ${hasMedia ? "has-media" : ""}">
+    <div
+      class="asset-artwork ${asset.kind} ${hasMedia ? "has-media" : ""}"
+      data-context-asset-id="${escapeHTML(asset.id)}"
+    >
       ${media}
       ${showKind ? `<span class="asset-kind">${kindLabel(asset.kind)}</span>` : ""}
     </div>
   `;
 }
 
-function renderFilmstrip(state, importDisabled = false) {
+function renderInspectorAssetIcon(asset) {
+  let mediaType = "image";
+  let icon = `
+    <rect x="3.5" y="5" width="17" height="14" rx="2.5"></rect>
+    <circle cx="8.5" cy="9.5" r="1.5"></circle>
+    <path d="m5.5 17 4.5-4.5 3.2 3.1 2.1-2.1 3.2 3.5"></path>
+  `;
+  if (isVideoAsset(asset)) {
+    mediaType = "video";
+    icon = `
+      <rect x="3.5" y="5" width="17" height="14" rx="2.5"></rect>
+      <path d="m10 9 5 3-5 3Z"></path>
+    `;
+  } else if (isAudioAsset(asset)) {
+    mediaType = "audio";
+    icon = `
+      <path d="M9 17.5V7l9-2v10.5"></path>
+      <ellipse cx="6.5" cy="17.5" rx="2.5" ry="1.8"></ellipse>
+      <ellipse cx="15.5" cy="15.5" rx="2.5" ry="1.8"></ellipse>
+    `;
+  } else if (isSubtitleAsset(asset)) {
+    mediaType = "subtitle";
+    icon = `
+      <rect x="3.5" y="5" width="17" height="14" rx="2.5"></rect>
+      <path d="M10 10.2a2.2 2.2 0 1 0 0 3.6M17 10.2a2.2 2.2 0 1 0 0 3.6"></path>
+    `;
+  }
+  return `
+    <div
+      class="inspector-media-icon ${mediaType}"
+      data-context-asset-id="${escapeHTML(asset.id)}"
+      role="img"
+      aria-label="${kindLabel(asset.kind)}"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg>
+    </div>
+  `;
+}
+
+function renderFilmstrip(state, generationType) {
+  const subtitleMode = generationType === "subtitle";
+  const importDisabled = generationType === "music";
+  const importLabel = t("workspace.importMedia");
+  const importAction = subtitleMode ? "importSubtitleMedia" : "importImage";
   return `<div class="filmstrip">
     <div class="filmstrip-assets" data-scroll-id="filmstrip">
       ${state.assets
@@ -827,9 +1032,9 @@ function renderFilmstrip(state, importDisabled = false) {
     </div>
     <button
       class="icon-button compact filmstrip-import-button"
-      data-action="importImage"
-      title="${t("sidebar.import")}"
-      aria-label="${t("sidebar.import")}"
+      data-action="${importAction}"
+      title="${importLabel}"
+      aria-label="${importLabel}"
       ${importDisabled ? "disabled" : ""}
     >
       <svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -902,19 +1107,20 @@ function renderAssetInspector(state) {
   }
   const operation = [...state.operations].reverse().find((item) => item.outputAssetIDs.includes(asset.id));
   const lineage = buildLineage(state.assets, asset);
-  const isVideo = asset.kind === "generatedVideo";
-  const isAudio = asset.kind === "generatedAudio";
-  const canEdit = !isVideo && !isAudio && hasActiveProfile(state, "imageToImage");
+  const isVideo = isVideoAsset(asset);
+  const isAudio = isAudioAsset(asset);
+  const isSubtitle = isSubtitleAsset(asset);
+  const canEdit = isImageAssetKind(asset) && hasActiveProfile(state, "imageToImage");
   const inferenceDisabledAttribute = isInferenceBusy(state)
     ? "disabled aria-busy=\"true\""
     : "";
   return `
     <div class="inspector-scroll" data-scroll-id="inspector-info">
       <div class="section-heading"><h2>${escapeHTML(asset.title)}</h2></div>
-      <div class="inspector-preview">${renderArtwork(asset, true)}</div>
-      ${
-        isVideo || isAudio
-          ? ""
+      <div class="inspector-preview">${renderInspectorAssetIcon(asset)}</div>
+        ${
+          isVideo || isAudio || isSubtitle
+            ? ""
           : `<div class="inspector-actions">
               <button class="secondary-button compact" data-action="describe" ${inferenceDisabledAttribute}>⌕ ${t("inspector.caption")}</button>
               ${canEdit ? `<button class="secondary-button compact" data-action="imageToImage" ${inferenceDisabledAttribute}>▧ ${t("cap.imageToImage")}</button>` : ""}
@@ -922,12 +1128,14 @@ function renderAssetInspector(state) {
             </div>`
       }
       <div class="inspector-group">
-        <h3>${t(isAudio ? "inspector.audioInfo" : isVideo ? "inspector.videoInfo" : "inspector.imageInfo")}</h3>
-        ${isAudio ? "" : detailRow(t("inspector.dimensions"), `${asset.pixelWidth} × ${asset.pixelHeight}`)}
-        ${isAudio ? detailRow(t("inspector.duration"), formatDuration((asset.mediaDurationSeconds || 0) * 1_000)) : ""}
+        <h3>${t(isSubtitle ? "inspector.subtitleInfo" : isAudio ? "inspector.audioInfo" : isVideo ? "inspector.videoInfo" : "inspector.imageInfo")}</h3>
+        ${isAudio || isSubtitle ? "" : detailRow(t("inspector.dimensions"), `${asset.pixelWidth} × ${asset.pixelHeight}`)}
+        ${isAudio || isSubtitle ? detailRow(t("inspector.duration"), formatDuration((asset.mediaDurationSeconds || 0) * 1_000)) : ""}
         ${isAudio ? detailRow(t("inspector.audioFormat"), String(asset.audioFormat || "").toUpperCase()) : ""}
         ${isAudio ? detailRow(t("inspector.sampleRate"), `${Number(asset.sampleRate || 0).toLocaleString()} Hz`) : ""}
         ${isAudio ? detailRow(t("inspector.channels"), String(asset.channelCount || "–")) : ""}
+        ${isSubtitle ? detailRow(t("workspace.subtitleFormat"), String(asset.subtitleFormat || "").toUpperCase()) : ""}
+        ${isSubtitle ? detailRow(t("inspector.language"), asset.languageCode || "–") : ""}
         ${detailRow(t("inspector.kind"), kindLabel(asset.kind))}
       </div>
       ${
@@ -944,10 +1152,6 @@ function renderAssetInspector(state) {
         <div class="lineage">
           ${lineage.map((item) => `<div class="lineage-item"><span>›</span>${escapeHTML(item.title)}</div>`).join("")}
         </div>
-      </div>
-      <div class="inspector-group">
-        <h3>${t("inspector.currentPrompt")}</h3>
-        <div class="section-note">${escapeHTML(state.recipe.prompt)}</div>
       </div>
     </div>
   `;
@@ -1205,10 +1409,23 @@ function detailRow(label, value) {
 }
 
 function assetSummary(asset) {
-  if (asset.kind === "generatedAudio") {
+  if (isAudioAsset(asset)) {
     const format = String(asset.audioFormat || "").toUpperCase();
     const duration = formatDuration((asset.mediaDurationSeconds || 0) * 1_000);
     return [format, duration].filter(Boolean).join(" · ");
+  }
+  if (isVideoAsset(asset)) {
+    const dimensions = asset.pixelWidth && asset.pixelHeight
+      ? `${asset.pixelWidth} × ${asset.pixelHeight}`
+      : "";
+    const duration = formatDuration((asset.mediaDurationSeconds || 0) * 1_000);
+    return [dimensions, duration].filter(Boolean).join(" · ");
+  }
+  if (isSubtitleAsset(asset)) {
+    const format = String(asset.subtitleFormat || "").toUpperCase();
+    return [format, asset.languageCode, formatDuration((asset.mediaDurationSeconds || 0) * 1_000)]
+      .filter(Boolean)
+      .join(" · ");
   }
   return `${asset.pixelWidth} × ${asset.pixelHeight}`;
 }
@@ -1219,7 +1436,35 @@ function selectedAsset(state) {
 
 export function selectedSourceImage(state) {
   const asset = selectedAsset(state);
-  return asset && !["generatedVideo", "generatedAudio"].includes(asset.kind) ? asset : null;
+  return isImageAssetKind(asset) ? asset : null;
+}
+
+export function selectedSubtitleSource(state) {
+  const asset = selectedAsset(state);
+  if (isTimedMediaAsset(asset)) return asset;
+  if (!isSubtitleAsset(asset) || !asset.parentAssetID) return null;
+  const parent = state.assets.find((candidate) => candidate.id === asset.parentAssetID);
+  return isTimedMediaAsset(parent) ? parent : null;
+}
+
+function isImageAssetKind(asset) {
+  return Boolean(asset) && ["imported", "generated", "edited", "upscaled"].includes(asset.kind);
+}
+
+function isVideoAsset(asset) {
+  return Boolean(asset) && ["importedVideo", "generatedVideo"].includes(asset.kind);
+}
+
+function isAudioAsset(asset) {
+  return Boolean(asset) && ["importedAudio", "generatedAudio"].includes(asset.kind);
+}
+
+function isSubtitleAsset(asset) {
+  return Boolean(asset) && asset.kind === "generatedSubtitle";
+}
+
+function isTimedMediaAsset(asset) {
+  return isVideoAsset(asset) || isAudioAsset(asset);
 }
 
 function buildLineage(assets, start) {

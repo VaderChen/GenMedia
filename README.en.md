@@ -6,10 +6,10 @@ GenMedia is a local AI media generation app with **native Apple Silicon support*
 
 - Swift handles models, profiles, job queues, files, and MLX/Core ML inference.
 - `WKWebView` embeds the HTML, CSS, and JavaScript UI without requiring a network connection or npm runtime.
-- Text-to-image, image-to-text, image-to-image, text-to-video, image-to-video, text-to-music, and upscaling can run independently or be chained through asset lineage.
+- Text-to-image, image-to-text, image-to-image, text-to-video, image-to-video, text-to-music, subtitle generation, and upscaling can run independently or be chained through asset lineage.
 - Every operation preserves a profile snapshot, making the model and architecture revision traceable after updates.
 - A dedicated settings page supports Traditional Chinese, English, Japanese, Korean, and six persistent color themes.
-- A standard JSON-RPC 2.0 stdio MCP server is available to agents and automation tools.
+- Settings provides a switch for a localhost-only MCP HTTP API, while a standalone JSON-RPC 2.0 stdio server remains available when the app is not running.
 
 ## Preview
 
@@ -55,6 +55,16 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 ```
 
 `ltx-2-mlx` uses its Gemma text encoder configuration by default. If a local Gemma model is available, set `GENIMAGE_LTX_GEMMA_MODEL` to its directory or Hugging Face ID. The app DMG currently does not bundle the Python runtime, Gemma weights, or FFmpeg. Treat these as optional external components and review their runtime and model licenses separately before distribution.
+
+### Subtitle Generation
+
+The subtitle workflow accepts video or audio, extracts its audio track, and lets `SubtitleGenerationRouter` select a native Core ML ASR adapter. It preserves segment timing and exports SRT or WebVTT. Supported ASR profiles are multilingual Whisper Large v3 Turbo, Chinese Paraformer Large, and Japanese Parakeet 0.6B; the source language can be detected automatically or selected by the profile.
+
+After transcription, an optional local Qwen3.5 or Qwen3.8 MLX text model can translate the same timeline into Traditional Chinese, Simplified Chinese, English, Japanese, or Korean. The result is stored in the active workspace as a `generatedSubtitle` asset whose parent is the source video or audio asset.
+
+`GenImageASRPoC` is a standalone WhisperKit validation utility for checking media decoding, language recognition, and timestamps without modifying the main app workspace. The production app follows the same Swift/Core ML boundary. See [ASR Subtitle PoC](docs/ASR_POC.en.md).
+
+Qwen3-VL, Qwen3.5, and Qwen3.8 are multimodal models, so Model Center classifies each under both image-to-text and text-to-text and provides a profile for each capability. Managed downloads include `processor_config.json`, image/video preprocessing configuration, tokenizer data, chat templates, and the complete weight index; installation is reported complete only after required-file validation succeeds.
 
 ### Profiles, Jobs, and Memory
 
@@ -107,10 +117,13 @@ GENIMAGE_MODEL_ROOT="/path/to/models" swift run GenImageDoctor
 Start the standard MCP stdio server:
 
 ```bash
-.build/arm64-apple-macosx/release/GenImageMCP
+MCP_BIN_DIR="$(swift build -c release --show-bin-path)"
+"$MCP_BIN_DIR/GenImageMCP"
 ```
 
-The MCP server supports `initialize`, `ping`, `tools/list`, and `tools/call`. Available tools cover local models and profiles, native Z-Image text-to-image generation, Qwen3-VL image description, and Core ML upscaling.
+The MCP server supports `initialize`, `ping`, `tools/list`, and `tools/call`. Available tools cover local models and profiles, native Z-Image text-to-image generation, Qwen image editing and description, Core ML upscaling, and standalone subtitle generation.
+
+For app-managed use, enable the switch under Settings → MCP Integration. The app then exposes `http://127.0.0.1:12181/mcp`, a localhost-only HTTP POST JSON-RPC endpoint. HTTP and stdio share the same MCP tool core, while the stdio executable continues to work independently with GenMedia.app closed.
 
 End-to-end MCP validation has been completed: `genimage_generate_image` outputs PNG files with a local Z-Image Turbo Q4 model, `genimage_describe_image` produces Traditional Chinese descriptions with Qwen3-VL, and `genimage_upscale_image` performs 4× upscaling with a local Real-ESRGAN Core ML model.
 
@@ -123,11 +136,12 @@ Sources/
 ├── GenImageCore/
 │   ├── ApplicationSupport.swift  # The one definition of where app data lives
 │   ├── DomainModels.swift        # Assets, recipes, jobs, models, and profiles
-│   ├── InferenceServices.swift   # Image, text, video, and music inference interfaces
+│   ├── InferenceServices.swift   # Image, text, video, music, and subtitle interfaces
 │   ├── ModelCatalog.swift        # Built-in models and profiles
-│   ├── OutputFileNaming.swift    # Image, video, and music output names
+│   ├── OutputFileNaming.swift    # Image, video, music, and subtitle output names
 │   ├── OutputGeometry.swift      # The one definition of output-size arithmetic (mirrored by js/geometry.js)
 │   ├── ProjectWorkspacePersistence.swift # Open generation-project persistence
+│   ├── SubtitleDocument.swift    # SRT and WebVTT rendering
 │   └── WorkflowGraph.swift       # Asset lineage and branch relationships
 ├── GenImageRuntime/
 │   ├── ZImageTextToImageService.swift
@@ -137,24 +151,42 @@ Sources/
 │   ├── MusicGenerationRouter.swift
 │   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── MediaAudioPreparer.swift
+│   ├── WhisperSubtitleTranscriber.swift
+│   ├── ParaformerChineseSubtitleTranscriber.swift
+│   ├── ParakeetJapaneseSubtitleTranscriber.swift
+│   ├── SubtitleGenerationRouter.swift
+│   ├── QwenTextGenerationService.swift
 │   ├── SubprocessRuntime.swift   # Shared subprocess plumbing for external runtimes
 │   ├── AudioOutputEncoder.swift
 │   └── CoreMLUpscaleService.swift
-└── GenImageApp/
+├── GenImageApp/
     ├── AppStore.swift            # Type declaration, stored properties, init
-    ├── AppStore+*.swift          # Behaviour split by responsibility (Persistence, Profiles, Jobs, … 10 files)
+    ├── AppStore+SubtitleGeneration.swift
+    ├── AppStore+Workspaces.swift
+    ├── AppStore+*.swift          # Other responsibility-based AppStore behavior
     ├── HybridBridgeController.swift
+    ├── LocalMCPServiceController.swift # In-app MCP HTTP switch and state
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # Secure local image, video, and audio delivery to WebUI
-    └── Resources/WebUI/          # HTML/CSS/JavaScript frontend
-Patches/                           # Dependency source patches plus manifest.txt, applied during builds
+    └── Resources/WebUI/
+        ├── js/automatic-flow.js  # Automatic-flow page scaffold
+        └── …                     # Remaining HTML/CSS/JavaScript frontend
+├── GenImageASRPoC/
+    └── main.swift                # Standalone ASR validation utility
+└── GenImageMCPServer/
+    ├── MCPServer.swift           # Standalone stdio JSON-RPC server core
+    └── MCPHTTPServer.swift       # Localhost HTTP transport used by the app switch
+Patches/
+├── MLX-Swift-LM-Qwen35-Text-Only.patch # Qwen3.5 text-only input compatibility
+└── manifest.txt                  # Dependency patch manifest applied during builds
 scripts/
 └── apply-runtime-patches.command  # Apply and verify dependency patches from the manifest
 ```
 
 ## Current Status
 
-The app is connected to local inference for Z-Image Turbo text-to-image, Qwen3-VL image-to-text, Qwen 2511 image-to-image, LTX-2.3 MLX text-to-video and image-to-video, ACE-Step 1.5 Turbo MLX and MiniMax Music 3 MLX 8-bit text-to-music, and Core ML Real-ESRGAN upscaling. Videos are added as MP4 assets; music can be exported as MP3, M4A, AAC, or FLAC with actual duration, sample rate, channel count, profile snapshots, and lineage preserved.
+The app is connected to local inference for Z-Image Turbo text-to-image, Qwen3-VL/Qwen3.5/Qwen3.8 multimodal image-to-text and text-to-text, Qwen 2511 image-to-image, LTX-2.3 MLX text-to-video and image-to-video, ACE-Step 1.5 Turbo MLX and MiniMax Music 3 MLX 8-bit text-to-music, Whisper/Paraformer/Parakeet subtitle generation, and Core ML Real-ESRGAN upscaling. Videos are added as MP4 assets; music exports as MP3, M4A, AAC, or FLAC; subtitles export as SRT or WebVTT with language, timing, profile snapshots, and lineage.
 
 More information:
 
@@ -163,6 +195,7 @@ More information:
 - [Web Bridge](docs/WEB_BRIDGE.en.md)
 - [Roadmap](docs/ROADMAP.en.md)
 - [MCP Interface](docs/MCP.en.md)
+- [ASR Subtitle PoC](docs/ASR_POC.en.md)
 - [Local Model Test Report](docs/MODEL_TEST_REPORT.en.md)
 
 ## License

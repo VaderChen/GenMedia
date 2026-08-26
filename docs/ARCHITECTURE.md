@@ -4,8 +4,8 @@
 
 ## 設計目標
 
-1. 文生圖、圖生文、圖生圖、影片生成、音樂生成與 Upscale 是獨立能力，不互相依賴。
-2. 圖片、影片與音訊輸出可以形成工作流與分支。
+1. 文生圖、圖生文、圖生圖、影片生成、音樂生成、字幕生成與 Upscale 是獨立能力，不互相依賴。
+2. 圖片、影片、音訊與字幕輸出可以形成工作流與分支。
 3. UI 不直接依賴 MLX、Core ML 或任何特定模型。
 4. 模型更新時，以 Profile 切換模型版本與推論架構。
 5. 舊作品保存 Profile 快照，不受日後 Profile 修改影響。
@@ -34,6 +34,9 @@ AppStore / Workflow coordination
         ├── ImageToImageGenerating
         ├── VideoGenerating
         ├── MusicGenerating
+        ├── MediaTranscribing
+        ├── SubtitleGenerating
+        ├── TextGenerating
         └── ImageUpscaling
                     │
                     ▼
@@ -58,6 +61,7 @@ Web UI 只能透過 Bridge 使用本機能力，不可直接讀取任意檔案�
 - Web UI 將側邊欄與路由、工作區分頁、尺寸運算及全量渲染保護拆至 `chrome.js`、`workspace-tabs.js`、`geometry.js` 與 `render-preservation.js`；`app.js` 保留橋接與應用程式協調。
 - `SubprocessRuntime` 統一外部 Worker、影片 CLI、音樂 CLI 與 FFmpeg 的可執行檔搜尋、環境、日誌、進度、停滯偵測、取消及終止語意。
 - 相依套件修正由 `Patches/manifest.txt` 描述，統一交由 `scripts/apply-runtime-patches.command` 套用與驗證；版本不符或修正失敗時建置會停止，不會靜默使用未修正的來源碼。
+- `GenImageMCP` 維持自行持有 `InferenceServices` 的獨立 stdio server；App 的 `LocalMCPServiceController` 只管理 localhost HTTP transport 的生命週期，兩者直接共用 `MCPServer` 工具核心，不形成 stdio→HTTP 代理。
 - ACE-Step 正式 Runtime 的階段型別已移除 PoC 命名；診斷專用的 DiT probe 與正式生成階段分開，避免實驗程式與產品路徑混淆。
 
 ## Profile
@@ -86,10 +90,13 @@ Web UI 只能透過 Bridge 使用本機能力，不可直接讀取任意檔案�
 - 獨立文生影：MP4 資產沒有 parent。
 - 圖生影：MP4 資產以來源圖片為 parent。
 - 獨立文生音樂：MP3、M4A、AAC 或 FLAC 資產沒有 parent，並記錄實際時長、取樣率與聲道數。
+- 字幕生成：先以 `importedVideo` 或 `importedAudio` 匯入來源，SRT／WebVTT 結果以 `generatedSubtitle` 保存並以來源媒體為 parent。
 
 `WorkflowGraph` 提供 lineage 與 children 查詢，UI 不需要推測資產關係。
 
 開啟中的工作區分頁是生成專案的生命週期邊界。Swift 將 `Project`、`MediaAsset`、`WorkflowOperation` 與選取狀態以原子 JSON 快照保存至 Application Support；一般 App 結束不會清除。Web UI 的分頁狀態保存在 WebKit localStorage，關閉分頁時透過 Bridge 通知原生層移除該分頁資產與 lineage 索引，但不刪除已輸出的媒體檔。
+
+命名工作區位於分頁之上，每個工作區維護自己的分頁集合。建立與刪除由 Bridge 進入 `AppStore+Workspaces`，刪除前必須確認；切換工作區只切換對應分頁與選取狀態，不重建 Runtime 或媒體播放器。
 
 ## 推論 Runtime
 
@@ -101,9 +108,12 @@ Web UI 只能透過 Bridge 使用本機能力，不可直接讀取任意檔案�
 - 去噪迴圈會檢查 Swift Task cancellation。
 - 支援模型卸載、LoRA 卸載、取消與記憶體快取清理。
 
-圖生文固定使用 `mlx-swift-lm 2.30.6`：
+圖生文與文生文的多模態路徑固定使用 `mlx-swift-lm` revision `7da33441c7c08b010ff1aa8da9dc3d82277272f5`：
 
 - `QwenVLImageDescriptionService` 透過 `VLMModelFactory` 載入本機 Qwen3-VL。
+- `QwenTextGenerationService` 使用相同多模態容器的純文字模式；Qwen3-VL、Qwen3.5、Qwen3.8 模型描述同時宣告 `.imageToText` 與 `.textToText`，各能力使用獨立 Profile。
+- Qwen3.5 純文字輸入的上游相容修正由 `Patches/MLX-Swift-LM-Qwen35-Text-Only.patch` 套用。
+- 受管理下載會取得並驗證 `processor_config.json`、影像／影片前處理設定、Tokenizer、Chat Template、權重檔與索引，避免只有文字權重而缺少多模態處理檔。
 - 模型容器在服務生命週期內快取，避免同一 Profile 重複載入。
 - 支援繁中、英文、日文、韓文輸出提示。
 
@@ -128,5 +138,15 @@ Upscale 由 `CoreMLUpscaleService` 執行 Real-ESRGAN 512 tile 與 4× 拼接。
 - 兩個 Adapter 都固定取得暫存 WAV，再由 `AudioOutputEncoder` 轉碼為 MP3 320 kbps、M4A AAC 256 kbps、ADTS AAC 256 kbps 或 FLAC 無損音訊。
 - 成功、失敗或取消時清理暫存檔；只有完成的壓縮音訊會以 `generatedAudio` 資產保留，並記錄實際時長、取樣率與聲道數。
 - ACE-Step 權重由模型中心管理，原生 Runtime 編譯於 App 內，不使用獨立安裝路徑或服務環境變數。
+
+字幕生成位於多媒體匯入與文字模型之間：
+
+1. `MediaAudioPreparer` 從影片或音訊準備可供辨識的音軌與暫存路徑。
+2. `SubtitleGenerationRouter` 以 `MediaTranscribing.supports(profile:)` 依序選擇第一個相符 Adapter。
+3. Whisper Large v3 Turbo 負責多語言辨識，Paraformer Large 負責中文，Parakeet 0.6B 負責日文；三者都在本機 Core ML 路徑執行。
+4. 可選的 `QwenTextGenerationService` 以 Qwen3.5／Qwen3.8 MLX 對每批字幕翻譯，但不改變開始與結束時間。
+5. `SubtitleDocument` 將結果寫為 SRT／WebVTT，再以 `generatedSubtitle` 資產加入目前工作區。
+
+`GenImageASRPoC` 是獨立驗證執行檔，只測試 WhisperKit 的媒體解碼、語言辨識與時間軸輸出；不寫入 App 工作區，也不是主 App 的替代執行路徑。
 
 MLX metallib 已由 `RuntimeSupport/mlx.metallib` 與 `build.command` 放入 Release 執行目錄。發佈前仍需完成模型授權檢查、16/24/32GB 壓力測試、App bundle、簽章與公證。

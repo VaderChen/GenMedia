@@ -189,8 +189,8 @@ public enum ModelCatalog {
             id: "local-captioner-3b@q4",
             displayName: "Qwen3-VL 4B 4-bit",
             publisher: "Qwen / MLX Community",
-            summary: "以 Qwen3-VL 將圖片轉成可編輯的多語言描述。",
-            capabilities: [.imageToText],
+            summary: "Qwen3-VL 多模態模型，可進行圖片理解、多語言描述與一般文字生成。",
+            capabilities: [.imageToText, .textToText],
             quantization: .fourBit,
             approximateDownloadGB: 2.9,
             recommendedMemoryGB: 16,
@@ -201,13 +201,50 @@ public enum ModelCatalog {
             id: "qwen3-vl-8b-nsfw-caption-v45@mxfp4",
             displayName: "Qwen3-VL 8B NSFW Caption V4.5 mxfp4",
             publisher: "Disty0 / MLX Community",
-            summary: "Qwen3-VL NSFW Caption V4.5 的 MLX mxfp4 版本；適合需要無審核內容描述的圖生文工作流。",
-            capabilities: [.imageToText],
+            summary: "Qwen3-VL NSFW Caption V4.5 多模態 MLX mxfp4 版本；支援圖片理解與文字生成。",
+            capabilities: [.imageToText, .textToText],
             quantization: .fourBit,
             approximateDownloadGB: 5.52,
             recommendedMemoryGB: 24,
             licenseName: "Apache-2.0",
             sourceURL: URL(string: "https://huggingface.co/mlx-community/Qwen3-VL-8B-NSFW-Caption-V4.5-mxfp4")
+        ),
+        ModelDescriptor(
+            id: "lmstudio-community/Qwen3.5-4B-MLX-4bit",
+            displayName: "Qwen3.5 4B MLX 4-bit",
+            publisher: "LM Studio Community / Qwen",
+            summary: "Apple Silicon 原生 MLX 多模態模型，支援圖片理解、字幕翻譯、摘要、改寫與文字生成。",
+            capabilities: [.imageToText, .textToText],
+            quantization: .fourBit,
+            approximateDownloadGB: 2.85,
+            recommendedMemoryGB: 16,
+            licenseName: "Apache-2.0",
+            sourceURL: URL(string: "https://huggingface.co/lmstudio-community/Qwen3.5-4B-MLX-4bit"),
+            isRecommended: true
+        ),
+        ModelDescriptor(
+            id: "lmstudio-community/Qwen3.5-9B-MLX-4bit",
+            displayName: "Qwen3.5 9B MLX 4-bit",
+            publisher: "LM Studio Community / Qwen",
+            summary: "較高品質的 Apple Silicon 原生 MLX 多模態模型，支援圖片理解、長字幕翻譯與文字校訂。",
+            capabilities: [.imageToText, .textToText],
+            quantization: .fourBit,
+            approximateDownloadGB: 5.57,
+            recommendedMemoryGB: 24,
+            licenseName: "Apache-2.0",
+            sourceURL: URL(string: "https://huggingface.co/lmstudio-community/Qwen3.5-9B-MLX-4bit")
+        ),
+        ModelDescriptor(
+            id: "lmstudio-community/Qwen3.8-27B-MLX-4bit",
+            displayName: "Qwen3.8 27B MLX 4-bit",
+            publisher: "LM Studio Community / Qwen",
+            summary: "大型 Apple Silicon 原生 MLX 多模態模型，支援圖片理解、高品質翻譯、潤稿與複雜文字處理。",
+            capabilities: [.imageToText, .textToText],
+            quantization: .fourBit,
+            approximateDownloadGB: 14.98,
+            recommendedMemoryGB: 64,
+            licenseName: "Apache-2.0",
+            sourceURL: URL(string: "https://huggingface.co/lmstudio-community/Qwen3.8-27B-MLX-4bit")
         ),
         ModelDescriptor(
             id: "qwen-image-edit-2511@mlx-int4",
@@ -324,6 +361,45 @@ public enum ModelCatalog {
             isRecommended: true
         ),
         ModelDescriptor(
+            id: "argmaxinc/whisperkit-coreml@large-v3-turbo",
+            displayName: "Whisper Large v3 Turbo Core ML",
+            publisher: "Argmax / OpenAI",
+            summary: "支援多語言與自動語言偵測的 WhisperKit Core ML 模型，可從影片或音訊產生字幕時間軸。",
+            capabilities: [.videoToText],
+            quantization: .coreML,
+            approximateDownloadGB: 0.96,
+            recommendedMemoryGB: 16,
+            licenseName: "MIT / Apache-2.0",
+            sourceURL: URL(string: "https://huggingface.co/argmaxinc/whisperkit-coreml"),
+            isRecommended: true
+        ),
+        ModelDescriptor(
+            id: "FluidInference/paraformer-large-zh-coreml",
+            displayName: "Paraformer Large 中文 Core ML",
+            publisher: "FluidInference / FunASR",
+            summary: "針對中文語音辨識最佳化的 Core ML INT8 模型，使用 Apple Neural Engine 產生逐字時間軸與字幕。",
+            capabilities: [.videoToText],
+            quantization: .coreML,
+            approximateDownloadGB: 0.22,
+            recommendedMemoryGB: 8,
+            licenseName: "Paraformer Upstream License",
+            sourceURL: URL(string: "https://huggingface.co/FluidInference/paraformer-large-zh-coreml"),
+            isRecommended: true
+        ),
+        ModelDescriptor(
+            id: "FluidInference/parakeet-0.6b-ja-coreml",
+            displayName: "Parakeet 0.6B 日文 Core ML",
+            publisher: "FluidInference / NVIDIA",
+            summary: "針對日文語音辨識最佳化的 Core ML 模型，可產生逐字時間軸與日文字幕。",
+            capabilities: [.videoToText],
+            quantization: .coreML,
+            approximateDownloadGB: 0.62,
+            recommendedMemoryGB: 8,
+            licenseName: "CC-BY-4.0",
+            sourceURL: URL(string: "https://huggingface.co/FluidInference/parakeet-0.6b-ja-coreml"),
+            isRecommended: true
+        ),
+        ModelDescriptor(
             id: "realesrgan-x4@coreml",
             displayName: "Real-ESRGAN 4×",
             publisher: "mlboydaisuke / xinntao",
@@ -428,6 +504,86 @@ public enum ModelCatalog {
             architecture: .mlxSwift,
             defaults: ProfileDefaults(maxTokens: 512, languageCode: "zh-Hant"),
             notes: "MLX Community 轉換版；內容標記為 Not-For-All-Audiences，請確認使用環境與內容政策。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "文生文 · Qwen3-VL 4B 4-bit",
+            capability: .textToText,
+            modelID: "local-captioner-3b@q4",
+            modelRevision: "main",
+            architecture: .mlxSwift,
+            defaults: ProfileDefaults(maxTokens: 2_048, languageCode: "auto"),
+            notes: "多模態 VLM Runtime 的純文字模式，可用於摘要、改寫與一般文字生成。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "NSFW 文生文 · Qwen3-VL 8B mxfp4",
+            capability: .textToText,
+            modelID: "qwen3-vl-8b-nsfw-caption-v45@mxfp4",
+            modelRevision: "V4.5-mxfp4",
+            architecture: .mlxSwift,
+            defaults: ProfileDefaults(maxTokens: 2_048, languageCode: "auto"),
+            notes: "多模態 VLM Runtime 的純文字模式；內容標記為 Not-For-All-Audiences。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "圖生文 · Qwen3.5 4B MLX 4-bit",
+            capability: .imageToText,
+            modelID: "lmstudio-community/Qwen3.5-4B-MLX-4bit",
+            modelRevision: "c43ee1d65576a5d98de1e8405cac93c371a655c1",
+            architecture: .mlxSwift,
+            defaults: ProfileDefaults(maxTokens: 512, languageCode: "zh-Hant"),
+            notes: "建議的原生 MLX 多模態圖生文 Profile。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "圖生文 · Qwen3.5 9B MLX 4-bit",
+            capability: .imageToText,
+            modelID: "lmstudio-community/Qwen3.5-9B-MLX-4bit",
+            modelRevision: "b455506b0f574c74616dbcd56879bde38fafcff3",
+            architecture: .mlxSwift,
+            defaults: ProfileDefaults(maxTokens: 512, languageCode: "zh-Hant"),
+            notes: "較高品質的原生 MLX 多模態圖生文 Profile。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "圖生文 · Qwen3.8 27B MLX 4-bit",
+            capability: .imageToText,
+            modelID: "lmstudio-community/Qwen3.8-27B-MLX-4bit",
+            modelRevision: "6067b15cf581666a4aecf6af3afaba4bb5efc20c",
+            architecture: .mlxSwift,
+            defaults: ProfileDefaults(maxTokens: 1_024, languageCode: "zh-Hant"),
+            notes: "大型原生 MLX 多模態圖生文 Profile，建議 64GB 記憶體。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "文生文 · Qwen3.5 4B MLX 4-bit",
+            capability: .textToText,
+            modelID: "lmstudio-community/Qwen3.5-4B-MLX-4bit",
+            modelRevision: "c43ee1d65576a5d98de1e8405cac93c371a655c1",
+            architecture: .mlxSwift,
+            defaults: ProfileDefaults(maxTokens: 2_048, languageCode: "auto"),
+            notes: "多模態 VLM Runtime 的純文字模式；停用 thinking，適合字幕翻譯、摘要、改寫與一般文字生成。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "文生文 · Qwen3.5 9B MLX 4-bit",
+            capability: .textToText,
+            modelID: "lmstudio-community/Qwen3.5-9B-MLX-4bit",
+            modelRevision: "b455506b0f574c74616dbcd56879bde38fafcff3",
+            architecture: .mlxSwift,
+            defaults: ProfileDefaults(maxTokens: 4_096, languageCode: "auto"),
+            notes: "多模態 VLM Runtime 的純文字模式，適合長字幕翻譯與文字校訂。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "文生文 · Qwen3.8 27B MLX 4-bit",
+            capability: .textToText,
+            modelID: "lmstudio-community/Qwen3.8-27B-MLX-4bit",
+            modelRevision: "6067b15cf581666a4aecf6af3afaba4bb5efc20c",
+            architecture: .mlxSwift,
+            defaults: ProfileDefaults(maxTokens: 8_192, languageCode: "auto"),
+            notes: "大型多模態 VLM Runtime 的純文字模式；適合高品質字幕翻譯、潤稿與複雜文字處理，建議 64GB 記憶體。",
             isBuiltIn: true
         ),
         InferenceProfile(
@@ -581,6 +737,36 @@ public enum ModelCatalog {
                 durationSemantics: .maximum
             ),
             notes: "MiniMax Music 3 原生 MLX 8-bit Profile；依音樂風格 Prompt 與歌詞生成最長 5–300 秒的 44.1 kHz 立體聲音訊，模型可能依歌曲結構提前自然結束。建議 64GB 記憶體；推論需外部 mlx-minimax-music3 Runtime 與 FFmpeg。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "多語字幕 · Whisper Large v3 Turbo",
+            capability: .videoToText,
+            modelID: "argmaxinc/whisperkit-coreml@large-v3-turbo",
+            modelRevision: "0f63a7800b00dd0226abd051b906c246e1907482",
+            architecture: .coreML,
+            defaults: ProfileDefaults(languageCode: "auto"),
+            notes: "多語言 Core ML Profile；自動偵測來源語言並輸出字幕時間軸。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "中文字幕 · Paraformer Large Core ML",
+            capability: .videoToText,
+            modelID: "FluidInference/paraformer-large-zh-coreml",
+            modelRevision: "5dd557bd06342a3cd07ceccb909d8a45e48b053a",
+            architecture: .coreML,
+            defaults: ProfileDefaults(languageCode: "zh"),
+            notes: "中文語音專用 Core ML INT8 Profile；由 Apple Neural Engine 執行，支援長音訊分段辨識與字幕時間軸合併。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "日文字幕 · Parakeet 0.6B Core ML",
+            capability: .videoToText,
+            modelID: "FluidInference/parakeet-0.6b-ja-coreml",
+            modelRevision: "2952296ff1da4a6d6a7aec545e226367db80c612",
+            architecture: .coreML,
+            defaults: ProfileDefaults(languageCode: "ja"),
+            notes: "日文語音專用 Core ML Profile；輸出逐字時間軸並整理為日文字幕。",
             isBuiltIn: true
         ),
         InferenceProfile(

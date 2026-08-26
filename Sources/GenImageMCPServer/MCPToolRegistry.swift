@@ -76,6 +76,31 @@ public struct MCPToolRegistry {
                     "max_tokens": integerProperty("Maximum generated tokens.", defaultValue: 512)
                 ],
                 required: ["input_path", "model_path"]
+            ),
+            tool(
+                name: "genimage_generate_subtitle",
+                description: "Generate SRT or WebVTT subtitles from a local video or audio file with native Core ML ASR.",
+                properties: [
+                    "input_path": stringProperty("Absolute input video or audio path."),
+                    "model_path": stringProperty("Absolute WhisperKit, Paraformer, or Parakeet model directory."),
+                    "model_id": stringProperty("ASR model ID exposed by genimage_models_list."),
+                    "format": [
+                        "type": "string",
+                        "description": "Subtitle output format.",
+                        "enum": ["srt", "vtt"],
+                        "default": "srt"
+                    ],
+                    "language_code": stringProperty("Optional ASR language code; use auto for detection."),
+                    "output_path": stringProperty("Optional absolute subtitle output path."),
+                    "target_language_code": [
+                        "type": "string",
+                        "description": "Optional translation target language.",
+                        "enum": ["zh-Hant", "zh-Hans", "en", "ja", "ko"]
+                    ],
+                    "translation_model_path": stringProperty("Absolute Qwen text model directory; required with target_language_code."),
+                    "translation_model_id": stringProperty("Qwen text model ID; required with target_language_code.")
+                ],
+                required: ["input_path", "model_path", "model_id"]
             )
         ]
     }
@@ -95,6 +120,8 @@ public struct MCPToolRegistry {
                 return try await edit(arguments: arguments)
             case "genimage_describe_image":
                 return try await describe(arguments: arguments)
+            case "genimage_generate_subtitle":
+                return try await generateSubtitle(arguments: arguments)
             default:
                 return toolError("Unknown tool: \(name)")
             }
@@ -450,6 +477,147 @@ public struct MCPToolRegistry {
         )
     }
 
+    private func generateSubtitle(arguments: [String: Any]) async throws -> [String: Any] {
+        let inputURL = try requiredFileURL("input_path", arguments: arguments)
+        let modelURL = try requiredFileURL("model_path", arguments: arguments)
+        let modelID = try requiredString("model_id", arguments: arguments)
+        let format: SubtitleFormat
+        switch (arguments["format"] as? String ?? "srt").lowercased() {
+        case "srt": format = .srt
+        case "vtt": format = .vtt
+        default:
+            throw MCPToolError.invalidArgument("format must be srt or vtt")
+        }
+
+        let requestedOutputURL: URL?
+        let outputDirectory: URL
+        if let path = arguments["output_path"] as? String, !path.isEmpty {
+            guard NSString(string: path).isAbsolutePath else {
+                throw MCPToolError.invalidArgument("output_path must be absolute")
+            }
+            let url = URL(fileURLWithPath: path)
+            guard url.pathExtension.lowercased() == format.fileExtension else {
+                throw MCPToolError.invalidArgument(
+                    "output_path extension must be .\(format.fileExtension)"
+                )
+            }
+            guard !FileManager.default.fileExists(atPath: url.path) else {
+                throw MCPToolError.runtime("Output path already exists: \(url.path)")
+            }
+            requestedOutputURL = url
+            outputDirectory = url.deletingLastPathComponent()
+        } else {
+            requestedOutputURL = nil
+            outputDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("GenImageMCP", isDirectory: true)
+        }
+
+        let translation = try subtitleTranslation(arguments: arguments)
+        let projectID = UUID()
+        let sourceAsset = MediaAsset(
+            projectID: projectID,
+            kind: Self.audioExtensions.contains(inputURL.pathExtension.lowercased())
+                ? .importedAudio
+                : .importedVideo,
+            title: inputURL.deletingPathExtension().lastPathComponent,
+            fileURL: inputURL,
+            pixelWidth: 0,
+            pixelHeight: 0
+        )
+        let profile = InferenceProfile(
+            name: "MCP Subtitle \(modelID)",
+            capability: .videoToText,
+            modelID: modelID,
+            modelRevision: "mcp",
+            architecture: .coreML,
+            defaults: ProfileDefaults(
+                languageCode: arguments["language_code"] as? String ?? "auto"
+            )
+        )
+        let router = SubtitleGenerationRouter(outputDirectory: outputDirectory)
+        let result: SubtitleGenerationResult
+        do {
+            result = try await router.generate(
+                request: SubtitleGenerationRequest(
+                    projectID: projectID,
+                    sourceAsset: sourceAsset,
+                    profile: profile,
+                    modelURL: modelURL,
+                    format: format,
+                    translation: translation
+                ),
+                progress: { _ in }
+            )
+        } catch {
+            await router.unload()
+            throw error
+        }
+        await router.unload()
+
+        guard var outputURL = result.asset.fileURL else {
+            throw MCPToolError.runtime("Subtitle generation completed without an output path.")
+        }
+        if let requestedOutputURL,
+           outputURL.standardizedFileURL != requestedOutputURL.standardizedFileURL {
+            try FileManager.default.moveItem(at: outputURL, to: requestedOutputURL)
+            outputURL = requestedOutputURL
+        }
+        var structured: [String: Any] = [
+            "input_path": inputURL.path,
+            "output_path": outputURL.path,
+            "format": format.rawValue,
+            "language_code": result.transcript.languageCode,
+            "duration_seconds": result.transcript.durationSeconds,
+            "segment_count": result.transcript.segments.count
+        ]
+        if let targetLanguage = translation?.targetLanguage.rawValue {
+            structured["target_language_code"] = targetLanguage
+        }
+        return toolSuccess(
+            text: "Subtitles written to \(outputURL.path)",
+            structured: structured
+        )
+    }
+
+    private func subtitleTranslation(
+        arguments: [String: Any]
+    ) throws -> SubtitleTranslationConfiguration? {
+        let targetCode = (arguments["target_language_code"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let targetCode, !targetCode.isEmpty else {
+            guard arguments["translation_model_path"] == nil,
+                  arguments["translation_model_id"] == nil else {
+                throw MCPToolError.invalidArgument(
+                    "target_language_code is required with translation model arguments"
+                )
+            }
+            return nil
+        }
+        guard let targetLanguage = SubtitleTranslationLanguage(rawValue: targetCode) else {
+            throw MCPToolError.invalidArgument(
+                "target_language_code must be zh-Hant, zh-Hans, en, ja, or ko"
+            )
+        }
+        let modelURL = try requiredFileURL("translation_model_path", arguments: arguments)
+        let modelID = try requiredString("translation_model_id", arguments: arguments)
+        return SubtitleTranslationConfiguration(
+            targetLanguage: targetLanguage,
+            profile: InferenceProfile(
+                name: "MCP Subtitle Translation \(modelID)",
+                capability: .textToText,
+                modelID: modelID,
+                modelRevision: "mcp",
+                architecture: .mlxSwift,
+                defaults: ProfileDefaults(maxTokens: 2_048)
+            ),
+            modelURL: modelURL
+        )
+    }
+
+    private static let audioExtensions: Set<String> = [
+        "aac", "aif", "aiff", "caf", "flac", "m4a", "mp3", "ogg", "opus", "wav"
+    ]
+
     private func modelRoot(arguments: [String: Any]) -> URL {
         ModelStorage.rootURL(explicitPath: arguments["model_root"] as? String)
     }
@@ -463,6 +631,17 @@ public struct MCPToolRegistry {
             throw MCPToolError.invalidArgument("Path does not exist: \(url.path)")
         }
         return url
+    }
+
+    private func requiredString(_ key: String, arguments: [String: Any]) throws -> String {
+        guard let value = arguments[key] as? String else {
+            throw MCPToolError.invalidArgument("\(key) is required")
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw MCPToolError.invalidArgument("\(key) is required")
+        }
+        return trimmed
     }
 
     private func integer(_ value: Any?, defaultValue: Int) -> Int {
