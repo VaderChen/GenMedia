@@ -33,12 +33,18 @@ public actor HuggingFaceModelInstaller {
     public static let ltx23UnionControlLoRAModelID = "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control"
     public static let captionerModelID = "local-captioner-3b@q4"
     public static let nsfwCaptionerModelID = "qwen3-vl-8b-nsfw-caption-v45@mxfp4"
+    public static let qwen35Multimodal4BModelID = "lmstudio-community/Qwen3.5-4B-MLX-4bit"
+    public static let qwen35Multimodal9BModelID = "lmstudio-community/Qwen3.5-9B-MLX-4bit"
+    public static let qwen38Multimodal27BModelID = "lmstudio-community/Qwen3.8-27B-MLX-4bit"
     public static let ltx23DistilledModelID = "Lightricks/LTX-2.3@distilled-1.1"
     public static let ltx23MLXQ4ModelID = "dgrauet/ltx-2.3-mlx-q4"
     public static let miniMaxH3MLX8BitModelID = "pipenetwork/MiniMax-H3-MLX-8bit"
     public static let miniMaxH3MLX4BitModelID = "pipenetwork/MiniMax-H3-MLX-4bit"
     public static let aceStep15TurboModelID = "ACE-Step/Ace-Step1.5"
     public static let miniMaxMusic3MLX8BitModelID = "vanch007/MiniMax-Music3-MLX-8bit"
+    public static let whisperLargeV3TurboCoreMLModelID = "argmaxinc/whisperkit-coreml@large-v3-turbo"
+    public static let paraformerChineseCoreMLModelID = "FluidInference/paraformer-large-zh-coreml"
+    public static let parakeetJapaneseCoreMLModelID = "FluidInference/parakeet-0.6b-ja-coreml"
     public static let realESRGAN4xModelID = "realesrgan-x4@coreml"
     public static let realESRGAN2xModelID = "realesrgan-x2@coreml"
 
@@ -80,15 +86,18 @@ public actor HuggingFaceModelInstaller {
     private struct InstallPlan: Sendable {
         var directoryName: String
         var runtimeRelativePath: String?
+        var requiredRuntimeFiles: Set<String>
         var sources: [SourcePlan]
 
         init(
             directoryName: String,
             runtimeRelativePath: String? = nil,
+            requiredRuntimeFiles: Set<String> = [],
             sources: [SourcePlan]
         ) {
             self.directoryName = directoryName
             self.runtimeRelativePath = runtimeRelativePath
+            self.requiredRuntimeFiles = requiredRuntimeFiles
             self.sources = sources
         }
     }
@@ -285,6 +294,7 @@ public actor HuggingFaceModelInstaller {
         progressTracker.emit()
 
         try Self.materializeQuantizationManifest(at: destination)
+        try Self.validateRequiredRuntimeFiles(for: plan, at: destination)
 
         let manifest = InstallManifest(
             schemaVersion: 2,
@@ -490,6 +500,7 @@ public actor HuggingFaceModelInstaller {
                 )
             }
         }
+        try validateRequiredRuntimeFiles(for: plan, at: destination)
         let runtimeURL = runtimeURL(for: plan, destination: destination)
         guard FileManager.default.fileExists(atPath: runtimeURL.path) else {
             throw ModelInstallerError.runtimeNotFound(runtimeURL)
@@ -819,6 +830,15 @@ public actor HuggingFaceModelInstaller {
         case captionerModelID:
             return InstallPlan(
                 directoryName: "Qwen3-VL-4B-Instruct-4bit",
+                requiredRuntimeFiles: [
+                    "config.json",
+                    "model.safetensors",
+                    "preprocessor_config.json",
+                    "processor_config.json",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "video_preprocessor_config.json"
+                ],
                 sources: [
                     SourcePlan(
                         repository: "mlx-community/Qwen3-VL-4B-Instruct-4bit",
@@ -834,6 +854,7 @@ public actor HuggingFaceModelInstaller {
                             "model.safetensors",
                             "model.safetensors.index.json",
                             "preprocessor_config.json",
+                            "processor_config.json",
                             "special_tokens_map.json",
                             "tokenizer.json",
                             "tokenizer_config.json",
@@ -868,6 +889,24 @@ public actor HuggingFaceModelInstaller {
                         ]
                     )
                 ]
+            )
+        case qwen35Multimodal4BModelID:
+            return qwenMultimodalPlan(
+                repository: qwen35Multimodal4BModelID,
+                revision: "c43ee1d65576a5d98de1e8405cac93c371a655c1",
+                directoryName: "qwen3.5-4b-mlx-4bit"
+            )
+        case qwen35Multimodal9BModelID:
+            return qwenMultimodalPlan(
+                repository: qwen35Multimodal9BModelID,
+                revision: "b455506b0f574c74616dbcd56879bde38fafcff3",
+                directoryName: "qwen3.5-9b-mlx-4bit"
+            )
+        case qwen38Multimodal27BModelID:
+            return qwenMultimodalPlan(
+                repository: qwen38Multimodal27BModelID,
+                revision: "6067b15cf581666a4aecf6af3afaba4bb5efc20c",
+                directoryName: "qwen3.8-27b-mlx-4bit"
             )
         case realESRGAN4xModelID:
             return realESRGANPlan(directoryName: "realesrgan-coreml-x4")
@@ -990,6 +1029,79 @@ public actor HuggingFaceModelInstaller {
                     )
                 ]
             )
+        case whisperLargeV3TurboCoreMLModelID:
+            return InstallPlan(
+                directoryName: "whisper-large-v3-turbo-coreml",
+                runtimeRelativePath: "openai_whisper-large-v3_turbo_954MB",
+                sources: [
+                    SourcePlan(
+                        repository: "argmaxinc/whisperkit-coreml",
+                        revision: "0f63a7800b00dd0226abd051b906c246e1907482",
+                        destinationSubdirectory: "",
+                        prefixes: [
+                            "openai_whisper-large-v3_turbo_954MB/MelSpectrogram.mlmodelc/",
+                            "openai_whisper-large-v3_turbo_954MB/AudioEncoder.mlmodelc/",
+                            "openai_whisper-large-v3_turbo_954MB/TextDecoder.mlmodelc/"
+                        ],
+                        exactFiles: [
+                            "openai_whisper-large-v3_turbo_954MB/config.json",
+                            "openai_whisper-large-v3_turbo_954MB/generation_config.json"
+                        ]
+                    ),
+                    SourcePlan(
+                        repository: "openai/whisper-large-v3",
+                        revision: "06f233fe06e710322aca913c1bc4249a0d71fce1",
+                        destinationSubdirectory: "openai_whisper-large-v3_turbo_954MB",
+                        prefixes: [],
+                        exactFiles: [
+                            "added_tokens.json",
+                            "merges.txt",
+                            "normalizer.json",
+                            "preprocessor_config.json",
+                            "special_tokens_map.json",
+                            "tokenizer.json",
+                            "tokenizer_config.json",
+                            "vocab.json"
+                        ]
+                    )
+                ]
+            )
+        case paraformerChineseCoreMLModelID:
+            return InstallPlan(
+                directoryName: "paraformer-large-zh-coreml-int8",
+                sources: [
+                    SourcePlan(
+                        repository: paraformerChineseCoreMLModelID,
+                        revision: "5dd557bd06342a3cd07ceccb909d8a45e48b053a",
+                        destinationSubdirectory: "",
+                        prefixes: [
+                            "ParaformerPreprocessor.mlmodelc/",
+                            "ParaformerEncoder_int8.mlmodelc/",
+                            "ParaformerCifAlphas.mlmodelc/",
+                            "ParaformerDecoder_int8.mlmodelc/"
+                        ],
+                        exactFiles: ["README.md", "vocab.json"]
+                    )
+                ]
+            )
+        case parakeetJapaneseCoreMLModelID:
+            return InstallPlan(
+                directoryName: "parakeet-0.6b-ja-coreml",
+                sources: [
+                    SourcePlan(
+                        repository: parakeetJapaneseCoreMLModelID,
+                        revision: "2952296ff1da4a6d6a7aec545e226367db80c612",
+                        destinationSubdirectory: "",
+                        prefixes: [
+                            "Preprocessor.mlmodelc/",
+                            "Encoder.mlmodelc/",
+                            "Decoderv2.mlmodelc/",
+                            "Jointerv2.mlmodelc/"
+                        ],
+                        exactFiles: ["README.md", "config.json", "metadata.json", "vocab.json"]
+                    )
+                ]
+            )
         case int4ModelID:
             return InstallPlan(
                 directoryName: "qwen-image-edit-2511-int4",
@@ -1070,6 +1182,47 @@ public actor HuggingFaceModelInstaller {
                         "FL2VA/video_vae/"
                     ],
                     exactFiles: ["FL2VA/model_index.json"]
+                )
+            ]
+        )
+    }
+
+    private nonisolated static func qwenMultimodalPlan(
+        repository: String,
+        revision: String,
+        directoryName: String
+    ) -> InstallPlan {
+        InstallPlan(
+            directoryName: directoryName,
+            requiredRuntimeFiles: [
+                "chat_template.jinja",
+                "config.json",
+                "model.safetensors.index.json",
+                "preprocessor_config.json",
+                "processor_config.json",
+                "tokenizer.json",
+                "tokenizer_config.json",
+                "video_preprocessor_config.json",
+                "vocab.json"
+            ],
+            sources: [
+                SourcePlan(
+                    repository: repository,
+                    revision: revision,
+                    destinationSubdirectory: "",
+                    prefixes: ["model"],
+                    exactFiles: [
+                        "README.md",
+                        "chat_template.jinja",
+                        "config.json",
+                        "generation_config.json",
+                        "preprocessor_config.json",
+                        "processor_config.json",
+                        "tokenizer.json",
+                        "tokenizer_config.json",
+                        "video_preprocessor_config.json",
+                        "vocab.json"
+                    ]
                 )
             ]
         )
@@ -1199,6 +1352,18 @@ public actor HuggingFaceModelInstaller {
     ) -> URL {
         guard let relativePath = plan.runtimeRelativePath else { return destination }
         return destination.appendingPathComponent(relativePath)
+    }
+
+    private nonisolated static func validateRequiredRuntimeFiles(
+        for plan: InstallPlan,
+        at destination: URL
+    ) throws {
+        for relativePath in plan.requiredRuntimeFiles.sorted() {
+            let url = destination.appendingPathComponent(relativePath)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw ModelInstallerError.requiredRuntimeFileMissing(relativePath)
+            }
+        }
     }
 
     private nonisolated static func isSafeRelativePath(_ path: String) -> Bool {
@@ -1517,6 +1682,7 @@ public enum ModelInstallerError: LocalizedError, Sendable {
     case runtimeNotFound(URL)
     case sizeMismatch(path: String, expected: Int64, actual: Int64)
     case invalidQuantizationConfig(URL, String)
+    case requiredRuntimeFileMissing(String)
 
     public var errorDescription: String? {
         switch self {
@@ -1544,6 +1710,8 @@ public enum ModelInstallerError: LocalizedError, Sendable {
             "模型檔案大小不符：\(path)（預期 \(expected)，實際 \(actual) bytes）"
         case let .invalidQuantizationConfig(url, message):
             "量化設定無法轉換：\(url.lastPathComponent)；\(message)"
+        case let .requiredRuntimeFileMissing(path):
+            "模型缺少 Runtime 必要檔案：\(path)"
         }
     }
 }

@@ -4,8 +4,8 @@
 
 ## 설계 목표
 
-1. 텍스트→이미지, 이미지→텍스트, 이미지→이미지, 비디오 생성, 음악 생성, 업스케일은 서로 의존하지 않는 독립 기능입니다.
-2. 이미지, 비디오, 오디오 출력으로 작업 흐름과 분기를 구성할 수 있습니다.
+1. 텍스트→이미지, 이미지→텍스트, 이미지→이미지, 비디오 생성, 음악 생성, 자막 생성, 업스케일은 서로 의존하지 않는 독립 기능입니다.
+2. 이미지, 비디오, 오디오, 자막 출력으로 작업 흐름과 분기를 구성할 수 있습니다.
 3. UI는 MLX, Core ML 또는 특정 모델에 직접 의존하지 않습니다.
 4. 모델 업데이트 시 프로필을 통해 모델 버전과 추론 아키텍처를 전환합니다.
 5. 기존 작업은 프로필 스냅샷을 보존하므로 이후 프로필 변경의 영향을 받지 않습니다.
@@ -34,6 +34,9 @@ AppStore / Workflow coordination
         ├── ImageToImageGenerating
         ├── VideoGenerating
         ├── MusicGenerating
+        ├── MediaTranscribing
+        ├── SubtitleGenerating
+        ├── TextGenerating
         └── ImageUpscaling
                     │
                     ▼
@@ -58,6 +61,7 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 - Web UI는 사이드바와 라우팅, 작업 공간 탭, 크기 계산, 전체 렌더링 보호를 `chrome.js`, `workspace-tabs.js`, `geometry.js`, `render-preservation.js`로 분리하고 `app.js`는 Bridge와 애플리케이션 조정을 담당합니다.
 - `SubprocessRuntime`가 외부 Worker, 비디오·음악 CLI, FFmpeg의 실행 파일 검색, 환경, 로그, 진행률, 정체 감지, 취소, 종료 처리를 공통화합니다.
 - 의존 패키지 소스 수정은 `Patches/manifest.txt`에 정의하고 `scripts/apply-runtime-patches.command`가 적용 및 검증합니다. pin 불일치나 수정 실패 시 수정되지 않은 소스로 계속하지 않고 빌드를 중단합니다.
+- `GenImageMCP`는 자체 `InferenceServices`를 보유하는 독립 stdio server로 유지됩니다. 앱의 `LocalMCPServiceController`는 localhost HTTP transport 수명 주기만 관리하며 둘 다 동일한 `MCPServer` 도구 코어를 직접 사용하므로 stdio→HTTP 프록시가 아닙니다.
 - 운영용 ACE-Step 단계 타입은 더 이상 PoC 이름을 사용하지 않습니다. 진단 전용 DiT probe를 운영 생성 단계와 분리하여 실험 코드와 앱 실행 경로를 명확히 했습니다.
 
 ## 프로필
@@ -86,10 +90,13 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 - 독립 텍스트→비디오: MP4 에셋에 parent가 없습니다.
 - 이미지→비디오: MP4 에셋은 원본 이미지를 parent로 사용합니다.
 - 독립 텍스트→음악: MP3, M4A, AAC 또는 FLAC 에셋에 parent가 없으며 실제 길이, 샘플링 레이트, 채널 수를 기록합니다.
+- 자막 생성: 원본을 `importedVideo` 또는 `importedAudio`로 가져오고 SRT/WebVTT 결과를 `generatedSubtitle`로 저장하며 원본 미디어를 parent로 사용합니다.
 
 `WorkflowGraph`가 lineage와 children 조회를 제공하므로 UI에서 에셋 관계를 추측할 필요가 없습니다.
 
 열려 있는 작업 공간 탭이 생성 프로젝트의 수명 주기 경계입니다. Swift는 `Project`, `MediaAsset`, `WorkflowOperation`, 선택 상태를 Application Support의 JSON 스냅샷으로 원자 저장하며 일반적인 앱 종료 시 지우지 않습니다. Web UI는 탭 정보를 WebKit localStorage에 보관합니다. 탭을 닫으면 Bridge를 통해 네이티브 계층에 알리고 해당 탭의 에셋 및 lineage 인덱스만 제거하며 출력된 미디어 파일은 유지합니다.
+
+이름이 있는 작업 공간은 탭 상위에 있으며 각 작업 공간은 자체 탭 집합을 유지합니다. 생성과 삭제는 Bridge를 통해 `AppStore+Workspaces`로 전달되고 삭제 전 확인이 필요합니다. 작업 공간 전환은 해당 탭과 선택 상태만 바꾸며 Runtime이나 미디어 플레이어를 다시 만들지 않습니다.
 
 ## 추론 Runtime
 
@@ -101,9 +108,12 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 - 노이즈 제거 루프는 Swift Task 취소를 확인합니다.
 - 모델 언로드, LoRA 언로드, 취소, 메모리 캐시 정리를 지원합니다.
 
-이미지→텍스트는 `mlx-swift-lm 2.30.6`을 사용합니다.
+멀티모달 이미지→텍스트 및 텍스트→텍스트 경로는 `mlx-swift-lm` revision `7da33441c7c08b010ff1aa8da9dc3d82277272f5`를 사용합니다.
 
 - `QwenVLImageDescriptionService`는 `VLMModelFactory`를 통해 로컬 Qwen3-VL을 불러옵니다.
+- `QwenTextGenerationService`는 같은 멀티모달 컨테이너의 텍스트 전용 입력을 사용합니다. Qwen3-VL, Qwen3.5, Qwen3.8 설명자는 `.imageToText`와 `.textToText`를 모두 선언하고 기능별 독립 Profile을 제공합니다.
+- Qwen3.5 텍스트 전용 입력의 업스트림 호환 수정은 `Patches/MLX-Swift-LM-Qwen35-Text-Only.patch`로 적용합니다.
+- 관리형 다운로드는 `processor_config.json`, 이미지/비디오 전처리 설정, Tokenizer, Chat Template, 가중치와 인덱스를 내려받아 검증하므로 텍스트 가중치만 있는 모델을 설치 완료로 처리하지 않습니다.
 - 같은 프로필의 반복 로드를 피하기 위해 서비스 수명 동안 모델 컨테이너를 캐시합니다.
 - 번체 중국어, 영어, 일본어, 한국어 출력 프롬프트를 지원합니다.
 
@@ -128,5 +138,15 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 - 두 Adapter 모두 임시 WAV를 얻고 `AudioOutputEncoder`가 MP3 320 kbps, M4A AAC 256 kbps, ADTS AAC 256 kbps 또는 무손실 FLAC으로 변환합니다.
 - 성공, 실패 또는 취소 시 임시 파일을 정리하며 완료된 압축 오디오만 실제 길이, 샘플링 레이트, 채널 수와 함께 `generatedAudio` 에셋으로 보존합니다.
 - ACE-Step 가중치는 모델 센터에서 관리하며 네이티브 Runtime은 앱에 컴파일되므로 별도 설치 경로나 서비스 환경 변수를 사용하지 않습니다.
+
+자막 생성은 미디어 가져오기와 텍스트 생성 사이에 위치합니다.
+
+1. `MediaAudioPreparer`가 비디오 또는 오디오에서 인식용 오디오 트랙과 임시 경로를 준비합니다.
+2. `SubtitleGenerationRouter`가 `MediaTranscribing.supports(profile:)`를 순서대로 평가해 첫 번째 일치 Adapter를 선택합니다.
+3. Whisper Large v3 Turbo는 다국어, Paraformer Large는 중국어, Parakeet 0.6B는 일본어를 담당하며 모두 로컬 Core ML 경로로 실행됩니다.
+4. 선택적 `QwenTextGenerationService`는 Qwen3.5/Qwen3.8 MLX로 자막을 묶음 번역하되 구간 시작과 종료 시간은 바꾸지 않습니다.
+5. `SubtitleDocument`가 SRT/WebVTT를 만들고 현재 작업 공간에 `generatedSubtitle` 에셋으로 저장합니다.
+
+`GenImageASRPoC`는 WhisperKit 미디어 디코딩, 언어 인식, 타임라인 출력만 검증하는 독립 실행 파일입니다. 앱 작업 공간에 쓰지 않으며 정식 흐름의 대체 경로도 아닙니다.
 
 MLX metallib은 `RuntimeSupport/mlx.metallib`에서 `build.command`를 통해 Release 실행 디렉터리로 복사됩니다. 배포 전에는 모델 라이선스 검토, 16/24/32 GB 부하 테스트, App bundle, 서명, 공증을 완료해야 합니다.

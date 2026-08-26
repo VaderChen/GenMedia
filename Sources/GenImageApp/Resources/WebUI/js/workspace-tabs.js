@@ -4,6 +4,7 @@
 // 於 app.js 的重繪流程被閱讀與修改。
 
 const WORKSPACE_TABS_KEY = "genimage.workspaceTabs";
+const WORKSPACE_TABS_SCHEMA_VERSION = 2;
 
 // 尚未落地的生成輸出：記住送出當下的分頁，等對應的 job 完成時把結果放回同一個分頁。
 const pendingOutputs = [];
@@ -12,6 +13,7 @@ const pendingOutputs = [];
 export function trackPendingOutput(ui, action) {
   const pending = {
     action,
+    workspaceID: ui.activeWorkspaceID,
     tabID: ui.activeWorkspaceTabID,
     jobID: null,
     expiresAt: Date.now() + 60 * 60 * 1000,
@@ -34,7 +36,7 @@ function bindPendingOutputJobs(previousState, nextState) {
   });
 }
 
-function takePendingOutputTab(action, nextState) {
+function takePendingOutputTab(action, nextState, workspaceID) {
   const now = Date.now();
   for (let index = pendingOutputs.length - 1; index >= 0; index -= 1) {
     if (pendingOutputs[index].expiresAt < now) pendingOutputs.splice(index, 1);
@@ -43,9 +45,16 @@ function takePendingOutputTab(action, nextState) {
     nextState.jobs.filter((job) => job.state === "completed").map((job) => job.id),
   );
   let index = pendingOutputs.findIndex(
-    (pending) => pending.action === action && pending.jobID && completedJobIDs.has(pending.jobID),
+    (pending) => pending.workspaceID === workspaceID
+      && pending.action === action
+      && pending.jobID
+      && completedJobIDs.has(pending.jobID),
   );
-  if (index < 0) index = pendingOutputs.findIndex((pending) => pending.action === action);
+  if (index < 0) {
+    index = pendingOutputs.findIndex(
+      (pending) => pending.workspaceID === workspaceID && pending.action === action,
+    );
+  }
   if (index < 0) return null;
   return pendingOutputs.splice(index, 1)[0].tabID;
 }
@@ -70,39 +79,117 @@ export function formatWorkspaceTabName(date) {
 export function loadWorkspaceTabs() {
   try {
     const stored = JSON.parse(localStorage.getItem(WORKSPACE_TABS_KEY) || "null");
-    const tabs = Array.isArray(stored?.tabs)
-      ? stored.tabs
-          .filter((tab) => typeof tab?.id === "string")
-          .map((tab, index) => ({
-            id: tab.id,
-            name: typeof tab.name === "string" && tab.name.trim()
-              ? tab.name.trim()
-              : formatWorkspaceTabName(new Date(Date.now() + index * 1_000)),
-            assetIDs: Array.isArray(tab.assetIDs) ? tab.assetIDs.filter((id) => typeof id === "string") : [],
-            selectedAssetID: typeof tab.selectedAssetID === "string" ? tab.selectedAssetID : null,
-            selectedAssetIDs: Array.isArray(tab.selectedAssetIDs)
-              ? tab.selectedAssetIDs.filter((id) => typeof id === "string")
-              : [],
-            selectionAnchorID: typeof tab.selectionAnchorID === "string" ? tab.selectionAnchorID : null,
-          }))
-      : [];
-    if (tabs.length) {
-      const activeTabID = tabs.some((tab) => tab.id === stored.activeTabID) ? stored.activeTabID : tabs[0].id;
-      return { tabs, activeTabID };
+    if (stored?.schemaVersion === WORKSPACE_TABS_SCHEMA_VERSION && stored.workspaces) {
+      const workspaceTabStates = {};
+      Object.entries(stored.workspaces).forEach(([workspaceID, value]) => {
+        if (typeof workspaceID !== "string" || !workspaceID) return;
+        workspaceTabStates[workspaceID] = normalizeWorkspaceTabState(value);
+      });
+      return { workspaceTabStates, legacyWorkspaceTabState: null };
+    }
+    if (stored?.tabs) {
+      return {
+        workspaceTabStates: {},
+        legacyWorkspaceTabState: normalizeWorkspaceTabState(stored),
+      };
     }
   } catch {
     localStorage.removeItem(WORKSPACE_TABS_KEY);
   }
 
-  const tab = makeWorkspaceTab();
-  return { tabs: [tab], activeTabID: tab.id };
+  return {
+    workspaceTabStates: {},
+    legacyWorkspaceTabState: makeWorkspaceTabState(),
+  };
 }
 
 export function saveWorkspaceTabs(ui) {
+  persistActiveWorkspaceTabState(ui);
   localStorage.setItem(
     WORKSPACE_TABS_KEY,
-    JSON.stringify({ tabs: ui.workspaceTabs, activeTabID: ui.activeWorkspaceTabID }),
+    JSON.stringify({
+      schemaVersion: WORKSPACE_TABS_SCHEMA_VERSION,
+      workspaces: ui.workspaceTabStates,
+    }),
   );
+}
+
+export function activateWorkspaceTabs(ui, workspaceID) {
+  if (!workspaceID) return;
+  if (ui.activeWorkspaceID === workspaceID && ui.workspaceTabs.length) return;
+  persistActiveWorkspaceTabState(ui);
+
+  let tabState = ui.workspaceTabStates[workspaceID];
+  if (!tabState && ui.legacyWorkspaceTabState) {
+    tabState = ui.legacyWorkspaceTabState;
+    ui.legacyWorkspaceTabState = null;
+  }
+  if (!tabState) tabState = makeWorkspaceTabState();
+
+  ui.workspaceTabStates[workspaceID] = tabState;
+  ui.activeWorkspaceID = workspaceID;
+  ui.workspaceTabs = tabState.tabs;
+  ui.activeWorkspaceTabID = tabState.activeTabID;
+  saveWorkspaceTabs(ui);
+}
+
+export function pruneWorkspaceTabStates(ui, workspaceIDs) {
+  const validWorkspaceIDs = new Set(workspaceIDs);
+  let changed = false;
+  if (ui.activeWorkspaceID && !validWorkspaceIDs.has(ui.activeWorkspaceID)) {
+    ui.activeWorkspaceID = null;
+    ui.workspaceTabs = [];
+    ui.activeWorkspaceTabID = null;
+    changed = true;
+  }
+  Object.keys(ui.workspaceTabStates).forEach((workspaceID) => {
+    if (!validWorkspaceIDs.has(workspaceID)) {
+      delete ui.workspaceTabStates[workspaceID];
+      changed = true;
+    }
+  });
+  if (changed) saveWorkspaceTabs(ui);
+}
+
+function persistActiveWorkspaceTabState(ui) {
+  if (!ui.activeWorkspaceID || !ui.workspaceTabs.length) return;
+  ui.workspaceTabStates[ui.activeWorkspaceID] = {
+    tabs: ui.workspaceTabs,
+    activeTabID: ui.activeWorkspaceTabID,
+  };
+}
+
+function normalizeWorkspaceTabState(value) {
+  const tabs = Array.isArray(value?.tabs)
+    ? value.tabs
+        .filter((tab) => typeof tab?.id === "string")
+        .map((tab, index) => ({
+          id: tab.id,
+          name: typeof tab.name === "string" && tab.name.trim()
+            ? tab.name.trim()
+            : formatWorkspaceTabName(new Date(Date.now() + index * 1_000)),
+          assetIDs: Array.isArray(tab.assetIDs)
+            ? tab.assetIDs.filter((id) => typeof id === "string")
+            : [],
+          selectedAssetID: typeof tab.selectedAssetID === "string" ? tab.selectedAssetID : null,
+          selectedAssetIDs: Array.isArray(tab.selectedAssetIDs)
+            ? tab.selectedAssetIDs.filter((id) => typeof id === "string")
+            : [],
+          selectionAnchorID: typeof tab.selectionAnchorID === "string" ? tab.selectionAnchorID : null,
+        }))
+    : [];
+  if (!tabs.length) return makeWorkspaceTabState();
+  return {
+    tabs,
+    activeTabID: tabs.some((tab) => tab.id === value.activeTabID)
+      ? value.activeTabID
+      : tabs[0].id,
+  };
+}
+
+function makeWorkspaceTabState() {
+  const tab = makeWorkspaceTab();
+  return { tabs: [tab], activeTabID: tab.id };
 }
 
 export function activeWorkspaceTab(ui) {
@@ -152,7 +239,11 @@ export function reconcileWorkspaceTabs(ui, previousState, nextState) {
     if (!outputIDs.length) return;
 
     const parentTab = operation.inputAssetID ? workspaceTabOwningAsset(ui, operation.inputAssetID) : null;
-    const pendingTabID = takePendingOutputTab(operation.action, nextState);
+    const pendingTabID = takePendingOutputTab(
+      operation.action,
+      nextState,
+      ui.activeWorkspaceID,
+    );
     const targetTab = parentTab
       || ui.workspaceTabs.find((tab) => tab.id === pendingTabID)
       || activeWorkspaceTab(ui);
@@ -287,5 +378,5 @@ export function isImageAssetID(state, assetID) {
 }
 
 export function isImageAsset(asset) {
-  return !["generatedVideo", "generatedAudio"].includes(asset.kind);
+  return ["imported", "generated", "edited", "upscaled"].includes(asset.kind);
 }

@@ -124,7 +124,10 @@ struct WorkflowGraphTests {
             "Qwen3-VL-4B-Instruct-4bit/config.json",
             "Qwen3-VL-4B-Instruct-4bit/model.safetensors",
             "Qwen3-VL-4B-Instruct-4bit/tokenizer.json",
+            "Qwen3-VL-4B-Instruct-4bit/tokenizer_config.json",
             "Qwen3-VL-4B-Instruct-4bit/preprocessor_config.json",
+            "Qwen3-VL-4B-Instruct-4bit/processor_config.json",
+            "Qwen3-VL-4B-Instruct-4bit/video_preprocessor_config.json",
             "upscale/realesrgan512.mlmodel",
             "z-image-turbo-loras/example-style.safetensors"
         ]
@@ -143,6 +146,7 @@ struct WorkflowGraphTests {
 
         #expect(capabilities.contains(.textToImage))
         #expect(capabilities.contains(.imageToText))
+        #expect(capabilities.contains(.textToText))
         #expect(capabilities.contains(.upscale))
         #expect(result.profiles.contains {
             $0.capability == .upscale && $0.defaults.upscaleScale == 2

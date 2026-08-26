@@ -45,7 +45,7 @@ SwiftPM の実行には `mlx.metallib` が必要です。互換ファイルは `
 - 量子化：4-bit affine、group size 64。
 - モデル、tokenizer、chat template、preprocessor の設定が完全です。
 
-`mlx-swift-lm 2.30.6` の Qwen3-VL Runtime を統合済みです。
+`mlx-swift-lm` revision `7da33441c7c08b010ff1aa8da9dc3d82277272f5` の Qwen マルチモーダル Runtime を統合済みです。
 
 - ローカル 4-bit モデルの読み込みに成功しました。
 - Z-Image が生成した PNG をそのまま入力として使用できます。
@@ -57,7 +57,7 @@ SwiftPM の実行には `mlx.metallib` が必要です。互換ファイルは `
 標準 JSON-RPC 2.0 stdio MCP server で次のスモークテストとエンドツーエンドテストを完了しています。
 
 - `initialize` はプロトコル版 `2025-06-18` を返します。
-- `tools/list` はモデル、プロファイル、アップスケール、テキストから画像、画像からテキストの 5 ツールを返します。
+- `tools/list` はモデル、プロファイル、アップスケール、テキストから画像、画像編集、画像からテキスト、字幕生成の 7 ツールを返します。
 - `genimage_generate_image` はネイティブ Z-Image Runtime を直接呼び出し、出力 PNG のサイズと形式を確認しました。
 - `genimage_describe_image` はネイティブ Qwen3-VL Runtime を直接呼び出し、繁体字中国語の説明を出力しました。
 - `genimage_upscale_image` はローカル Real-ESRGAN Core ML モデルで 4 倍出力を生成しました。

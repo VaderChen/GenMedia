@@ -13,6 +13,12 @@ extension AppStore {
             .sorted { $0.createdAt < $1.createdAt }
     }
 
+    var projectOperations: [WorkflowOperation] {
+        operations
+            .filter { $0.projectID == selectedProjectID }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
     var selectedAsset: MediaAsset? {
         guard let selectedAssetID else { return nil }
         return assets.first { $0.id == selectedAssetID }
@@ -21,6 +27,29 @@ extension AppStore {
     var selectedSourceImage: MediaAsset? {
         guard let asset = selectedAsset,
               asset.kind.isImage,
+              let fileURL = asset.fileURL,
+              FileManager.default.fileExists(atPath: fileURL.path) else {
+            return nil
+        }
+        return asset
+    }
+
+    var selectedSubtitleSource: MediaAsset? {
+        guard let selectedAssetID else { return nil }
+        if let source = subtitleSourceAsset(id: selectedAssetID) {
+            return source
+        }
+        guard let subtitle = assets.first(where: {
+            $0.id == selectedAssetID && $0.kind == .generatedSubtitle
+        }), let parentAssetID = subtitle.parentAssetID else {
+            return nil
+        }
+        return subtitleSourceAsset(id: parentAssetID)
+    }
+
+    func subtitleSourceAsset(id: UUID) -> MediaAsset? {
+        guard let asset = assets.first(where: { $0.id == id }),
+              asset.kind.isTimedMedia,
               let fileURL = asset.fileURL,
               FileManager.default.fileExists(atPath: fileURL.path) else {
             return nil

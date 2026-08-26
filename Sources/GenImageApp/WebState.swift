@@ -1,6 +1,12 @@
 import Foundation
 import GenImageCore
 
+struct WebWorkspace: Encodable {
+    let id: UUID
+    let name: String
+    let isDefault: Bool
+}
+
 struct WebAsset: Encodable {
     let id: UUID
     let parentAssetID: UUID?
@@ -12,6 +18,9 @@ struct WebAsset: Encodable {
     let sampleRate: Int?
     let channelCount: Int?
     let audioFormat: AudioOutputFormat?
+    let subtitleFormat: SubtitleFormat?
+    let languageCode: String?
+    let textContent: String?
     let createdAt: Date
     let previewURL: String?
 
@@ -26,6 +35,9 @@ struct WebAsset: Encodable {
         sampleRate = asset.sampleRate
         channelCount = asset.channelCount
         audioFormat = asset.audioFormat
+        subtitleFormat = asset.subtitleFormat
+        languageCode = asset.languageCode
+        textContent = asset.textContent
         createdAt = asset.createdAt
         previewURL = asset.fileURL == nil ? nil : "genimage-asset://\(asset.id.uuidString)"
     }
@@ -117,9 +129,26 @@ struct WebMusicOutputSettings: Encodable {
     }
 }
 
+struct WebMCPServiceState: Encodable {
+    let isEnabled: Bool
+    let isRunning: Bool
+    let endpointURL: String?
+    let errorMessage: String?
+
+    @MainActor
+    init(service: LocalMCPServiceController) {
+        isEnabled = service.isEnabled
+        isRunning = service.isRunning
+        endpointURL = service.endpointURL
+        errorMessage = service.errorMessage
+    }
+}
+
 struct WebAppState: Encodable {
     let schemaVersion: Int
     let projectName: String
+    let workspaces: [WebWorkspace]
+    let selectedWorkspaceID: UUID
     let modelRootPath: String
     let outputDirectoryPath: String
     let assets: [WebAsset]
@@ -139,11 +168,16 @@ struct WebAppState: Encodable {
     let availableUpdate: AppUpdateInfo?
     let systemMetrics: SystemMetricsSnapshot
     let isReleasingMemory: Bool
+    let mcpService: WebMCPServiceState
 
     @MainActor
-    init(store: AppStore) {
+    init(store: AppStore, mcpService: LocalMCPServiceController) {
         schemaVersion = 1
         projectName = store.selectedProject?.name ?? "工作區"
+        workspaces = store.projects.enumerated().map { index, project in
+            WebWorkspace(id: project.id, name: project.name, isDefault: index == 0)
+        }
+        selectedWorkspaceID = store.selectedProjectID
         modelRootPath = store.modelRootPath
         outputDirectoryPath = store.outputDirectoryPath
         assets = store.projectAssets.map(WebAsset.init)
@@ -164,7 +198,7 @@ struct WebAppState: Encodable {
         activeProfileIDs = Dictionary(
             uniqueKeysWithValues: store.activeProfileIDs.map { ($0.key.rawValue, $0.value) }
         )
-        operations = store.operations.map {
+        operations = store.projectOperations.map {
             WebOperation(
                 id: $0.id,
                 action: $0.action,
@@ -178,5 +212,6 @@ struct WebAppState: Encodable {
         availableUpdate = store.availableUpdate
         systemMetrics = store.systemMetrics
         isReleasingMemory = store.isReleasingMemory
+        self.mcpService = WebMCPServiceState(service: mcpService)
     }
 }

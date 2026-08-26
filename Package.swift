@@ -24,7 +24,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/ml-explore/mlx-swift-lm.git",
-            exact: "2.30.6"
+            revision: "7da33441c7c08b010ff1aa8da9dc3d82277272f5"
         ),
         .package(
             url: "https://github.com/ml-explore/mlx-swift.git",
@@ -33,6 +33,14 @@ let package = Package(
         .package(
             url: "https://github.com/apple/swift-log.git",
             from: "1.6.4"
+        ),
+        .package(
+            url: "https://github.com/argmaxinc/argmax-oss-swift.git",
+            revision: "ea872ffd35705aa757f33033500b9b0d40bd38df"
+        ),
+        .package(
+            url: "https://github.com/FluidInference/FluidAudio.git",
+            revision: "6428e29186573c6d33c598e25d460e6690bc0ee1"
         )
     ],
     targets: [
@@ -47,7 +55,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "GenImageApp",
-            dependencies: ["GenImageCore", "GenImageRuntime"],
+            dependencies: ["GenImageCore", "GenImageRuntime", "GenImageMCPServer"],
             resources: [
                 .copy("Resources/WebUI")
             ]
@@ -64,6 +72,8 @@ let package = Package(
                 .product(name: "ZImage", package: "z-image.swift"),
                 .product(name: "MLXVLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "WhisperKit", package: "argmax-oss-swift"),
+                .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "Logging", package: "swift-log")
             ]
         ),
@@ -81,6 +91,13 @@ let package = Package(
                 "ACEStepSwiftRuntime",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift")
+            ]
+        ),
+        .executableTarget(
+            name: "GenImageASRPoC",
+            dependencies: [
+                "GenImageCore",
+                .product(name: "WhisperKit", package: "argmax-oss-swift")
             ]
         ),
         .testTarget(

@@ -373,7 +373,6 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
     }
 
     private static func ffmpegExecutable() throws -> URL {
-        let fileManager = FileManager.default
         let environment = ProcessInfo.processInfo.environment
         var candidates: [URL] = []
         if let configured = environment["GENIMAGE_FFMPEG"], !configured.isEmpty {

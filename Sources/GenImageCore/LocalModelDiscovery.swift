@@ -23,12 +23,16 @@ public enum LocalModelDiscovery {
         discoverZImage(root: root, fileManager: fileManager, result: &result)
         discoverCaptioner(root: root, fileManager: fileManager, result: &result)
         discoverNSFWCaptioner(root: root, fileManager: fileManager, result: &result)
+        discoverManagedMultimodalModels(root: root, fileManager: fileManager, result: &result)
         discoverQwenImageEdit(root: root, fileManager: fileManager, result: &result)
         discoverLTX23(root: root, fileManager: fileManager, result: &result)
         discoverLTX23MLXQ4(root: root, fileManager: fileManager, result: &result)
         discoverMiniMaxH3MLX(root: root, fileManager: fileManager, result: &result)
         discoverACEStep15(root: root, fileManager: fileManager, result: &result)
         discoverMiniMaxMusic3MLX(root: root, fileManager: fileManager, result: &result)
+        discoverWhisperMultilingual(root: root, fileManager: fileManager, result: &result)
+        discoverParaformerChinese(root: root, fileManager: fileManager, result: &result)
+        discoverParakeetJapanese(root: root, fileManager: fileManager, result: &result)
         discoverUpscalers(root: root, fileManager: fileManager, result: &result)
         discoverLoRAs(root: root, fileManager: fileManager, result: &result)
 
@@ -37,6 +41,320 @@ public enum LocalModelDiscovery {
 
     private struct ManagedModelManifest: Decodable {
         var modelID: String
+    }
+
+    private struct ManagedMultimodalModelSpec {
+        var modelID: String
+        var revision: String
+        var directoryName: String
+        var displayName: String
+        var maximumTokens: Int
+        var recommendedMemoryGB: Int
+        var isRecommended: Bool
+    }
+
+    private static let managedMultimodalModelSpecs = [
+        ManagedMultimodalModelSpec(
+            modelID: "lmstudio-community/Qwen3.5-4B-MLX-4bit",
+            revision: "c43ee1d65576a5d98de1e8405cac93c371a655c1",
+            directoryName: "qwen3.5-4b-mlx-4bit",
+            displayName: "Qwen3.5 4B MLX 4-bit",
+            maximumTokens: 2_048,
+            recommendedMemoryGB: 16,
+            isRecommended: true
+        ),
+        ManagedMultimodalModelSpec(
+            modelID: "lmstudio-community/Qwen3.5-9B-MLX-4bit",
+            revision: "b455506b0f574c74616dbcd56879bde38fafcff3",
+            directoryName: "qwen3.5-9b-mlx-4bit",
+            displayName: "Qwen3.5 9B MLX 4-bit",
+            maximumTokens: 4_096,
+            recommendedMemoryGB: 24,
+            isRecommended: false
+        ),
+        ManagedMultimodalModelSpec(
+            modelID: "lmstudio-community/Qwen3.8-27B-MLX-4bit",
+            revision: "6067b15cf581666a4aecf6af3afaba4bb5efc20c",
+            directoryName: "qwen3.8-27b-mlx-4bit",
+            displayName: "Qwen3.8 27B MLX 4-bit",
+            maximumTokens: 8_192,
+            recommendedMemoryGB: 64,
+            isRecommended: false
+        )
+    ]
+
+    private static func discoverManagedMultimodalModels(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        for spec in managedMultimodalModelSpecs {
+            let directory = root.appendingPathComponent(spec.directoryName, isDirectory: true)
+            let requiredPaths = [
+                "config.json",
+                "model.safetensors.index.json",
+                "preprocessor_config.json",
+                "processor_config.json",
+                "tokenizer.json",
+                "tokenizer_config.json",
+                "video_preprocessor_config.json"
+            ]
+            guard requiredPaths.allSatisfy({
+                fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+            }), let files = try? fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+            ), files.contains(where: { $0.pathExtension == "safetensors" }) else {
+                continue
+            }
+            guard managedManifestMatches(
+                modelID: spec.modelID,
+                directory: directory,
+                fileManager: fileManager
+            ) else { continue }
+
+            result.models.append(
+                ModelDescriptor(
+                    id: spec.modelID,
+                    displayName: "\(spec.displayName)（本機）",
+                    publisher: "Local / LM Studio Community / Qwen",
+                    summary: "已安裝 Apple Silicon 原生 MLX 多模態模型，可供圖片理解、字幕翻譯、摘要、改寫與文字生成使用。",
+                    capabilities: [.imageToText, .textToText],
+                    quantization: .fourBit,
+                    approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                    recommendedMemoryGB: spec.recommendedMemoryGB,
+                    licenseName: "Apache-2.0",
+                    sourceURL: URL(string: "https://huggingface.co/\(spec.modelID)"),
+                    localURL: directory,
+                    isRecommended: spec.isRecommended
+                )
+            )
+            result.profiles.append(
+                InferenceProfile(
+                    name: "文生文 · \(spec.displayName)",
+                    capability: .textToText,
+                    modelID: spec.modelID,
+                    modelRevision: spec.revision,
+                    architecture: .mlxSwift,
+                    defaults: ProfileDefaults(
+                        maxTokens: spec.maximumTokens,
+                        languageCode: "auto"
+                    ),
+                    notes: "從 \(directory.path) 自動偵測；使用原生 Swift／MLX 文生文 Runtime。",
+                    isBuiltIn: true
+                )
+            )
+            result.profiles.append(
+                InferenceProfile(
+                    name: "圖生文 · \(spec.displayName)",
+                    capability: .imageToText,
+                    modelID: spec.modelID,
+                    modelRevision: spec.revision,
+                    architecture: .mlxSwift,
+                    defaults: ProfileDefaults(maxTokens: 512, languageCode: "zh-Hant"),
+                    notes: "從 \(directory.path) 自動偵測；使用原生 Swift／MLX 多模態 Runtime。",
+                    isBuiltIn: true
+                )
+            )
+        }
+    }
+
+    private static func discoverWhisperMultilingual(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let modelID = "argmaxinc/whisperkit-coreml@large-v3-turbo"
+        let revision = "0f63a7800b00dd0226abd051b906c246e1907482"
+        let installationDirectory = root.appendingPathComponent(
+            "whisper-large-v3-turbo-coreml",
+            isDirectory: true
+        )
+        let runtimeDirectory = installationDirectory.appendingPathComponent(
+            "openai_whisper-large-v3_turbo_954MB",
+            isDirectory: true
+        )
+        let requiredPaths = [
+            "MelSpectrogram.mlmodelc/coremldata.bin",
+            "AudioEncoder.mlmodelc/coremldata.bin",
+            "AudioEncoder.mlmodelc/weights/weight.bin",
+            "TextDecoder.mlmodelc/coremldata.bin",
+            "TextDecoder.mlmodelc/weights/weight.bin",
+            "tokenizer.json",
+            "tokenizer_config.json"
+        ]
+        guard requiredPaths.allSatisfy({
+            fileManager.fileExists(atPath: runtimeDirectory.appendingPathComponent($0).path)
+        }) else { return }
+        guard managedManifestMatches(
+            modelID: modelID,
+            directory: installationDirectory,
+            fileManager: fileManager
+        ) else { return }
+
+        result.models.append(
+            ModelDescriptor(
+                id: modelID,
+                displayName: "Whisper Large v3 Turbo Core ML（本機）",
+                publisher: "Local / Argmax / OpenAI",
+                summary: "已安裝多語 Whisper Large v3 Turbo，可自動偵測來源語言並產生字幕時間軸。",
+                capabilities: [.videoToText],
+                quantization: .coreML,
+                approximateDownloadGB: sizeInGB(of: installationDirectory, fileManager: fileManager),
+                recommendedMemoryGB: 16,
+                licenseName: "MIT / Apache-2.0",
+                sourceURL: URL(string: "https://huggingface.co/argmaxinc/whisperkit-coreml"),
+                localURL: runtimeDirectory,
+                isRecommended: true
+            )
+        )
+        result.profiles.append(
+            InferenceProfile(
+                name: "多語字幕 · Whisper Large v3 Turbo",
+                capability: .videoToText,
+                modelID: modelID,
+                modelRevision: revision,
+                architecture: .coreML,
+                defaults: ProfileDefaults(languageCode: "auto"),
+                notes: "從 \(runtimeDirectory.path) 自動偵測；自動辨識語言並輸出字幕時間軸。",
+                isBuiltIn: true
+            )
+        )
+    }
+
+    private static func discoverParakeetJapanese(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let modelID = "FluidInference/parakeet-0.6b-ja-coreml"
+        let revision = "2952296ff1da4a6d6a7aec545e226367db80c612"
+        let directory = root.appendingPathComponent(
+            "parakeet-0.6b-ja-coreml",
+            isDirectory: true
+        )
+        let requiredPaths = [
+            "Preprocessor.mlmodelc/coremldata.bin",
+            "Encoder.mlmodelc/coremldata.bin",
+            "Encoder.mlmodelc/weights/weight.bin",
+            "Decoderv2.mlmodelc/coremldata.bin",
+            "Decoderv2.mlmodelc/weights/weight.bin",
+            "Jointerv2.mlmodelc/coremldata.bin",
+            "Jointerv2.mlmodelc/weights/weight.bin",
+            "vocab.json"
+        ]
+        guard requiredPaths.allSatisfy({
+            fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }) else { return }
+        guard managedManifestMatches(
+            modelID: modelID,
+            directory: directory,
+            fileManager: fileManager
+        ) else { return }
+
+        result.models.append(
+            ModelDescriptor(
+                id: modelID,
+                displayName: "Parakeet 0.6B 日文 Core ML（本機）",
+                publisher: "Local / FluidInference / NVIDIA",
+                summary: "已安裝日文 Parakeet 0.6B Core ML 模型，可產生逐字時間軸與日文字幕。",
+                capabilities: [.videoToText],
+                quantization: .coreML,
+                approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                recommendedMemoryGB: 8,
+                licenseName: "CC-BY-4.0",
+                sourceURL: URL(string: "https://huggingface.co/\(modelID)"),
+                localURL: directory,
+                isRecommended: true
+            )
+        )
+        result.profiles.append(
+            InferenceProfile(
+                name: "日文字幕 · Parakeet 0.6B Core ML",
+                capability: .videoToText,
+                modelID: modelID,
+                modelRevision: revision,
+                architecture: .coreML,
+                defaults: ProfileDefaults(languageCode: "ja"),
+                notes: "從 \(directory.path) 自動偵測；使用 Core ML 進行日文字幕辨識。",
+                isBuiltIn: true
+            )
+        )
+    }
+
+    private static func managedManifestMatches(
+        modelID: String,
+        directory: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        let manifestURL = directory.appendingPathComponent("genimage-model.json")
+        guard fileManager.fileExists(atPath: manifestURL.path) else { return true }
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(ManagedModelManifest.self, from: data) else {
+            return false
+        }
+        return manifest.modelID == modelID
+    }
+
+    private static func discoverParaformerChinese(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let modelID = "FluidInference/paraformer-large-zh-coreml"
+        let revision = "5dd557bd06342a3cd07ceccb909d8a45e48b053a"
+        let directory = root.appendingPathComponent(
+            "paraformer-large-zh-coreml-int8",
+            isDirectory: true
+        )
+        let requiredPaths = [
+            "ParaformerPreprocessor.mlmodelc/coremldata.bin",
+            "ParaformerEncoder_int8.mlmodelc/coremldata.bin",
+            "ParaformerEncoder_int8.mlmodelc/weights/weight.bin",
+            "ParaformerCifAlphas.mlmodelc/coremldata.bin",
+            "ParaformerCifAlphas.mlmodelc/weights/weight.bin",
+            "ParaformerDecoder_int8.mlmodelc/coremldata.bin",
+            "ParaformerDecoder_int8.mlmodelc/weights/weight.bin",
+            "vocab.json"
+        ]
+        guard requiredPaths.allSatisfy({
+            fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }) else { return }
+
+        guard managedManifestMatches(
+            modelID: modelID,
+            directory: directory,
+            fileManager: fileManager
+        ) else { return }
+
+        result.models.append(
+            ModelDescriptor(
+                id: modelID,
+                displayName: "Paraformer Large 中文 Core ML（本機）",
+                publisher: "Local / FluidInference / FunASR",
+                summary: "已安裝中文 Paraformer Large Core ML INT8 模型，可由 Apple Neural Engine 產生逐字時間軸與字幕。",
+                capabilities: [.videoToText],
+                quantization: .coreML,
+                approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                recommendedMemoryGB: 8,
+                licenseName: "Paraformer Upstream License",
+                sourceURL: URL(string: "https://huggingface.co/\(modelID)"),
+                localURL: directory,
+                isRecommended: true
+            )
+        )
+        result.profiles.append(
+            InferenceProfile(
+                name: "中文字幕 · Paraformer Large Core ML",
+                capability: .videoToText,
+                modelID: modelID,
+                modelRevision: revision,
+                architecture: .coreML,
+                defaults: ProfileDefaults(languageCode: "zh"),
+                notes: "從 \(directory.path) 自動偵測；使用 Core ML INT8 與 Apple Neural Engine 進行中文字幕辨識。",
+                isBuiltIn: true
+            )
+        )
     }
 
     private static func discoverACEStep15(
@@ -896,7 +1214,15 @@ public enum LocalModelDiscovery {
         result: inout DiscoveredModelCatalog
     ) {
         let directory = root.appendingPathComponent("Qwen3-VL-4B-Instruct-4bit", isDirectory: true)
-        let requiredFiles = ["config.json", "model.safetensors", "tokenizer.json", "preprocessor_config.json"]
+        let requiredFiles = [
+            "config.json",
+            "model.safetensors",
+            "preprocessor_config.json",
+            "processor_config.json",
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "video_preprocessor_config.json"
+        ]
         guard requiredFiles.allSatisfy({ fileManager.fileExists(atPath: directory.appendingPathComponent($0).path) }) else {
             return
         }
@@ -910,8 +1236,8 @@ public enum LocalModelDiscovery {
             id: modelID,
             displayName: "Qwen3-VL 4B 4-bit",
             publisher: isManagedInstall ? "MLX Community" : "Qwen",
-            summary: "已偵測到 Qwen3-VL 圖像理解模型，可供圖生文 Profile 使用。",
-            capabilities: [.imageToText],
+            summary: "已偵測到 Qwen3-VL 多模態模型，可供圖生文與文生文 Profile 使用。",
+            capabilities: [.imageToText, .textToText],
             quantization: .fourBit,
             approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
             recommendedMemoryGB: 16,
@@ -930,6 +1256,18 @@ public enum LocalModelDiscovery {
                 architecture: .mlxSwift,
                 defaults: ProfileDefaults(maxTokens: 512, languageCode: "zh-Hant"),
                 notes: "從 \(directory.path) 自動偵測。",
+                isBuiltIn: true
+            )
+        )
+        result.profiles.append(
+            InferenceProfile(
+                name: "文生文 · Qwen3-VL 4-bit",
+                capability: .textToText,
+                modelID: modelID,
+                modelRevision: "4bit-local",
+                architecture: .mlxSwift,
+                defaults: ProfileDefaults(maxTokens: 2_048, languageCode: "auto"),
+                notes: "從 \(directory.path) 自動偵測；使用多模態 VLM Runtime 的純文字模式。",
                 isBuiltIn: true
             )
         )
@@ -952,7 +1290,9 @@ public enum LocalModelDiscovery {
             "model.safetensors.index.json",
             "tokenizer.json",
             "preprocessor_config.json",
-            "processor_config.json"
+            "processor_config.json",
+            "tokenizer_config.json",
+            "video_preprocessor_config.json"
         ]
         guard requiredFiles.allSatisfy({
             fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
@@ -968,8 +1308,8 @@ public enum LocalModelDiscovery {
                 id: discoveredModelID,
                 displayName: "Qwen3-VL 8B NSFW Caption V4.5 mxfp4",
                 publisher: isManagedInstall ? "MLX Community" : "Qwen",
-                summary: "已偵測到 Qwen3-VL NSFW Caption MLX 模型，可供圖生文 Profile 使用。",
-                capabilities: [.imageToText],
+                summary: "已偵測到 Qwen3-VL NSFW Caption 多模態 MLX 模型，可供圖生文與文生文 Profile 使用。",
+                capabilities: [.imageToText, .textToText],
                 quantization: .fourBit,
                 approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
                 recommendedMemoryGB: 24,
@@ -987,7 +1327,19 @@ public enum LocalModelDiscovery {
                 modelRevision: "V4.5-mxfp4-local",
                 architecture: .mlxSwift,
                 defaults: ProfileDefaults(maxTokens: 512, languageCode: "zh-Hant"),
-                notes: "從 (directory.path) 自動偵測；內容標記為 Not-For-All-Audiences。",
+                notes: "從 \(directory.path) 自動偵測；內容標記為 Not-For-All-Audiences。",
+                isBuiltIn: true
+            )
+        )
+        result.profiles.append(
+            InferenceProfile(
+                name: "NSFW 文生文 · Qwen3-VL 8B mxfp4",
+                capability: .textToText,
+                modelID: discoveredModelID,
+                modelRevision: "V4.5-mxfp4-local",
+                architecture: .mlxSwift,
+                defaults: ProfileDefaults(maxTokens: 2_048, languageCode: "auto"),
+                notes: "從 \(directory.path) 自動偵測；使用多模態 VLM Runtime 的純文字模式。",
                 isBuiltIn: true
             )
         )

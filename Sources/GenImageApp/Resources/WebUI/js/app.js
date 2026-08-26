@@ -2,12 +2,15 @@ import { invoke, onClipboardImage, onState } from "./bridge.js";
 import {
   refreshModelProgressDOM,
   refreshToastDOM,
+  renderInfoDialog,
   renderPasteDialog,
   renderRoute,
   renderSidebar,
   renderSmallOutputWarningDialog,
   renderToast,
   renderUpdateBanner,
+  renderWorkspaceCreateDialog,
+  renderWorkspaceDeleteDialog,
   renderWorkspaceTabRenameDialog,
   updateSystemMetricsDOM,
 } from "./chrome.js";
@@ -23,6 +26,7 @@ import { appendProfileLoRARow, removeProfileLoRARow } from "./profiles.js";
 import { withPreservedView } from "./render-preservation.js";
 import { getTheme, setTheme } from "./themes.js";
 import {
+  activateWorkspaceTabs,
   activeWorkspaceTab,
   dropPendingOutput,
   formatWorkspaceTabName,
@@ -30,6 +34,7 @@ import {
   isImageAssetID,
   loadWorkspaceTabs,
   makeWorkspaceTab,
+  pruneWorkspaceTabStates,
   reconcileWorkspaceTabs,
   removeAssetFromWorkspaceTabs,
   replacementAssetIDAfterRemoval,
@@ -40,6 +45,7 @@ import {
   workspaceTabOwningAsset,
 } from "./workspace-tabs.js";
 import {
+  canTranslateSubtitles,
   isInferenceBusy,
   refreshJobsPanel,
   refreshJobTimings,
@@ -47,17 +53,20 @@ import {
   renderQuickTools,
   renderWorkspace,
   selectedSourceImage,
+  selectedSubtitleSource,
 } from "./workspace.js";
 
 const root = document.querySelector("#app");
 const STATUS_MESSAGE_DURATION_MS = 5_000;
 const JOB_TIMING_REFRESH_MS = 1_000;
-const PROMPT_TABS = new Set(["prompt", "negative", "lyrics", "imageOutput", "videoOutput", "musicOutput"]);
-const GENERATION_TYPES = new Set(["image", "video", "music"]);
+const PROMPT_TABS = new Set(["prompt", "negative", "lyrics", "imageOutput", "videoOutput", "musicOutput", "subtitleOutput"]);
+const GENERATION_TYPES = new Set(["image", "video", "music", "subtitle"]);
+const SUBTITLE_TARGET_LANGUAGES = new Set(["source", "zh-Hant", "zh-Hans", "en", "ja", "ko"]);
 const PROMPT_TABS_BY_GENERATION_TYPE = {
   image: new Set(["prompt", "negative", "imageOutput"]),
   video: new Set(["prompt", "negative", "videoOutput"]),
   music: new Set(["prompt", "lyrics", "musicOutput"]),
+  subtitle: new Set(["subtitleOutput"]),
 };
 const SUPPORTED_IMAGE_FILE_PATTERN = /\.(png|jpe?g|webp|gif|tiff?|heic|heif)$/i;
 
@@ -79,20 +88,33 @@ const savedGenerationType = normalizeGenerationType(
   localStorage.getItem("genimage.generationType"),
   savedPromptTab,
 );
+const savedSubtitleFormat = normalizeSubtitleFormat(localStorage.getItem("genimage.subtitleFormat"));
+const savedSubtitleTargetLanguage = normalizeSubtitleTargetLanguage(
+  localStorage.getItem("genimage.subtitleTargetLanguage"),
+);
 const ui = {
   route: "workspace",
   previewMode: "single",
   zoom: 1,
   creationCollapsed: localStorage.getItem("genimage.creationCollapsed") === "true",
   generationType: savedGenerationType,
+  subtitleFormat: savedSubtitleFormat,
+  subtitleTargetLanguage: savedSubtitleTargetLanguage,
   promptTab: normalizePromptTab(savedPromptTab, savedGenerationType),
   inspectorTab: localStorage.getItem("genimage.inspectorTab") === "jobs" ? "jobs" : "info",
-  workspaceTabs: savedWorkspaceTabs.tabs,
-  activeWorkspaceTabID: savedWorkspaceTabs.activeTabID,
+  workspaceTabStates: savedWorkspaceTabs.workspaceTabStates,
+  legacyWorkspaceTabState: savedWorkspaceTabs.legacyWorkspaceTabState,
+  activeWorkspaceID: null,
+  workspaceTabs: [],
+  activeWorkspaceTabID: null,
   renameWorkspaceTabID: null,
   renameWorkspaceTabValue: "",
+  workspaceCreateDialogOpen: false,
+  workspaceCreateName: "",
+  workspaceDeleteTargetID: null,
   pasteDialogOpen: false,
   smallOutputWarning: null,
+  infoDialog: null,
   modelFilter: "all",
   profileFilter: "all",
   modelSearch: "",
@@ -111,9 +133,22 @@ onState((nextState) => {
     showBridgeError(new Error(`Unsupported Bridge schema: ${nextState.schemaVersion}`));
     return;
   }
+  const workspaceChanged = nextState.selectedWorkspaceID !== ui.activeWorkspaceID;
+  pruneWorkspaceTabStates(
+    ui,
+    (nextState.workspaces || []).map((workspace) => workspace.id),
+  );
+  if (workspaceChanged) {
+    clearTimeout(recipeTimer);
+    recipeTimer = null;
+    activeEditableField = null;
+    composingEditableField = null;
+    renderDeferredDuringEditing = false;
+    activateWorkspaceTabs(ui, nextState.selectedWorkspaceID);
+  }
   const statusMessageChanged = nextState.statusMessage !== state?.statusMessage;
   const nextContentSignature = contentSignature(nextState);
-  if (state && activeEditableField) {
+  if (state && !workspaceChanged && activeEditableField) {
     const contentChanged = contentSignatureWithoutEditableSettings(nextState)
       !== contentSignatureWithoutEditableSettings(state);
     const localRecipe = state.recipe;
@@ -162,6 +197,7 @@ onState((nextState) => {
     return;
   }
   const descriptionUpdated = state
+    && !workspaceChanged
     && nextState.recipe.prompt !== state.recipe.prompt
     && nextState.operations.slice(state.operations.length).some((operation) => operation.action === "describe");
   if (descriptionUpdated) {
@@ -174,6 +210,7 @@ onState((nextState) => {
   stateContentSignature = nextContentSignature;
   if (statusMessageChanged) scheduleStatusMessageDismiss(nextState.statusMessage);
   render();
+  if (workspaceChanged) restoreActiveWorkspaceSelection(nextState);
 });
 
 invoke("bootstrap").catch(showBridgeError);
@@ -191,6 +228,7 @@ root.addEventListener("click", async (event) => {
     switch (action) {
       case "navigate":
         ui.route = target.dataset.route;
+        ui.infoDialog = null;
         if (ui.route === "profiles") dismissProfileHint();
         render();
         break;
@@ -229,6 +267,26 @@ root.addEventListener("click", async (event) => {
         setInspectorTab("jobs");
         await invokeTrackedOutput("generateMusic", undefined, "generateMusic");
         break;
+      case "generateSubtitles": {
+        const workspaceState = workspaceStateForActiveTab(ui, state);
+        const sourceAsset = selectedSubtitleSource(workspaceState);
+        ui.route = "workspace";
+        ui.previewMode = "single";
+        setInspectorTab("jobs");
+        await invokeTrackedOutput(
+          "generateSubtitles",
+          {
+            sourceAssetID: sourceAsset?.id || null,
+            format: ui.subtitleFormat,
+            targetLanguageCode: canTranslateSubtitles(state)
+              && ui.subtitleTargetLanguage !== "source"
+              ? ui.subtitleTargetLanguage
+              : null,
+          },
+          "generateSubtitles",
+        );
+        break;
+      }
       case "describe":
         ui.route = "workspace";
         setInspectorTab("jobs");
@@ -293,6 +351,47 @@ root.addEventListener("click", async (event) => {
       case "workspaceAddTab":
         addWorkspaceTab();
         break;
+      case "createWorkspace":
+        ui.workspaceCreateName = t("workspace.newWorkspaceName", {
+          count: (state.workspaces?.length || 0) + 1,
+        });
+        ui.workspaceCreateDialogOpen = true;
+        render();
+        queueMicrotask(() => {
+          const input = root.querySelector('[data-ui-field="workspaceName"]');
+          input?.focus({ preventScroll: true });
+          input?.select?.();
+        });
+        break;
+      case "workspaceCreateCancel":
+        ui.workspaceCreateDialogOpen = false;
+        ui.workspaceCreateName = "";
+        render();
+        break;
+      case "workspaceCreateSave": {
+        const name = ui.workspaceCreateName.trim();
+        if (!name) break;
+        ui.workspaceCreateDialogOpen = false;
+        ui.workspaceCreateName = "";
+        await invoke("createWorkspace", { name });
+        break;
+      }
+      case "deleteWorkspace":
+        if ((state.workspaces?.length || 0) <= 1) break;
+        ui.workspaceDeleteTargetID = state.selectedWorkspaceID;
+        render();
+        break;
+      case "workspaceDeleteCancel":
+        ui.workspaceDeleteTargetID = null;
+        render();
+        break;
+      case "workspaceDeleteConfirm": {
+        const workspaceID = ui.workspaceDeleteTargetID;
+        if (!workspaceID) break;
+        ui.workspaceDeleteTargetID = null;
+        await invoke("deleteWorkspace", { workspaceID });
+        break;
+      }
       case "workspaceCloseTab":
         await closeWorkspaceTab(target.dataset.tabId);
         break;
@@ -365,6 +464,12 @@ root.addEventListener("click", async (event) => {
           outputKind: ui.generationType,
         });
         break;
+      case "importSubtitleMedia":
+        ui.route = "workspace";
+        ui.previewMode = "single";
+        setInspectorTab("info");
+        await invoke("importSubtitleMedia");
+        break;
       case "cancelJob":
         await invoke("cancelJob", { jobID: target.dataset.jobId });
         break;
@@ -380,6 +485,18 @@ root.addEventListener("click", async (event) => {
         break;
       case "profileFilter":
         ui.profileFilter = target.dataset.filter;
+        render();
+        break;
+      case "openModelInfo":
+        ui.infoDialog = { kind: "model", id: target.dataset.modelId };
+        render();
+        break;
+      case "openProfileInfo":
+        ui.infoDialog = { kind: "profile", id: target.dataset.profileId };
+        render();
+        break;
+      case "closeInfoDialog":
+        ui.infoDialog = null;
         render();
         break;
       case "chooseModelRoot":
@@ -440,11 +557,11 @@ root.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("contextmenu", (event) => {
-  const media = event.target.closest?.(".asset-artwork [data-asset-id]");
+  const media = event.target.closest?.("[data-context-asset-id]");
   if (!media) return;
   event.preventDefault();
   event.stopPropagation();
-  openAssetContextMenu(event.clientX, event.clientY, media.dataset.assetId);
+  openAssetContextMenu(event.clientX, event.clientY, media.dataset.contextAssetId);
 });
 
 document.addEventListener("pointerdown", (event) => {
@@ -452,12 +569,67 @@ document.addEventListener("pointerdown", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeImageContextMenu();
+  if (event.key === "Enter" && event.target.matches?.('[data-ui-field="workspaceName"]')) {
+    event.preventDefault();
+    root.querySelector('[data-action="workspaceCreateSave"]:not(:disabled)')?.click();
+    return;
+  }
+  if (event.key !== "Escape") return;
+  closeImageContextMenu();
+  if (ui.workspaceCreateDialogOpen || ui.workspaceDeleteTargetID) {
+    ui.workspaceCreateDialogOpen = false;
+    ui.workspaceCreateName = "";
+    ui.workspaceDeleteTargetID = null;
+    render();
+    return;
+  }
+  if (ui.infoDialog) {
+    ui.infoDialog = null;
+    render();
+  }
 });
 
 root.addEventListener("change", async (event) => {
+  if (event.target.dataset.setting === "mcpEnabled") {
+    const enabled = event.target.checked;
+    event.target.disabled = true;
+    try {
+      await invoke("setMCPServiceEnabled", { enabled });
+    } catch (error) {
+      event.target.checked = !enabled;
+      event.target.disabled = false;
+      showBridgeError(error);
+    }
+    return;
+  }
+
+  if (event.target.dataset.uiField === "workspaceID") {
+    const workspaceID = event.target.value;
+    if (!workspaceID || workspaceID === state.selectedWorkspaceID) return;
+    try {
+      await invoke("selectWorkspace", { workspaceID });
+    } catch (error) {
+      showBridgeError(error);
+    }
+    return;
+  }
+
   if (event.target.dataset.uiField === "generationType") {
     setGenerationType(event.target.value);
+    refreshCreationPanelDOM();
+    return;
+  }
+
+  if (event.target.dataset.uiField === "subtitleFormat") {
+    ui.subtitleFormat = normalizeSubtitleFormat(event.target.value);
+    localStorage.setItem("genimage.subtitleFormat", ui.subtitleFormat);
+    refreshCreationPanelDOM();
+    return;
+  }
+
+  if (event.target.dataset.uiField === "subtitleTargetLanguage") {
+    ui.subtitleTargetLanguage = normalizeSubtitleTargetLanguage(event.target.value);
+    localStorage.setItem("genimage.subtitleTargetLanguage", ui.subtitleTargetLanguage);
     refreshCreationPanelDOM();
     return;
   }
@@ -648,6 +820,13 @@ root.addEventListener("input", (event) => {
 
   if (event.target.dataset.uiField === "workspaceTabName") {
     ui.renameWorkspaceTabValue = event.target.value;
+    return;
+  }
+
+  if (event.target.dataset.uiField === "workspaceName") {
+    ui.workspaceCreateName = event.target.value;
+    const saveButton = root.querySelector('[data-action="workspaceCreateSave"]');
+    if (saveButton) saveButton.disabled = !ui.workspaceCreateName.trim();
   }
 });
 
@@ -817,8 +996,11 @@ function render() {
         </div>
       </div>
       ${renderWorkspaceTabRenameDialog(ui)}
+      ${renderWorkspaceCreateDialog(ui)}
+      ${renderWorkspaceDeleteDialog(state, ui)}
       ${renderPasteDialog(state, ui, pasteState)}
       ${renderSmallOutputWarningDialog(ui)}
+      ${renderInfoDialog(state, ui)}
       ${renderToast(state)}
     `;
   });
@@ -911,6 +1093,13 @@ function addWorkspaceTab() {
   render();
 }
 
+function restoreActiveWorkspaceSelection(nextState) {
+  const selectedAssetID = activeWorkspaceTab(ui)?.selectedAssetID;
+  if (!selectedAssetID || selectedAssetID === nextState.selectedAssetID) return;
+  if (!nextState.assets.some((asset) => asset.id === selectedAssetID)) return;
+  invoke("selectAsset", { assetID: selectedAssetID }).catch(showBridgeError);
+}
+
 async function activateWorkspaceTab(tabID) {
   const tab = ui.workspaceTabs.find((item) => item.id === tabID);
   if (!tab) return;
@@ -978,7 +1167,8 @@ function isPreviewZoomDisabled() {
   if (!state || ui.generationType === "music") return true;
   const workspaceState = workspaceStateForActiveTab(ui, state);
   return workspaceState.assets.some(
-    (asset) => asset.id === workspaceState.selectedAssetID && asset.kind === "generatedAudio",
+    (asset) => asset.id === workspaceState.selectedAssetID
+      && ["importedAudio", "generatedAudio", "generatedSubtitle"].includes(asset.kind),
   );
 }
 
@@ -1310,7 +1500,17 @@ function normalizePromptTab(value, generationType) {
   const normalizedGenerationType = normalizeGenerationType(generationType, promptTab);
   if (PROMPT_TABS_BY_GENERATION_TYPE[normalizedGenerationType].has(promptTab)) return promptTab;
   if (promptTab.endsWith("Output")) return `${normalizedGenerationType}Output`;
-  return normalizedGenerationType === "music" ? "lyrics" : "prompt";
+  if (normalizedGenerationType === "music") return "lyrics";
+  if (normalizedGenerationType === "subtitle") return "subtitleOutput";
+  return "prompt";
+}
+
+function normalizeSubtitleFormat(value) {
+  return value === "vtt" ? "vtt" : "srt";
+}
+
+function normalizeSubtitleTargetLanguage(value) {
+  return SUBTITLE_TARGET_LANGUAGES.has(value) ? value : "source";
 }
 
 function setGenerationType(value, preferredPromptTab = ui.promptTab) {
@@ -1322,7 +1522,7 @@ function setGenerationType(value, preferredPromptTab = ui.promptTab) {
 }
 
 function saveProfile(profileID) {
-  const card = root.querySelector(`[data-profile-card="${CSS.escape(profileID)}"]`);
+  const card = root.querySelector(`[data-profile-editor="${CSS.escape(profileID)}"]`);
   if (!card) return Promise.resolve();
   const field = (name) => card.querySelector(`[data-profile-field="${name}"]`)?.value || "";
   const loras = Array.from(card.querySelectorAll("[data-profile-lora-row]"))

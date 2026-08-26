@@ -40,10 +40,12 @@ extension AppStore {
         let textToImage = textToImageService
         let imageToText = imageToTextService
         let upscale = upscaleService
+        let subtitles = subtitleGenerationService
         Task { @MainActor [weak self] in
             await textToImage.unload()
             await imageToText.unload()
             await upscale.unload()
+            await subtitles.unload()
             guard let self else { return }
             isReleasingMemory = false
             statusMessage = "模型記憶體已釋放。"

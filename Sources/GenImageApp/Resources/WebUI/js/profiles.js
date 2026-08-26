@@ -1,7 +1,7 @@
 import { architectureLabel, capabilityLabel, escapeHTML } from "./format.js";
 import { t } from "./i18n.js";
 
-const primaryCapabilities = ["imageToText", "textToImage", "imageToImage", "textToVideo", "imageToVideo", "textToMusic", "upscale"];
+const primaryCapabilities = ["imageToText", "textToImage", "textToText", "imageToImage", "textToVideo", "imageToVideo", "textToMusic", "videoToText", "upscale"];
 
 export function renderProfiles(state, ui) {
   const selectedCapability = primaryCapabilities.includes(ui.profileFilter)
@@ -107,20 +107,37 @@ function renderProfileCard(profile, isActive, isDisabled, models) {
           <h2>${escapeHTML(profile.name)}</h2>
           <p>${capabilityLabel(profile.capability)} · r${profile.profileRevision}</p>
         </div>
-        ${isActive ? `<span class="badge active">${t("common.active")}</span>` : ""}
-        ${isDisabled ? `<span class="badge">${t("profile.disabled")}</span>` : ""}
-        ${profile.isBuiltIn ? `<span class="badge">${t("common.builtIn")}</span>` : ""}
+        <div class="card-title-actions">
+          ${isActive ? `<span class="badge active">${t("common.active")}</span>` : ""}
+          ${isDisabled ? `<span class="badge">${t("profile.disabled")}</span>` : ""}
+          ${profile.isBuiltIn ? `<span class="badge">${t("common.builtIn")}</span>` : ""}
+          <button
+            class="icon-button card-info-button"
+            data-action="openProfileInfo"
+            data-profile-id="${profile.id}"
+            title="${t("common.info")}"
+            aria-label="${t("common.info")}"
+          >${infoIcon()}</button>
+        </div>
       </div>
-      <p>${escapeHTML(profile.notes || t("profile.noNotes"))}</p>
-      <div class="profile-meta">
-        <span>${t("profile.engine")}</span><strong>${architectureLabel(profile.architecture)}</strong>
-        <span>${t("profile.model")}</span><strong title="${escapeHTML(profile.modelID)}">${escapeHTML(profile.modelID)}</strong>
-        <span>${t("profile.modelRevision")}</span><strong>${escapeHTML(profile.modelRevision)}</strong>
-        <span>${t("profile.defaults")}</span><strong>${defaultsSummary(profile.defaults)}</strong>
-        <span>${t("profile.loras")}</span><strong>${profileLoRASummary(profile, models)}</strong>
-      </div>
-      ${profile.isBuiltIn ? renderBuiltInActions(profile, isActive, models) : renderProfileForm(profile, isActive, models)}
+      ${profile.isBuiltIn
+        ? renderBuiltInActions(profile, isActive, models)
+        : renderCustomCardActions(profile, isActive, models)}
     </article>
+  `;
+}
+
+export function renderProfileDetails(profile, isActive, models) {
+  return `
+    <p class="detail-summary">${escapeHTML(profile.notes || t("profile.noNotes"))}</p>
+    <div class="profile-meta detail-meta">
+      <span>${t("profile.engine")}</span><strong>${architectureLabel(profile.architecture)}</strong>
+      <span>${t("profile.model")}</span><strong>${escapeHTML(profile.modelID)}</strong>
+      <span>${t("profile.modelRevision")}</span><strong>${escapeHTML(profile.modelRevision)}</strong>
+      <span>${t("profile.defaults")}</span><strong>${defaultsSummary(profile.defaults)}</strong>
+      <span>${t("profile.loras")}</span><strong>${profileLoRASummary(profile, models)}</strong>
+    </div>
+    ${profile.isBuiltIn ? "" : `<div class="profile-detail-editor" data-profile-editor="${profile.id}">${renderProfileForm(profile, isActive, models)}</div>`}
   `;
 }
 
@@ -128,6 +145,13 @@ function renderBuiltInActions(profile, isActive, models) {
   return `<div class="button-row">
     ${renderActivationButton(profile, isActive, models)}
     <button class="secondary-button compact" data-action="duplicateProfile" data-profile-id="${profile.id}">${t("profile.duplicate")}</button>
+    ${renderProfileInstallButton(profile, models)}
+  </div>`;
+}
+
+function renderCustomCardActions(profile, isActive, models) {
+  return `<div class="button-row">
+    ${renderActivationButton(profile, isActive, models)}
     ${renderProfileInstallButton(profile, models)}
   </div>`;
 }
@@ -249,8 +273,15 @@ function renderProfileLoRARow(lora = {}) {
 }
 
 export function appendProfileLoRARow(button) {
-  const list = button.closest("[data-profile-card]")?.querySelector("[data-profile-lora-list]");
+  const list = button.closest("[data-profile-editor]")?.querySelector("[data-profile-lora-list]");
   if (list) list.insertAdjacentHTML("beforeend", renderProfileLoRARow());
+}
+
+function infoIcon() {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="9"></circle>
+    <path d="M12 10.5v6M12 7.5h.01"></path>
+  </svg>`;
 }
 
 export function removeProfileLoRARow(button) {

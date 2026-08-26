@@ -53,8 +53,9 @@ extension AppStore {
         let textToImage = textToImageService
         let imageToText = imageToTextService
         let upscale = upscaleService
+        let subtitles = subtitleGenerationService
 
-        Task { @MainActor [weak self, textToImage, imageToText, upscale] in
+        Task { @MainActor [weak self, textToImage, imageToText, upscale, subtitles] in
             var released: [String] = []
             if capability != .textToImage {
                 await textToImage.unload()
@@ -67,6 +68,10 @@ extension AppStore {
             if capability != .upscale {
                 await upscale.unload()
                 released.append("Upscale")
+            }
+            if capability != .videoToText {
+                await subtitles.unload()
+                released.append("字幕生成")
             }
             guard !released.isEmpty, let self else { return }
             self.statusMessage = "記憶體使用率約 \(usagePercent)%；已釋放非焦點模型：\(released.joined(separator: "、"))。"
@@ -90,7 +95,7 @@ extension AppStore {
 
         let compatibleArchitectures: Set<InferenceArchitecture>?
         switch profile.capability {
-        case .textToImage, .imageToText:
+        case .textToImage, .imageToText, .textToText:
             compatibleArchitectures = [.mlxSwift]
         case .upscale:
             compatibleArchitectures = [.coreML]
@@ -98,6 +103,8 @@ extension AppStore {
             compatibleArchitectures = [.externalCLI]
         case .textToMusic:
             compatibleArchitectures = [.mlxSwift, .externalCLI]
+        case .videoToText:
+            compatibleArchitectures = [.coreML]
         case .controlNet, .lora:
             compatibleArchitectures = nil
         }
@@ -382,6 +389,10 @@ extension AppStore {
             return false
         }
         return true
+    }
+
+    func isProfileReadyWithoutStatus(_ profile: InferenceProfile) -> Bool {
+        missingProfileModels(profile).isEmpty
     }
 
     private func missingProfileModels(_ profile: InferenceProfile) -> [ModelDescriptor] {

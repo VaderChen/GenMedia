@@ -95,6 +95,37 @@ extension AppStore {
         return asset.id
     }
 
+    @discardableResult
+    func importMedia(
+        url: URL,
+        kind: AssetKind,
+        pixelWidth: Int,
+        pixelHeight: Int,
+        durationSeconds: Double
+    ) -> UUID {
+        precondition(kind == .importedVideo || kind == .importedAudio)
+        let asset = MediaAsset(
+            projectID: selectedProjectID,
+            kind: kind,
+            title: url.deletingPathExtension().lastPathComponent,
+            fileURL: url,
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight,
+            mediaDurationSeconds: durationSeconds
+        )
+        assets.append(asset)
+        operations.append(
+            WorkflowOperation(
+                projectID: selectedProjectID,
+                action: .importMedia,
+                outputAssetIDs: [asset.id]
+            )
+        )
+        selectAsset(asset.id)
+        statusMessage = "已匯入「\(asset.title)」；可以開始生成字幕。"
+        return asset.id
+    }
+
     private func removeManagedAssetFile(at fileURL: URL?) -> Error? {
         guard let fileURL else { return nil }
         let fileManager = FileManager.default

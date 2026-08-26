@@ -6,10 +6,10 @@ GenMedia は **Apple Silicon をネイティブサポート**するローカル 
 
 - Swift がモデル、プロファイル、ジョブキュー、ファイル、MLX／Core ML 推論を管理します。
 - `WKWebView` に HTML、CSS、JavaScript UI を組み込み、ネットワーク接続や npm ランタイムを必要としません。
-- テキストから画像、画像からテキスト、画像から画像、テキストから動画、画像から動画、テキストから音楽、アップスケールを個別に実行でき、アセットの系譜を通じて連携できます。
+- テキストから画像、画像からテキスト、画像から画像、テキストから動画、画像から動画、テキストから音楽、字幕生成、アップスケールを個別に実行でき、アセットの系譜を通じて連携できます。
 - 各操作でプロファイルのスナップショットを保存し、モデルやアーキテクチャの更新後も当時のバージョンを追跡できます。
 - 専用の設定画面で繁体字中国語、英語、日本語、韓国語、および永続化可能な 6 種類のカラーテーマを利用できます。
-- 標準 JSON-RPC 2.0 stdio MCP サーバーを Agent や自動化ツールから利用できます。
+- 設定画面のスイッチで localhost 専用 MCP HTTP API を起動でき、App を起動していない場合も独立した JSON-RPC 2.0 stdio サーバーを利用できます。
 
 ## プレビュー
 
@@ -55,6 +55,16 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 ```
 
 `ltx-2-mlx` は既定で Gemma テキストエンコーダー設定を使用します。ローカルの Gemma モデルがある場合は、`GENIMAGE_LTX_GEMMA_MODEL` にモデルディレクトリまたは Hugging Face ID を指定できます。現在のアプリ DMG には Python Runtime、Gemma の重み、FFmpeg は含まれていません。正式配布前に、これらを任意の外部コンポーネントとして扱い、Runtime とモデルのライセンスを個別に確認してください。
+
+### 字幕生成
+
+字幕フローは動画または音声を読み込み、音声トラックを抽出した後、`SubtitleGenerationRouter` がネイティブ Core ML ASR Adapter を選択します。区間タイムラインを保持したまま SRT または WebVTT を出力します。多言語 Whisper Large v3 Turbo、中国語 Paraformer Large、日本語 Parakeet 0.6B をサポートし、入力言語は自動検出または Profile で指定できます。
+
+認識後はローカル Qwen3.5／Qwen3.8 MLX テキストモデルを任意で使用し、同じタイムラインを繁体字中国語、簡体字中国語、英語、日本語、韓国語へ翻訳できます。結果は入力動画または音声を parent とする `generatedSubtitle` アセットとして現在のワークスペースに保存されます。
+
+`GenImageASRPoC` はメイン App のワークスペースを変更せず、メディアデコード、言語認識、タイムコードを確認する独立 WhisperKit 検証ツールです。正式な App フローも同じ Swift／Core ML 境界を使用します。詳細は [ASR 字幕 PoC](docs/ASR_POC.ja.md) を参照してください。
+
+Qwen3-VL、Qwen3.5、Qwen3.8 はマルチモーダルモデルのため、モデルセンターでは「画像からテキスト」と「テキストからテキスト」の両方に分類され、それぞれの Profile が提供されます。管理対象ダウンロードには `processor_config.json`、画像／動画前処理設定、Tokenizer、Chat Template、完全な重みインデックスが含まれ、必須ファイルの検証後にのみインストール済みになります。
 
 ### プロファイル、ジョブ、メモリ
 
@@ -107,10 +117,13 @@ GENIMAGE_MODEL_ROOT="/path/to/models" swift run GenImageDoctor
 標準 MCP stdio サーバーを起動します。
 
 ```bash
-.build/arm64-apple-macosx/release/GenImageMCP
+MCP_BIN_DIR="$(swift build -c release --show-bin-path)"
+"$MCP_BIN_DIR/GenImageMCP"
 ```
 
-MCP は `initialize`、`ping`、`tools/list`、`tools/call` をサポートします。ツールにはローカルモデル、プロファイル、ネイティブ Z-Image のテキストから画像生成、Qwen3-VL の画像説明、Core ML アップスケールが含まれます。
+MCP は `initialize`、`ping`、`tools/list`、`tools/call` をサポートします。ツールにはローカルモデル、プロファイル、ネイティブ Z-Image のテキストから画像生成、Qwen の画像編集／説明、Core ML アップスケール、独立字幕生成が含まれます。
+
+App から使用する場合は「設定 → MCP 連携」のスイッチを有効にすると、localhost 専用 HTTP POST JSON-RPC エンドポイント `http://127.0.0.1:12181/mcp` が表示されます。HTTP と stdio は同じ MCP ツールコアを共有しますが、stdio 実行ファイルは GenMedia.app を閉じた状態でも独立して動作します。
 
 MCP のエンドツーエンド検証は完了しています。`genimage_generate_image` はローカル Z-Image Turbo Q4 で PNG を出力し、`genimage_describe_image` は Qwen3-VL で繁体字中国語の説明を生成し、`genimage_upscale_image` はローカル Real-ESRGAN Core ML モデルで 4 倍のアップスケールを実行します。
 
@@ -123,11 +136,12 @@ Sources/
 ├── GenImageCore/
 │   ├── ApplicationSupport.swift  # アプリデータ配置の唯一の定義
 │   ├── DomainModels.swift        # アセット、レシピ、ジョブ、モデル、プロファイル
-│   ├── InferenceServices.swift   # 画像、テキスト、動画、音楽の推論インターフェース
+│   ├── InferenceServices.swift   # 画像、テキスト、動画、音楽、字幕の推論インターフェース
 │   ├── ModelCatalog.swift        # 組み込みモデルとプロファイル
-│   ├── OutputFileNaming.swift    # 画像・動画・音楽の出力名
+│   ├── OutputFileNaming.swift    # 画像・動画・音楽・字幕の出力名
 │   ├── OutputGeometry.swift      # 出力サイズ演算の唯一の定義（js/geometry.js が鏡像）
 │   ├── ProjectWorkspacePersistence.swift # 開いている生成プロジェクトの永続化
+│   ├── SubtitleDocument.swift    # SRT／WebVTT の出力
 │   └── WorkflowGraph.swift       # アセットの系譜と分岐関係
 ├── GenImageRuntime/
 │   ├── ZImageTextToImageService.swift
@@ -137,24 +151,42 @@ Sources/
 │   ├── MusicGenerationRouter.swift
 │   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── MediaAudioPreparer.swift
+│   ├── WhisperSubtitleTranscriber.swift
+│   ├── ParaformerChineseSubtitleTranscriber.swift
+│   ├── ParakeetJapaneseSubtitleTranscriber.swift
+│   ├── SubtitleGenerationRouter.swift
+│   ├── QwenTextGenerationService.swift
 │   ├── SubprocessRuntime.swift   # 外部 Runtime 子プロセスの共通処理
 │   ├── AudioOutputEncoder.swift
 │   └── CoreMLUpscaleService.swift
-└── GenImageApp/
+├── GenImageApp/
     ├── AppStore.swift            # 型宣言、格納プロパティ、init
-    ├── AppStore+*.swift          # 責務ごとに分割した振る舞い（Persistence、Profiles、Jobs など 10 ファイル）
+    ├── AppStore+SubtitleGeneration.swift
+    ├── AppStore+Workspaces.swift
+    ├── AppStore+*.swift          # その他の責務別 AppStore 実装
     ├── HybridBridgeController.swift
+    ├── LocalMCPServiceController.swift # App 内 MCP HTTP スイッチと状態
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # ローカル画像、動画、音声を安全に WebUI へ提供
-    └── Resources/WebUI/          # HTML/CSS/JavaScript フロントエンド
-Patches/                           # ビルド時に適用する依存パッケージのソース修正と manifest.txt
+    └── Resources/WebUI/
+        ├── js/automatic-flow.js  # 自動フローページの骨組み
+        └── …                     # その他の HTML/CSS/JavaScript フロントエンド
+├── GenImageASRPoC/
+    └── main.swift                # 独立 ASR 検証ツール
+└── GenImageMCPServer/
+    ├── MCPServer.swift           # 独立 stdio JSON-RPC server コア
+    └── MCPHTTPServer.swift       # App スイッチ用 localhost HTTP transport
+Patches/
+├── MLX-Swift-LM-Qwen35-Text-Only.patch # Qwen3.5 純テキスト入力の互換修正
+└── manifest.txt                  # ビルド時に適用する依存パッチ一覧
 scripts/
 └── apply-runtime-patches.command  # manifest に従って依存パッケージ修正を適用・検証
 ```
 
 ## 現在の状態
 
-アプリは Z-Image Turbo のテキストから画像、Qwen3-VL の画像からテキスト、Qwen 2511 の画像から画像、LTX-2.3 MLX のテキストから動画／画像から動画、ACE-Step 1.5 Turbo MLX と MiniMax Music 3 MLX 8-bit のテキストから音楽、Core ML Real-ESRGAN のアップスケールによるローカル推論に接続済みです。動画は MP4、音楽は MP3／M4A／AAC／FLAC として追加され、実際の長さ、サンプルレート、チャンネル数、プロファイルスナップショット、系譜を保持します。
+アプリは Z-Image Turbo のテキストから画像、Qwen3-VL／Qwen3.5／Qwen3.8 マルチモーダルの画像からテキスト／テキストからテキスト、Qwen 2511 の画像から画像、LTX-2.3 MLX のテキストから動画／画像から動画、ACE-Step 1.5 Turbo MLX と MiniMax Music 3 MLX 8-bit のテキストから音楽、Whisper／Paraformer／Parakeet の字幕生成、Core ML Real-ESRGAN のアップスケールによるローカル推論に接続済みです。動画は MP4、音楽は MP3／M4A／AAC／FLAC、字幕は SRT／WebVTT として追加され、言語、時間軸、プロファイルスナップショット、系譜を保持します。
 
 詳細情報：
 
@@ -163,6 +195,7 @@ scripts/
 - [Web Bridge](docs/WEB_BRIDGE.ja.md)
 - [ロードマップ](docs/ROADMAP.ja.md)
 - [MCP インターフェース](docs/MCP.ja.md)
+- [ASR 字幕 PoC](docs/ASR_POC.ja.md)
 - [ローカルモデルテスト報告](docs/MODEL_TEST_REPORT.ja.md)
 
 ## ライセンス
