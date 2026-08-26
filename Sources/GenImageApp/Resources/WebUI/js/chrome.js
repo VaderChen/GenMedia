@@ -222,6 +222,24 @@ export function renderWorkspaceDeleteDialog(state, ui) {
   </div>`;
 }
 
+export function renderAssetRemovalDialog(state, ui) {
+  const removal = ui.assetRemovalDialog;
+  if (!removal) return "";
+  const asset = state.assets.find((item) => item.id === removal.assetID);
+  if (!asset) return "";
+  return `<div class="dialog-backdrop">
+    <section class="paste-dialog" role="alertdialog" aria-modal="true" aria-labelledby="asset-removal-dialog-title">
+      <h2 id="asset-removal-dialog-title">${t("asset.removeDialogTitle")}</h2>
+      <p>${t("asset.removeDialogMessage", { name: escapeHTML(asset.title) })}</p>
+      <div class="dialog-actions">
+        <button class="danger-button" data-action="assetRemovalDelete">${t("asset.deleteFile")}</button>
+        <button class="secondary-button" data-action="assetRemovalCancel">${t("common.cancel")}</button>
+        <button class="primary-button" data-action="assetRemovalRemove">${t("asset.removeFromWorkspace")}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
 export function renderSmallOutputWarningDialog(ui) {
   if (!ui.smallOutputWarning) return "";
   const { width, height } = ui.smallOutputWarning;

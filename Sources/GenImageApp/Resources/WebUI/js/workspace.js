@@ -70,13 +70,33 @@ const musicStyles = [
   ["lofi", "workspace.musicStyle.lofi"],
 ];
 
-const subtitleTargetLanguages = [
+export const subtitleTargetLanguages = [
   ["source", "workspace.subtitleTargetOriginal"],
   ["zh-Hant", "language.traditionalChinese"],
   ["zh-Hans", "language.simplifiedChinese"],
   ["en", "language.english"],
   ["ja", "language.japanese"],
   ["ko", "language.korean"],
+  ["es", "language.spanish"],
+  ["fr", "language.french"],
+  ["de", "language.german"],
+  ["it", "language.italian"],
+  ["pt", "language.portuguese"],
+  ["ru", "language.russian"],
+  ["ar", "language.arabic"],
+  ["hi", "language.hindi"],
+  ["bn", "language.bengali"],
+  ["id", "language.indonesian"],
+  ["vi", "language.vietnamese"],
+  ["th", "language.thai"],
+  ["tr", "language.turkish"],
+  ["pl", "language.polish"],
+  ["nl", "language.dutch"],
+  ["sv", "language.swedish"],
+  ["cs", "language.czech"],
+  ["uk", "language.ukrainian"],
+  ["ms", "language.malay"],
+  ["fil", "language.filipino"],
 ];
 
 const MUSIC_DURATION_MIN_SECONDS = 5;
@@ -208,7 +228,7 @@ export function renderCreationPanel(state, ui) {
     lyrics: "",
     style: "pop",
     durationSeconds: 10,
-    steps: 30,
+    steps: 20,
     seed: "42",
     format: "mp3",
   };

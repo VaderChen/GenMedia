@@ -730,7 +730,7 @@ public enum ModelCatalog {
             modelID: "vanch007/MiniMax-Music3-MLX-8bit",
             modelRevision: "57d87a63181336634a9557fd31aacc2ad6762935",
             architecture: .externalCLI,
-            defaults: ProfileDefaults(steps: 30, outputCount: 1, durationSeconds: 10),
+            defaults: ProfileDefaults(steps: 20, outputCount: 1, durationSeconds: 10),
             music: ProfileMusicConfiguration(
                 minimumDurationSeconds: 5,
                 maximumDurationSeconds: 300,

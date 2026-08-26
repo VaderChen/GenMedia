@@ -113,7 +113,11 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
         case "removeAsset":
             guard let id = uuid(params["assetID"]) else { throw BridgeError.invalidParameters }
-            store.removeAsset(id, selecting: uuid(params["replacementAssetID"]))
+            store.removeAsset(
+                id,
+                selecting: uuid(params["replacementAssetID"]),
+                deleteFile: params["deleteFile"] as? Bool ?? false
+            )
 
         case "closeWorkspaceProject":
             guard let rawAssetIDs = params["assetIDs"] as? [String] else {

@@ -143,7 +143,7 @@ struct MusicOutputSettings: Codable, Hashable, Sendable {
         lyrics: String = "",
         style: MusicStyle = .pop,
         durationSeconds: Int = 10,
-        steps: Int = 30,
+        steps: Int = 20,
         seed: UInt64 = 42,
         format: AudioOutputFormat = .mp3
     ) {
@@ -163,7 +163,7 @@ struct MusicOutputSettings: Codable, Hashable, Sendable {
             lyrics: try container.decodeIfPresent(String.self, forKey: .lyrics) ?? "",
             style: try container.decodeIfPresent(MusicStyle.self, forKey: .style) ?? .pop,
             durationSeconds: try container.decodeIfPresent(Int.self, forKey: .durationSeconds) ?? 10,
-            steps: try container.decodeIfPresent(Int.self, forKey: .steps) ?? 30,
+            steps: try container.decodeIfPresent(Int.self, forKey: .steps) ?? 20,
             seed: try container.decodeIfPresent(UInt64.self, forKey: .seed) ?? 42,
             format: try container.decodeIfPresent(AudioOutputFormat.self, forKey: .format) ?? .mp3
         )

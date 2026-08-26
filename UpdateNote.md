@@ -4,13 +4,18 @@
 
 ## Unreleased
 
+- 字幕翻譯目標語言由 5 種擴充為 25 種；App 與獨立 MCP server 共用 `SubtitleTranslationLanguage` 清單，避免介面、驗證與工具 Schema 不一致。
+- 工作區刪除圖示改為符合主題的柔和紅色；媒體刪除對話框依安全順序排列「刪除檔案／取消／只移除」；MCP 未啟動時仍顯示 API 區塊並改為停用狀態。
+- 媒體移除改為顯示三選一對話框：只從工作區移除並保留檔案、從工作區移除並刪除磁碟檔案，或取消；四語系介面同步更新。
+- 字幕輸出改為優先寫入來源影片或音訊檔案所在的目錄，並沿用來源檔名、只替換為 `.srt` 或 `.vtt` 副檔名；若來源路徑不存在，才退回既有輸出目錄與時間戳命名。
+- MiniMax Music 3 的預設推論步數由 30 調整為 20；新工作區與缺少步數欄位的設定會採用 20，已保存的使用者設定維持不變。
 - Qwen3-VL、Qwen3.5 與 Qwen3.8 多模態模型同時歸類為圖生文與文生文，模型中心篩選與 Profile 各自對應兩種能力；下載流程同步取得並驗證 Processor、影像／影片前處理、Tokenizer、Chat Template 與完整權重索引。
 - `mlx-swift-lm` 更新為支援 Qwen3.5 的 revision `7da33441c7c08b010ff1aa8da9dc3d82277272f5`，並由 `MLX-Swift-LM-Qwen35-Text-Only.patch` 修正 Qwen3.5 多模態 Runtime 的純文字輸入。
 - 設定頁新增 MCP Switch；啟動後揭露 localhost API `http://127.0.0.1:12181/mcp`。HTTP transport 與獨立 stdio server 共用同一工具核心，stdio 仍自行持有推論服務並可在 GenMedia.app 未執行時工作。
-- 新增影片／音訊字幕生成：`SubtitleGenerationRouter` 依 Profile 選擇多語言 Whisper Large v3 Turbo、中文 Paraformer Large 或日文 Parakeet 0.6B Core ML Adapter，輸出 SRT／WebVTT；可選用 Qwen3.5／Qwen3.8 MLX 將同一時間軸翻譯為繁中、簡中、英、日、韓文。
+- 新增影片／音訊字幕生成：`SubtitleGenerationRouter` 依 Profile 選擇多語言 Whisper Large v3 Turbo、中文 Paraformer Large 或日文 Parakeet 0.6B Core ML Adapter，輸出 SRT／WebVTT；可選用 Qwen3.5／Qwen3.8 MLX 在不改變時間軸下翻譯為 25 種目標語言。
 - 新增命名 workspace 的建立、切換與確認刪除；每個 workspace 維護自己的生成專案分頁集合，切換時只替換對應 tabs 與選取狀態。
 - 資產種類新增 `importedVideo`、`importedAudio` 與 `generatedSubtitle`，讓多媒體匯入、字幕 parent lineage 與圖片／時間性媒體判斷有明確型別。
-- 新增 12 項不需模型權重的測試，涵蓋 SRT 時間碼與邊界、`AssetKind` 全 case 分類、字幕 Adapter 選擇、16 kHz 單聲道換算、ASR 暫存輸出路徑與 MCP HTTP transport；原有 43 項加上新增項目共 55 項。
+- 新增 13 項不需模型權重的測試，涵蓋 SRT 時間碼與邊界、`AssetKind` 全 case 分類、字幕 Adapter 選擇、來源同名字幕輸出、16 kHz 單聲道換算、ASR 暫存輸出路徑與 MCP HTTP transport；原有 43 項加上新增項目共 56 項。
 - 獨立 stdio MCP server 新增第七個工具 `genimage_generate_subtitle`，直接在 MCP 行程內執行 Core ML ASR 與可選 MLX 翻譯，不依賴 GenMedia.app 啟動。
 - 除上述字幕與 workspace 能力外，本輪其餘項目為內部架構整理；既有生成流程與 Web Bridge 協定維持相容，變更集中在責任邊界、資料路徑一致性、可測試性與建置可靠性。
 - `ImageAsset` 更名為 `MediaAsset`：圖片、影片與音訊一直共用這個型別，音樂生成也是回傳它，名稱與實際用途不符。63 處引用一併更新；欄位名稱不動，因此持久化 JSON 與 Web UI 的鍵名不變，既有資料不需遷移。

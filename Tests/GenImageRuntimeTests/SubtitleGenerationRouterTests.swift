@@ -64,6 +64,36 @@ struct SubtitleGenerationRouterTests {
         #expect(await second.transcriptionCount == 0)
     }
 
+    @Test func writesSubtitleBesideSourceWithMatchingBaseName() async throws {
+        let outputDirectory = temporaryDirectory()
+        let sourceDirectory = temporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: outputDirectory)
+            try? FileManager.default.removeItem(at: sourceDirectory)
+        }
+        try FileManager.default.createDirectory(
+            at: sourceDirectory,
+            withIntermediateDirectories: true
+        )
+        let sourceURL = sourceDirectory.appendingPathComponent("source.mp4")
+        try Data().write(to: sourceURL)
+
+        let router = SubtitleGenerationRouter(
+            outputDirectory: outputDirectory,
+            adapters: [StubTranscriber(supportedModelIDs: ["test-model"])],
+            translator: StubTextGenerator()
+        )
+        var subtitleRequest = request()
+        subtitleRequest.sourceAsset.fileURL = sourceURL
+
+        let result = try await router.generate(request: subtitleRequest) { _ in }
+        let outputURL = try #require(result.asset.fileURL)
+
+        #expect(outputURL == sourceDirectory.appendingPathComponent("source.srt"))
+        #expect(FileManager.default.fileExists(atPath: outputURL.path))
+        #expect(!FileManager.default.fileExists(atPath: outputDirectory.path))
+    }
+
     private func temporaryDirectory() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(
             "genimage-subtitle-router-test-\(UUID().uuidString)",

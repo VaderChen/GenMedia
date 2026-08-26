@@ -60,7 +60,7 @@ Required arguments are the absolute source `input_path`, ASR `model_path`, and `
 - `FluidInference/paraformer-large-zh-coreml`: Chinese Paraformer
 - `FluidInference/parakeet-0.6b-ja-coreml`: Japanese Parakeet
 
-`format` accepts `srt` or `vtt` and defaults to `srt`. `language_code` selects the source language or `auto`. `output_path` may name a non-existing absolute path with the matching extension. When `target_language_code` is present, `translation_model_path` and `translation_model_id` are also required; a local Qwen text model translates to `zh-Hant`, `zh-Hans`, `en`, `ja`, or `ko` while preserving the source timeline.
+`format` accepts `srt` or `vtt` and defaults to `srt`. `language_code` selects the source language or `auto`. `output_path` may name a non-existing absolute path with the matching extension. When `target_language_code` is present, `translation_model_path` and `translation_model_id` are also required; a local Qwen text model translates while preserving the source timeline. The 25 supported target language codes are `zh-Hant`, `zh-Hans`, `en`, `ja`, `ko`, `es`, `fr`, `de`, `it`, `pt`, `ru`, `ar`, `hi`, `bn`, `id`, `vi`, `th`, `tr`, `pl`, `nl`, `sv`, `cs`, `uk`, `ms`, and `fil`.
 
 The tool creates `SubtitleGenerationRouter` and its inference services directly inside the `GenImageMCP` process. It neither connects to GenMedia.app nor requires the app to be running.
 

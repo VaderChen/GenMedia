@@ -483,7 +483,7 @@ public enum LocalModelDiscovery {
                 modelID: modelID,
                 modelRevision: "57d87a63181336634a9557fd31aacc2ad6762935",
                 architecture: .externalCLI,
-                defaults: ProfileDefaults(steps: 30, outputCount: 1, durationSeconds: 10),
+                defaults: ProfileDefaults(steps: 20, outputCount: 1, durationSeconds: 10),
                 notes: "從 \(directory.path) 自動偵測；透過 mlx-minimax-music3 與 Apple Silicon Metal 執行，輸出由 FFmpeg 轉為 MP3、M4A、AAC 或 FLAC。",
                 isBuiltIn: true
             )
