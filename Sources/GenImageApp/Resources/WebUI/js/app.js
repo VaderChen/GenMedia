@@ -2,6 +2,7 @@ import { invoke, onClipboardImage, onState } from "./bridge.js";
 import {
   refreshModelProgressDOM,
   refreshToastDOM,
+  renderAssetRemovalDialog,
   renderInfoDialog,
   renderPasteDialog,
   renderRoute,
@@ -54,6 +55,7 @@ import {
   renderWorkspace,
   selectedSourceImage,
   selectedSubtitleSource,
+  subtitleTargetLanguages,
 } from "./workspace.js";
 
 const root = document.querySelector("#app");
@@ -61,7 +63,9 @@ const STATUS_MESSAGE_DURATION_MS = 5_000;
 const JOB_TIMING_REFRESH_MS = 1_000;
 const PROMPT_TABS = new Set(["prompt", "negative", "lyrics", "imageOutput", "videoOutput", "musicOutput", "subtitleOutput"]);
 const GENERATION_TYPES = new Set(["image", "video", "music", "subtitle"]);
-const SUBTITLE_TARGET_LANGUAGES = new Set(["source", "zh-Hant", "zh-Hans", "en", "ja", "ko"]);
+const SUBTITLE_TARGET_LANGUAGES = new Set(
+  subtitleTargetLanguages.map(([value]) => value),
+);
 const PROMPT_TABS_BY_GENERATION_TYPE = {
   image: new Set(["prompt", "negative", "imageOutput"]),
   video: new Set(["prompt", "negative", "videoOutput"]),
@@ -112,6 +116,7 @@ const ui = {
   workspaceCreateDialogOpen: false,
   workspaceCreateName: "",
   workspaceDeleteTargetID: null,
+  assetRemovalDialog: null,
   pasteDialogOpen: false,
   smallOutputWarning: null,
   infoDialog: null,
@@ -337,8 +342,25 @@ root.addEventListener("click", async (event) => {
       case "removeAsset": {
         const assetID = target.dataset.assetId;
         const replacementAssetID = replacementAssetIDAfterRemoval(ui, state, assetID);
-        await invoke("removeAsset", { assetID, replacementAssetID });
-        removeAssetFromWorkspaceTabs(ui, assetID, replacementAssetID);
+        ui.assetRemovalDialog = { assetID, replacementAssetID };
+        render();
+        break;
+      }
+      case "assetRemovalCancel":
+        ui.assetRemovalDialog = null;
+        render();
+        break;
+      case "assetRemovalRemove":
+      case "assetRemovalDelete": {
+        const removal = ui.assetRemovalDialog;
+        if (!removal) break;
+        ui.assetRemovalDialog = null;
+        await invoke("removeAsset", {
+          assetID: removal.assetID,
+          replacementAssetID: removal.replacementAssetID,
+          deleteFile: action === "assetRemovalDelete",
+        });
+        removeAssetFromWorkspaceTabs(ui, removal.assetID, removal.replacementAssetID);
         break;
       }
       case "workspaceTab":
@@ -576,10 +598,11 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key !== "Escape") return;
   closeImageContextMenu();
-  if (ui.workspaceCreateDialogOpen || ui.workspaceDeleteTargetID) {
+  if (ui.workspaceCreateDialogOpen || ui.workspaceDeleteTargetID || ui.assetRemovalDialog) {
     ui.workspaceCreateDialogOpen = false;
     ui.workspaceCreateName = "";
     ui.workspaceDeleteTargetID = null;
+    ui.assetRemovalDialog = null;
     render();
     return;
   }
@@ -998,6 +1021,7 @@ function render() {
       ${renderWorkspaceTabRenameDialog(ui)}
       ${renderWorkspaceCreateDialog(ui)}
       ${renderWorkspaceDeleteDialog(state, ui)}
+      ${renderAssetRemovalDialog(state, ui)}
       ${renderPasteDialog(state, ui, pasteState)}
       ${renderSmallOutputWarningDialog(ui)}
       ${renderInfoDialog(state, ui)}

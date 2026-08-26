@@ -10,7 +10,11 @@ extension AppStore {
         }
     }
 
-    func removeAsset(_ id: UUID, selecting replacementID: UUID?) {
+    func removeAsset(
+        _ id: UUID,
+        selecting replacementID: UUID?,
+        deleteFile: Bool = false
+    ) {
         guard let removedAsset = assets.first(where: { $0.id == id }) else { return }
 
         operations = operations.compactMap { operation in
@@ -43,11 +47,13 @@ extension AppStore {
             comparisonAssetID = nil
         }
 
-        let fileRemovalError = removeManagedAssetFile(at: removedAsset.fileURL)
+        let fileRemovalError = deleteFile ? removeAssetFile(at: removedAsset.fileURL) : nil
         if let fileRemovalError {
-            statusMessage = "已從工作區移除「\(removedAsset.title)」，但無法刪除應用程式副本：\(fileRemovalError.localizedDescription)"
+            statusMessage = "已從工作區移除「\(removedAsset.title)」，但無法刪除檔案：\(fileRemovalError.localizedDescription)"
+        } else if deleteFile {
+            statusMessage = "已從工作區移除並刪除「\(removedAsset.title)」。"
         } else {
-            statusMessage = "已移除「\(removedAsset.title)」。"
+            statusMessage = "已從工作區移除「\(removedAsset.title)」；檔案仍保留於磁碟。"
         }
     }
 
@@ -126,16 +132,14 @@ extension AppStore {
         return asset.id
     }
 
-    private func removeManagedAssetFile(at fileURL: URL?) -> Error? {
+    private func removeAssetFile(at fileURL: URL?) -> Error? {
         guard let fileURL else { return nil }
         let fileManager = FileManager.default
-        let candidate = fileURL.resolvingSymlinksInPath().standardizedFileURL
+        let candidate = fileURL.standardizedFileURL
 
-        guard ApplicationSupport.managesFile(at: candidate, fileManager: fileManager),
-              fileManager.fileExists(atPath: candidate.path)
-        else {
-            return nil
-        }
+        guard fileManager.fileExists(atPath: candidate.path) else { return nil }
+        guard let values = try? candidate.resourceValues(forKeys: [.isDirectoryKey]),
+              values.isDirectory != true else { return CocoaError(.fileWriteInvalidFileName) }
         do {
             try fileManager.removeItem(at: candidate)
             return nil

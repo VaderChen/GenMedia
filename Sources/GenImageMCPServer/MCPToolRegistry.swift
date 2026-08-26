@@ -95,7 +95,7 @@ public struct MCPToolRegistry {
                     "target_language_code": [
                         "type": "string",
                         "description": "Optional translation target language.",
-                        "enum": ["zh-Hant", "zh-Hans", "en", "ja", "ko"]
+                        "enum": SubtitleTranslationLanguage.allCases.map(\.rawValue)
                     ],
                     "translation_model_path": stringProperty("Absolute Qwen text model directory; required with target_language_code."),
                     "translation_model_id": stringProperty("Qwen text model ID; required with target_language_code.")
@@ -544,7 +544,8 @@ public struct MCPToolRegistry {
                     profile: profile,
                     modelURL: modelURL,
                     format: format,
-                    translation: translation
+                    translation: translation,
+                    outputURL: requestedOutputURL
                 ),
                 progress: { _ in }
             )
@@ -594,8 +595,11 @@ public struct MCPToolRegistry {
             return nil
         }
         guard let targetLanguage = SubtitleTranslationLanguage(rawValue: targetCode) else {
+            let supportedCodes = SubtitleTranslationLanguage.allCases
+                .map(\.rawValue)
+                .joined(separator: ", ")
             throw MCPToolError.invalidArgument(
-                "target_language_code must be zh-Hant, zh-Hans, en, ja, or ko"
+                "target_language_code must be one of: \(supportedCodes)"
             )
         }
         let modelURL = try requiredFileURL("translation_model_path", arguments: arguments)

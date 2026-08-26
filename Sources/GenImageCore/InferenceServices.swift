@@ -340,6 +340,26 @@ public enum SubtitleTranslationLanguage: String, CaseIterable, Codable, Hashable
     case english = "en"
     case japanese = "ja"
     case korean = "ko"
+    case spanish = "es"
+    case french = "fr"
+    case german = "de"
+    case italian = "it"
+    case portuguese = "pt"
+    case russian = "ru"
+    case arabic = "ar"
+    case hindi = "hi"
+    case bengali = "bn"
+    case indonesian = "id"
+    case vietnamese = "vi"
+    case thai = "th"
+    case turkish = "tr"
+    case polish = "pl"
+    case dutch = "nl"
+    case swedish = "sv"
+    case czech = "cs"
+    case ukrainian = "uk"
+    case malay = "ms"
+    case filipino = "fil"
 
     public var promptName: String {
         switch self {
@@ -348,6 +368,26 @@ public enum SubtitleTranslationLanguage: String, CaseIterable, Codable, Hashable
         case .english: "English"
         case .japanese: "Japanese"
         case .korean: "Korean"
+        case .spanish: "Spanish"
+        case .french: "French"
+        case .german: "German"
+        case .italian: "Italian"
+        case .portuguese: "Portuguese"
+        case .russian: "Russian"
+        case .arabic: "Arabic"
+        case .hindi: "Hindi"
+        case .bengali: "Bengali"
+        case .indonesian: "Indonesian"
+        case .vietnamese: "Vietnamese"
+        case .thai: "Thai"
+        case .turkish: "Turkish"
+        case .polish: "Polish"
+        case .dutch: "Dutch"
+        case .swedish: "Swedish"
+        case .czech: "Czech"
+        case .ukrainian: "Ukrainian"
+        case .malay: "Malay"
+        case .filipino: "Filipino"
         }
     }
 }
@@ -375,6 +415,7 @@ public struct SubtitleGenerationRequest: Sendable, Hashable {
     public var modelURL: URL
     public var format: SubtitleFormat
     public var translation: SubtitleTranslationConfiguration?
+    public var outputURL: URL?
 
     public init(
         projectID: UUID,
@@ -382,7 +423,8 @@ public struct SubtitleGenerationRequest: Sendable, Hashable {
         profile: InferenceProfile,
         modelURL: URL,
         format: SubtitleFormat,
-        translation: SubtitleTranslationConfiguration? = nil
+        translation: SubtitleTranslationConfiguration? = nil,
+        outputURL: URL? = nil
     ) {
         self.projectID = projectID
         self.sourceAsset = sourceAsset
@@ -390,6 +432,7 @@ public struct SubtitleGenerationRequest: Sendable, Hashable {
         self.modelURL = modelURL
         self.format = format
         self.translation = translation
+        self.outputURL = outputURL
     }
 }
 

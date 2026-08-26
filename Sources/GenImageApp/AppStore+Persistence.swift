@@ -231,7 +231,7 @@ extension AppStore {
             steps: persistedValue(
                 saved?.steps,
                 range: 1...100,
-                fallback: defaults.steps ?? 30
+                fallback: defaults.steps ?? 20
             ),
             seed: saved?.seed ?? UInt64.random(in: 0...UInt64.max),
             format: saved?.format ?? .mp3

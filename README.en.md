@@ -60,7 +60,7 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 
 The subtitle workflow accepts video or audio, extracts its audio track, and lets `SubtitleGenerationRouter` select a native Core ML ASR adapter. It preserves segment timing and exports SRT or WebVTT. Supported ASR profiles are multilingual Whisper Large v3 Turbo, Chinese Paraformer Large, and Japanese Parakeet 0.6B; the source language can be detected automatically or selected by the profile.
 
-After transcription, an optional local Qwen3.5 or Qwen3.8 MLX text model can translate the same timeline into Traditional Chinese, Simplified Chinese, English, Japanese, or Korean. The result is stored in the active workspace as a `generatedSubtitle` asset whose parent is the source video or audio asset.
+After transcription, an optional local Qwen3.5 or Qwen3.8 MLX text model can translate the unchanged timeline into 25 target languages: Traditional Chinese, Simplified Chinese, English, Japanese, Korean, Spanish, French, German, Italian, Portuguese, Russian, Arabic, Hindi, Bengali, Indonesian, Vietnamese, Thai, Turkish, Polish, Dutch, Swedish, Czech, Ukrainian, Malay, and Filipino. The result is stored in the active workspace as a `generatedSubtitle` asset whose parent is the source video or audio asset.
 
 `GenImageASRPoC` is a standalone WhisperKit validation utility for checking media decoding, language recognition, and timestamps without modifying the main app workspace. The production app follows the same Swift/Core ML boundary. See [ASR Subtitle PoC](docs/ASR_POC.en.md).
 

@@ -60,7 +60,7 @@ stdio メッセージは 1 行につき 1 つの UTF-8 JSON-RPC オブジェク�
 - `FluidInference/paraformer-large-zh-coreml`：中国語 Paraformer
 - `FluidInference/parakeet-0.6b-ja-coreml`：日本語 Parakeet
 
-`format` は `srt` または `vtt` で、既定値は `srt` です。`language_code` は入力言語または `auto` を指定します。`output_path` には、まだ存在せず拡張子が形式と一致する絶対パスを指定できます。`target_language_code` を使う場合は `translation_model_path` と `translation_model_id` も必須で、ローカル Qwen テキストモデルが時間軸を保持したまま `zh-Hant`、`zh-Hans`、`en`、`ja`、`ko` へ翻訳します。
+`format` は `srt` または `vtt` で、既定値は `srt` です。`language_code` は入力言語または `auto` を指定します。`output_path` には、まだ存在せず拡張子が形式と一致する絶対パスを指定できます。`target_language_code` を使う場合は `translation_model_path` と `translation_model_id` も必須で、ローカル Qwen テキストモデルが時間軸を保持したまま翻訳します。対応する 25 種類の対象言語コードは `zh-Hant`、`zh-Hans`、`en`、`ja`、`ko`、`es`、`fr`、`de`、`it`、`pt`、`ru`、`ar`、`hi`、`bn`、`id`、`vi`、`th`、`tr`、`pl`、`nl`、`sv`、`cs`、`uk`、`ms`、`fil` です。
 
 このツールは `GenImageMCP` プロセス内で `SubtitleGenerationRouter` と推論サービスを直接生成します。GenMedia.app へ接続せず、App の起動も必要ありません。
 

@@ -99,13 +99,11 @@ export function renderSettings(state, ui) {
               <strong>${mcpStatus}</strong>
             </label>
           </div>
-          ${mcpService.isEnabled ? `
-            <div class="mcp-endpoint-block">
-              <label>${t("settings.mcpEndpoint")}</label>
-              <code class="command-box">${escapeHTML(mcpService.endpointURL || t("settings.mcpStarting"))}</code>
-              <p>${t("settings.mcpEndpointNote")}</p>
-            </div>
-          ` : ""}
+          <div class="mcp-endpoint-block ${mcpService.isEnabled ? "" : "is-disabled"}" aria-disabled="${mcpService.isEnabled ? "false" : "true"}">
+            <label>${t("settings.mcpEndpoint")}</label>
+            <code class="command-box">${escapeHTML(mcpService.endpointURL || (mcpService.isEnabled ? t("settings.mcpStarting") : t("settings.mcpDisabled")))}</code>
+            <p>${t("settings.mcpEndpointNote")}</p>
+          </div>
           ${mcpService.errorMessage
             ? `<p class="mcp-service-error">${escapeHTML(t("settings.mcpError", { message: mcpService.errorMessage }))}</p>`
             : ""}

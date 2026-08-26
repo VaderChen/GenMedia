@@ -60,7 +60,7 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 
 字幕フローは動画または音声を読み込み、音声トラックを抽出した後、`SubtitleGenerationRouter` がネイティブ Core ML ASR Adapter を選択します。区間タイムラインを保持したまま SRT または WebVTT を出力します。多言語 Whisper Large v3 Turbo、中国語 Paraformer Large、日本語 Parakeet 0.6B をサポートし、入力言語は自動検出または Profile で指定できます。
 
-認識後はローカル Qwen3.5／Qwen3.8 MLX テキストモデルを任意で使用し、同じタイムラインを繁体字中国語、簡体字中国語、英語、日本語、韓国語へ翻訳できます。結果は入力動画または音声を parent とする `generatedSubtitle` アセットとして現在のワークスペースに保存されます。
+認識後はローカル Qwen3.5／Qwen3.8 MLX テキストモデルを任意で使用し、タイムラインを変えずに繁体字中国語、簡体字中国語、英語、日本語、韓国語、スペイン語、フランス語、ドイツ語、イタリア語、ポルトガル語、ロシア語、アラビア語、ヒンディー語、ベンガル語、インドネシア語、ベトナム語、タイ語、トルコ語、ポーランド語、オランダ語、スウェーデン語、チェコ語、ウクライナ語、マレー語、フィリピン語の 25 言語へ翻訳できます。結果は入力動画または音声を parent とする `generatedSubtitle` アセットとして現在のワークスペースに保存されます。
 
 `GenImageASRPoC` はメイン App のワークスペースを変更せず、メディアデコード、言語認識、タイムコードを確認する独立 WhisperKit 検証ツールです。正式な App フローも同じ Swift／Core ML 境界を使用します。詳細は [ASR 字幕 PoC](docs/ASR_POC.ja.md) を参照してください。
 

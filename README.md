@@ -60,7 +60,7 @@ GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 
 字幕流程可匯入影片或音訊，抽取音訊軌後由 `SubtitleGenerationRouter` 選擇原生 Core ML ASR Adapter，保留片段時間軸並輸出 SRT 或 WebVTT。支援多語言 Whisper Large v3 Turbo、中文 Paraformer Large 與日文 Parakeet 0.6B；來源語言可自動偵測或由 Profile 指定。
 
-辨識完成後可選用本機 Qwen3.5／Qwen3.8 MLX 文生文模型，將同一批時間軸翻譯為繁體中文、簡體中文、英文、日文或韓文。字幕會以 `generatedSubtitle` 資產保存於目前工作區，並以來源影片或音訊為 parent。
+辨識完成後可選用本機 Qwen3.5／Qwen3.8 MLX 文生文模型，在不改變時間軸的前提下翻譯為繁中、簡中、英、日、韓、西、法、德、義、葡、俄、阿拉伯、印地、孟加拉、印尼、越南、泰、土耳其、波蘭、荷蘭、瑞典、捷克、烏克蘭、馬來或菲律賓文，共 25 種目標語言。字幕會以 `generatedSubtitle` 資產保存於目前工作區，並以來源影片或音訊為 parent。
 
 `GenImageASRPoC` 是獨立的 WhisperKit 驗證工具，用來在不修改主 App 工作區的情況下檢查媒體解碼、語言辨識與時間碼輸出；主 App 的正式字幕流程使用相同的純 Swift／Core ML 邊界。詳見 [ASR 字幕 PoC](docs/ASR_POC.md)。
 

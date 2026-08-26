@@ -54,13 +54,11 @@ public actor SubtitleGenerationRouter: SubtitleGenerating {
             try Task.checkCancellation()
         }
 
+        let outputURL = subtitleOutputURL(for: request)
+        let destinationDirectory = outputURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(
-            at: outputDirectory,
+            at: destinationDirectory,
             withIntermediateDirectories: true
-        )
-        let outputURL = OutputFileNaming.subtitleURL(
-            in: outputDirectory,
-            pathExtension: request.format.fileExtension
         )
         let document = SubtitleDocument.render(
             format: request.format,
@@ -83,6 +81,22 @@ public actor SubtitleGenerationRouter: SubtitleGenerating {
             textContent: transcript.text
         )
         return SubtitleGenerationResult(asset: asset, transcript: transcript)
+    }
+
+    private func subtitleOutputURL(for request: SubtitleGenerationRequest) -> URL {
+        if let outputURL = request.outputURL {
+            return outputURL
+        }
+        guard let sourceURL = request.sourceAsset.fileURL,
+              FileManager.default.fileExists(atPath: sourceURL.path) else {
+            return OutputFileNaming.subtitleURL(
+                in: outputDirectory,
+                pathExtension: request.format.fileExtension
+            )
+        }
+        return sourceURL
+            .deletingPathExtension()
+            .appendingPathExtension(request.format.fileExtension)
     }
 
     public func unload() async {
