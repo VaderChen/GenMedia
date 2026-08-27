@@ -7,6 +7,7 @@ GenMedia는 **Apple Silicon을 네이티브로 지원**하는 로컬 AI 미디�
 - Swift가 모델, 프로필, 작업 대기열, 파일, MLX/Core ML 추론을 관리합니다.
 - `WKWebView`에 HTML, CSS, JavaScript UI를 내장하여 네트워크 연결이나 npm 런타임이 필요하지 않습니다.
 - 텍스트→이미지, 이미지→텍스트, 이미지→이미지, 텍스트→비디오, 이미지→비디오, 텍스트→음악, 자막 생성, 업스케일을 독립적으로 실행하거나 에셋 계보를 통해 연결할 수 있습니다.
+- 자동 흐름은 독립 설정을 가진 작업 공간 탭을 만듭니다. ‘간단한 MV’ 템플릿은 키 비주얼, 배경 음악, 이미지 루프, 미디어 병합 단계를 준비합니다.
 - 각 작업은 프로필 스냅샷을 보존하므로 모델이나 아키텍처가 업데이트된 뒤에도 당시 버전을 추적할 수 있습니다.
 - 별도의 설정 화면에서 번체 중국어, 영어, 일본어, 한국어와 저장 가능한 6가지 색상 테마를 지원합니다.
 - 설정 화면의 스위치로 localhost 전용 MCP HTTP API를 시작할 수 있으며, 앱이 실행 중이 아니어도 독립 JSON-RPC 2.0 stdio 서버를 사용할 수 있습니다.
@@ -24,7 +25,12 @@ GenMedia는 **Apple Silicon을 네이티브로 지원**하는 로컬 AI 미디�
 ./run.command
 ```
 
-`build.command`는 Release 실행 파일과 표준 `GenMedia.app`를 `dist/`에 생성합니다. App에는 WebUI 리소스, MLX Metal 런타임, MCP 서버, 모델 진단 도구가 포함됩니다.
+`build.command`는 Release 실행 파일과 표준 `GenMedia.app`를 `dist/`에 생성합니다. App에는 WebUI 리소스, MLX Metal 런타임, MCP 서버, 모델 진단 도구와 통합 미디어 호환 계층인 LGPL 동적 `ffmpeg`/`ffprobe`가 포함됩니다. 첫 App bundle 빌드 전에 내장 FFmpeg를 한 번 준비하세요.
+
+```bash
+brew install pkg-config
+./scripts/build-ffmpeg-macos.sh
+```
 
 ```bash
 # Release 실행 파일과 App 빌드
@@ -41,10 +47,10 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 
 ### 비디오 Runtime
 
-비디오 생성은 교체 가능한 외부 `ltx-2-mlx` Runtime을 사용합니다. Swift 앱은 프로필, 매개변수 검증, 작업 대기열, 취소, 진행률, 에셋, 비디오 재생을 관리합니다. 처음 사용하기 전에 CLI와 FFmpeg를 설치하세요.
+비디오 생성은 교체 가능한 외부 `ltx-2-mlx` Runtime을 사용합니다. Swift 앱은 프로필, 매개변수 검증, 작업 대기열, 취소, 진행률, 에셋, 비디오 재생을 관리합니다. 처음 사용할 때는 비디오 CLI만 설치하면 됩니다.
 
 ```bash
-brew install uv ffmpeg
+brew install uv
 ./scripts/install-ltx-runtime.command
 ```
 
@@ -54,17 +60,33 @@ brew install uv ffmpeg
 GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 ```
 
-`ltx-2-mlx`는 기본적으로 Gemma 텍스트 인코더 설정을 사용합니다. 로컬 Gemma 모델이 있다면 `GENIMAGE_LTX_GEMMA_MODEL`에 모델 디렉터리 또는 Hugging Face ID를 지정할 수 있습니다. 현재 앱 DMG에는 Python Runtime, Gemma 가중치, FFmpeg가 포함되지 않습니다. 정식 배포 전에 이를 선택적 외부 구성 요소로 취급하고 Runtime 및 모델 라이선스를 각각 확인해야 합니다.
+`ltx-2-mlx`는 기본적으로 Gemma 텍스트 인코더 설정을 사용합니다. 로컬 Gemma 모델이 있다면 `GENIMAGE_LTX_GEMMA_MODEL`에 모델 디렉터리 또는 Hugging Face ID를 지정할 수 있습니다. App DMG에는 Python Runtime과 Gemma 가중치는 포함되지 않지만 LGPL 동적 FFmpeg는 내장됩니다. 배포 전에 비디오 Runtime과 모델 라이선스를 각각 확인하세요.
+
+### 호환 미디어 가져오기
+
+가져온 비디오와 오디오는 내장 `ffprobe`가 컨테이너, Codec, 트랙, 길이, 회전이 반영된 표시 크기를 검사하며, 긴 변환은 진행률이 표시되는 취소 가능한 작업으로 실행됩니다. WebKit에서 직접 재생할 수 있으면 원본을 유지하고, H.264/HEVC에서 컨테이너나 오디오만 호환되지 않으면 MP4로 무손실 재다중화합니다. 그 밖의 비디오는 VideoToolbox H.264/AAC, 호환되지 않는 오디오는 M4A AAC 재생 프록시를 생성합니다. 재생 프록시는 `AssetSchemeHandler`가 백그라운드 HTTP Range 청크 스트림으로 제공하므로 점진 재생과 탐색을 지원합니다. 원본 경로는 자막 소스로 유지되므로 자막 출력 폴더와 이름은 원본 파일을 따릅니다. 시작 시 대응 에셋이 없는 MediaCache 고아 파일을 삭제하며, 프로젝트를 닫거나 에셋을 제거할 때도 App이 관리하는 호환 캐시만 삭제합니다.
+
+### 자동 흐름과 미디어 합성
+
+자동 흐름은 선언형 단계로 새 작업 공간과 탭을 만듭니다. 각 탭은 작업 유형, Profile, Prompt, 이미지/비디오/음악/미디어 처리 설정을 개별 보존하므로 탭 전환이나 App 재시작 시 다른 초안을 덮어쓰지 않습니다. 첫 번째 ‘간단한 MV’ 템플릿은 텍스트→이미지, 텍스트→음악, 이미지 루프 비디오, 미디어 병합을 연결합니다.
+
+이미지 루프와 미디어 병합은 AI 모델이 필요하지 않으며 `MediaCompositionService`가 내장 FFmpeg로 실행합니다. 이미지 루프는 여러 이미지, 이미지당 시간, 전체 길이, 해상도, FPS, Cover/Contain을 지원합니다. 미디어 병합은 원본 오디오 교체/믹스, 볼륨, 출력 길이 정책을 지원합니다. 단계 간 입력은 파일명이 아니라 에셋 ID로 전달합니다.
 
 ### 자막 생성
 
-자막 흐름은 비디오 또는 오디오를 가져와 오디오 트랙을 추출한 뒤 `SubtitleGenerationRouter`가 네이티브 Core ML ASR Adapter를 선택합니다. 구간 타임라인을 보존하며 SRT 또는 WebVTT로 출력합니다. 다국어 Whisper Large v3 Turbo, 중국어 Paraformer Large, 일본어 Parakeet 0.6B를 지원하고 입력 언어는 자동 감지하거나 Profile에서 지정할 수 있습니다.
+자막 흐름은 비디오 또는 오디오를 가져와 내장 `ffprobe`로 트랙을 검사하고, 내장 `ffmpeg`로 선택한 오디오를 16 kHz 모노 PCM으로 통일한 뒤 `SubtitleGenerationRouter`가 네이티브 Core ML ASR Adapter를 선택합니다. 구간 타임라인을 보존하며 SRT 또는 WebVTT로 출력합니다. 다국어 Whisper Large v3 Turbo, 중국어 Paraformer Large, 일본어 Parakeet 0.6B를 지원하고 입력 언어는 자동 감지하거나 Profile에서 지정할 수 있습니다.
 
 인식 후에는 로컬 Qwen3.5/Qwen3.8 MLX 텍스트 모델로 타임라인을 유지한 채 번체 중국어, 간체 중국어, 영어, 일본어, 한국어, 스페인어, 프랑스어, 독일어, 이탈리아어, 포르투갈어, 러시아어, 아랍어, 힌디어, 벵골어, 인도네시아어, 베트남어, 태국어, 터키어, 폴란드어, 네덜란드어, 스웨덴어, 체코어, 우크라이나어, 말레이어, 필리핀어의 25개 언어로 번역할 수 있습니다. 결과는 원본 비디오 또는 오디오를 parent로 하는 `generatedSubtitle` 에셋으로 현재 작업 공간에 저장됩니다.
 
 `GenImageASRPoC`는 메인 앱 작업 공간을 수정하지 않고 미디어 디코딩, 언어 인식, 타임코드를 확인하는 독립 WhisperKit 검증 도구입니다. 정식 앱 흐름도 동일한 Swift/Core ML 경계를 사용합니다. 자세한 내용은 [ASR 자막 PoC](docs/ASR_POC.ko.md)를 참고하세요.
 
 Qwen3-VL, Qwen3.5, Qwen3.8은 멀티모달 모델이므로 모델 센터에서 이미지→텍스트와 텍스트→텍스트 두 분류에 모두 표시되고 각 기능별 Profile을 제공합니다. 관리형 다운로드에는 `processor_config.json`, 이미지/비디오 전처리 설정, Tokenizer, Chat Template, 전체 가중치 인덱스가 포함되며 필수 파일 검증이 끝난 뒤에만 설치 완료로 표시됩니다.
+
+### Civitai LoRA
+
+모델 센터에는 `ZImageTurbo` 기반 Civitai LoRA(Asian Beauties, Turbo Lightning, Flat AnimeStyle, Diorama)도 포함되어 있습니다. 설정의 **Civitai LoRA** 카드에 API Token을 붙여 넣고 저장하세요. Token은 macOS Keychain에만 저장하며 모델 manifest, 작업 공간 또는 로그에 기록하지 않습니다. 이후 모델 센터가 Civitai 웹사이트를 열어 수동 다운로드를 요구하는 대신 HTTPS `Authorization: Bearer` 헤더로 파일을 직접 다운로드합니다.
+
+기존 UI 없는 실행 스크립트와의 호환을 위해 `CIVITAI_TOKEN` 환경 변수도 fallback으로 계속 지원합니다.
 
 ### 프로필, 작업 및 메모리
 
@@ -91,9 +113,11 @@ Qwen3-VL, Qwen3.5, Qwen3.8은 멀티모달 모델이므로 모델 센터에서 �
 
 - **ACE-Step 1.5 Turbo MLX**: 권장 프로필입니다. 앱에 내장된 Apple Silicon 네이티브 Swift/MLX Runtime으로 추가 서비스 설치 없이 10~300초 길이의 노래 또는 연주곡을 생성합니다. 코드와 모델은 상업적으로 사용할 수 있는 MIT License입니다. 긴 오디오는 오버랩 분할 VAE 디코딩으로 메모리 사용량을 제어합니다.
 
-- **MiniMax Music 3 MLX 8-bit**: 외부 `mlx-minimax-music3` CLI로 실행됩니다. 5~300초 설정값은 최대 길이이며 곡 구조에 따라 모델이 더 일찍 자연 종료될 수 있습니다. 완료 후 앱에 실제 출력 길이가 표시됩니다. 모델에는 Community License가 적용됩니다.
+- **MiniMax Music 3 MLX 8-bit**: 앱에 포함된 독립 Swift Worker로 실행됩니다. 5~300초 설정값은 최대 길이이며 곡 구조에 따라 모델이 더 일찍 자연 종료될 수 있습니다. 완료 후 앱에 실제 출력 길이가 표시됩니다. 모델에는 Community License가 적용됩니다.
+- **MiniMax Music 3 MLX 4-bit**: 앱에 포함된 독립 Swift Worker로 실행되며 완전한 affine 4-bit MLX checkpoint를 사용합니다. 5~300초 설정값은 최대 길이이며 곡 구조에 따라 더 일찍 자연 종료될 수 있습니다. 모델에는 MiniMax Music 3 Community License가 적용됩니다.
+- **MiniMax Music 3 Composer 5.7B Distilled**: 모델 센터에서 선택적 Composer 가속 구성 요소로 제공합니다. 설치 프로그램은 `lr-6e-5` 가중치를 선택하며, 완전한 Music 3 checkpoint와 호환 Runtime이 필요하고 단독으로 음악을 생성할 수 없습니다.
 
-ACE-Step 네이티브 Runtime은 앱에 포함됩니다. 모델, MiniMax Music 3 Runtime, FFmpeg는 선택적 외부 구성 요소입니다.
+ACE-Step 네이티브 Runtime, MiniMax Music 3 Swift Worker와 LGPL FFmpeg 호환 계층은 앱에 포함됩니다. MiniMax Music 3 모델은 선택적 구성 요소입니다.
 
 ## 검증
 
@@ -135,6 +159,7 @@ MCP 엔드투엔드 검증을 완료했습니다. `genimage_generate_image`는 �
 Sources/
 ├── GenImageCore/
 │   ├── ApplicationSupport.swift  # 앱 데이터 위치의 유일한 정의
+│   ├── CivitaiTokenStore.swift   # Civitai Token의 macOS Keychain 저장
 │   ├── DomainModels.swift        # 에셋, 레시피, 작업, 모델, 프로필
 │   ├── InferenceServices.swift   # 이미지, 텍스트, 비디오, 음악, 자막 추론 인터페이스
 │   ├── ModelCatalog.swift        # 기본 제공 모델과 프로필
@@ -151,6 +176,9 @@ Sources/
 │   ├── MusicGenerationRouter.swift
 │   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── MediaCompatibilityService.swift # 내장 FFmpeg/ffprobe 검색, 탐색, 변환
+│   ├── MediaSourceCompatibilityService.swift # 입력 미디어 직접 재생, 재다중화, 재생 프록시
+│   ├── MediaCompositionService.swift # 이미지 루프 비디오와 미디어 병합
 │   ├── MediaAudioPreparer.swift
 │   ├── WhisperSubtitleTranscriber.swift
 │   ├── ParaformerChineseSubtitleTranscriber.swift
@@ -162,7 +190,10 @@ Sources/
 │   └── CoreMLUpscaleService.swift
 ├── GenImageApp/
     ├── AppStore.swift            # 타입 선언, 저장 속성, init
+    ├── AppStore+Credentials.swift # 설정 자격 증명 작업
     ├── AppStore+SubtitleGeneration.swift
+    ├── AppStore+MediaImport.swift
+    ├── AppStore+MediaComposition.swift
     ├── AppStore+Workspaces.swift
     ├── AppStore+*.swift          # 그 밖의 책임별 AppStore 동작
     ├── HybridBridgeController.swift
@@ -170,7 +201,7 @@ Sources/
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # 로컬 이미지, 비디오, 오디오를 WebUI에 안전하게 제공
     └── Resources/WebUI/
-        ├── js/automatic-flow.js  # 자동 흐름 화면 골격
+        ├── js/automatic-flow.js  # 템플릿, Profile 사전 검사, 작업 공간 계획
         └── …                     # 나머지 HTML/CSS/JavaScript 프런트엔드
 ├── GenImageASRPoC/
     └── main.swift                # 독립 ASR 검증 도구
@@ -181,12 +212,15 @@ Patches/
 ├── MLX-Swift-LM-Qwen35-Text-Only.patch # Qwen3.5 텍스트 전용 입력 호환 수정
 └── manifest.txt                  # 빌드 시 적용되는 의존 패치 목록
 scripts/
-└── apply-runtime-patches.command  # manifest에 따라 의존 패키지 수정 적용 및 검증
+├── apply-runtime-patches.command  # manifest에 따라 의존 패키지 수정 적용 및 검증
+├── install-ltx-runtime.command     # LTX 비디오 Runtime 설치
+├── install-minimax-music3-mlx-audio-runtime.command # 전용 MiniMax 4-bit Runtime 설치
+└── build-ffmpeg-macos.sh          # 번들 및 재링크 가능한 LGPL FFmpeg 빌드
 ```
 
 ## 현재 상태
 
-앱은 Z-Image Turbo 텍스트→이미지, Qwen3-VL/Qwen3.5/Qwen3.8 멀티모달 이미지→텍스트 및 텍스트→텍스트, Qwen 2511 이미지→이미지, LTX-2.3 MLX 텍스트→비디오 및 이미지→비디오, ACE-Step 1.5 Turbo MLX와 MiniMax Music 3 MLX 8-bit 텍스트→음악, Whisper/Paraformer/Parakeet 자막 생성, Core ML Real-ESRGAN 업스케일의 로컬 추론에 연결되어 있습니다. 비디오는 MP4, 음악은 MP3/M4A/AAC/FLAC, 자막은 SRT/WebVTT로 추가되며 언어, 타임라인, 프로필 스냅샷, 계보를 보존합니다.
+앱은 Z-Image Turbo 텍스트→이미지, Qwen3-VL/Qwen3.5/Qwen3.8 멀티모달 이미지→텍스트 및 텍스트→텍스트, Qwen 2511 이미지→이미지, LTX-2.3 MLX 텍스트→비디오 및 이미지→비디오, ACE-Step 1.5 Turbo MLX와 MiniMax Music 3 MLX 8-bit/4-bit 텍스트→음악, Whisper/Paraformer/Parakeet 자막 생성, Core ML Real-ESRGAN 업스케일의 로컬 추론에 연결되어 있습니다. 비디오는 MP4, 음악은 MP3/M4A/AAC/FLAC, 자막은 SRT/WebVTT로 추가되며 언어, 타임라인, 프로필 스냅샷, 계보를 보존합니다.
 
 추가 정보:
 
@@ -204,3 +238,4 @@ scripts/
 
 - 오픈 소스 사용은 [GNU General Public License v3.0](LICENSE)에 따라 허가됩니다.
 - 비공개 소스 통합, 독점 제품 배포, 맞춤형 상용 조건 등 GPLv3를 준수할 수 없거나 준수하지 않으려는 경우 저작권자에게 별도의 상용 라이선스를 요청하세요.
+- 내장 FFmpeg와 LAME은 각각의 LGPL 조건을 유지합니다. 라이선스 본문, 정확한 소스 버전, 빌드 정보는 App의 `Contents/Resources/Licenses/`에 포함됩니다.

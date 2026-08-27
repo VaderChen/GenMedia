@@ -49,6 +49,12 @@ const creationTabsByGenerationType = {
   subtitle: [
     { id: "subtitleOutput", labelKey: "workspace.subtitleSettings" },
   ],
+  imageLoop: [
+    { id: "imageLoopOutput", labelKey: "workspace.imageLoopSettings" },
+  ],
+  mediaMerge: [
+    { id: "mediaMergeOutput", labelKey: "workspace.mediaMergeSettings" },
+  ],
 };
 
 const musicStyles = [
@@ -247,7 +253,21 @@ export function renderCreationPanel(state, ui) {
   const showGenerateVideo = generationType === "video";
   const showGenerateMusic = generationType === "music";
   const showGenerateSubtitles = generationType === "subtitle";
+  const showCreateImageLoop = generationType === "imageLoop";
+  const showMergeMedia = generationType === "mediaMerge";
+  const imageLoopSources = resolvedImageLoopSourceAssets(state, ui);
+  const mergeSources = resolvedMediaMergeSources(state, ui);
   const imageGenerationAction = selectedSourceImage(state) ? "imageToImage" : "generate";
+  const imageGenerationReady = isProfileInstalled(
+    state,
+    activeProfile(state, imageGenerationAction === "imageToImage" ? "imageToImage" : "textToImage"),
+  );
+  const videoGenerationReady = isProfileInstalled(
+    state,
+    activeProfile(state, selectedSourceImage(state) ? "imageToVideo" : "textToVideo"),
+  );
+  const musicGenerationReady = isProfileInstalled(state, activeProfile(state, "textToMusic"));
+  const subtitleGenerationReady = isProfileInstalled(state, activeProfile(state, "videoToText"));
   const imageGenerationLabel = imageGenerationAction === "imageToImage"
     ? t("cap.imageToImage")
     : t("workspace.generate");
@@ -275,7 +295,7 @@ export function renderCreationPanel(state, ui) {
             ? `<button
                 class="primary-button creation-generate-button creation-generate-image"
                 data-action="${imageGenerationAction}"
-                ${inferenceDisabledAttribute}
+                ${inferenceBusy || !imageGenerationReady ? "disabled" : ""}
               >✦ ${imageGenerationLabel}</button>`
             : ""
         }
@@ -284,7 +304,7 @@ export function renderCreationPanel(state, ui) {
             ? `<button
                 class="secondary-button creation-generate-button creation-generate-video"
                 data-action="generateVideo"
-                ${inferenceDisabledAttribute}
+                ${inferenceBusy || !videoGenerationReady ? "disabled" : ""}
               >▶ ${t("workspace.generateVideo")}</button>`
             : ""
         }
@@ -293,7 +313,7 @@ export function renderCreationPanel(state, ui) {
             ? `<button
                 class="secondary-button creation-generate-button creation-generate-music"
                 data-action="generateMusic"
-                ${inferenceDisabledAttribute}
+                ${inferenceBusy || !musicGenerationReady ? "disabled" : ""}
               >♫ ${t("workspace.generateMusic")}</button>`
             : ""
         }
@@ -302,8 +322,26 @@ export function renderCreationPanel(state, ui) {
             ? `<button
                 class="secondary-button creation-generate-button creation-generate-subtitles"
                 data-action="generateSubtitles"
-                ${inferenceDisabledAttribute}
+                ${inferenceBusy || !subtitleGenerationReady ? "disabled" : ""}
               >CC ${t("workspace.generateSubtitles")}</button>`
+            : ""
+        }
+        ${
+          showCreateImageLoop
+            ? `<button
+                class="secondary-button creation-generate-button creation-generate-image-loop"
+                data-action="createImageLoop"
+                ${inferenceBusy || !imageLoopSources.length ? "disabled" : ""}
+              >▤ ${t("workspace.createImageLoop")}</button>`
+            : ""
+        }
+        ${
+          showMergeMedia
+            ? `<button
+                class="secondary-button creation-generate-button creation-merge-media"
+                data-action="mergeMedia"
+                ${inferenceBusy || !mergeSources.videoAsset || !mergeSources.audioAsset ? "disabled" : ""}
+              >⎌ ${t("workspace.mergeMedia")}</button>`
             : ""
         }
       </div>
@@ -327,7 +365,7 @@ export function renderCreationPanel(state, ui) {
             ${promptTab === "imageOutput" ? renderInlineAspectRatios(recipe, "image", selectedSourceImage(state)) : ""}
             ${promptTab === "videoOutput" ? renderInlineAspectRatios(videoOutputSettings, "video") : ""}
           </div>
-          ${generationType === "subtitle" ? "" : `<button class="ghost-button compact" data-action="applyProfileDefaults">${t("workspace.applyDefaults")}</button>`}
+          ${["subtitle", "imageLoop", "mediaMerge"].includes(generationType) ? "" : `<button class="ghost-button compact" data-action="applyProfileDefaults">${t("workspace.applyDefaults")}</button>`}
         </div>
         <div class="prompt-tab-panel" role="tabpanel">
           ${renderCreationTab(
@@ -337,6 +375,7 @@ export function renderCreationPanel(state, ui) {
             descriptionBusy,
             ui.subtitleFormat,
             ui.subtitleTargetLanguage,
+            ui,
           )}
         </div>
       </div>
@@ -376,20 +415,33 @@ export function canTranslateSubtitles(state) {
 }
 
 function renderGenerationTypeSelect(activeGenerationType) {
-  const options = [
+  const generationOptions = [
     ["image", "workspace.imageGeneration"],
     ["video", "workspace.videoGeneration"],
     ["music", "workspace.musicGeneration"],
     ["subtitle", "workspace.subtitleGeneration"],
   ];
+  const mediaOptions = [
+    ["imageLoop", "workspace.imageLoop"],
+    ["mediaMerge", "workspace.mediaMerge"],
+  ];
   return `<select
     class="field generation-type-select"
     data-ui-field="generationType"
-    aria-label="${t("workspace.generationType")}"
-    title="${t("workspace.generationType")}"
-  >${options.map(([value, labelKey]) =>
-    `<option value="${value}" ${value === activeGenerationType ? "selected" : ""}>${t(labelKey)}</option>`,
-  ).join("")}</select>`;
+    aria-label="${t("workspace.taskKind")}"
+    title="${t("workspace.taskKind")}"
+  >
+    <optgroup label="${t("workspace.aiGenerationGroup")}">
+      ${generationOptions.map(([value, labelKey]) =>
+        `<option value="${value}" ${value === activeGenerationType ? "selected" : ""}>${t(labelKey)}</option>`,
+      ).join("")}
+    </optgroup>
+    <optgroup label="${t("workspace.mediaProcessingGroup")}">
+      ${mediaOptions.map(([value, labelKey]) =>
+        `<option value="${value}" ${value === activeGenerationType ? "selected" : ""}>${t(labelKey)}</option>`,
+      ).join("")}
+    </optgroup>
+  </select>`;
 }
 
 function promptTabButton(tab, label, activeTab) {
@@ -410,6 +462,7 @@ function renderCreationTab(
   descriptionBusy,
   subtitleFormat,
   subtitleTargetLanguage,
+  ui,
 ) {
   if (promptTab === "imageOutput") return renderOutputSettings(state.recipe, "image");
   if (promptTab === "videoOutput") {
@@ -420,6 +473,8 @@ function renderCreationTab(
   if (promptTab === "subtitleOutput") {
     return renderSubtitleSettings(state, subtitleFormat, subtitleTargetLanguage);
   }
+  if (promptTab === "imageLoopOutput") return renderImageLoopSettings(state, ui);
+  if (promptTab === "mediaMergeOutput") return renderMediaMergeSettings(state, ui);
   if (generationType === "music") return renderMusicPromptEditor(state.musicOutputSettings);
   return renderPromptEditor(state.recipe, promptTab, descriptionBusy);
 }
@@ -471,6 +526,190 @@ function renderSubtitleSettings(state, subtitleFormat, subtitleTargetLanguage) {
       </section>
     </div>
   `;
+}
+
+function renderImageLoopSettings(state, ui) {
+  const settings = ui.imageLoopSettings;
+  const sourceAssets = resolvedImageLoopSourceAssets(state, ui);
+  const linkedDuration = linkedImageLoopDurationSeconds(state, ui);
+  const sourceSummary = sourceAssets.length
+    ? t("workspace.imageLoopSourceCount", { count: sourceAssets.length })
+    : t("workspace.imageLoopSourceEmpty");
+  return `
+    <div class="media-work-panel">
+      <section class="output-setting-group media-work-card">
+        <div class="media-work-source">
+          <span>${t("workspace.imageLoopSource")}</span>
+          <strong>${escapeHTML(sourceSummary)}</strong>
+          <small>${settings.sourceStepID ? t("workspace.flowLinkedSource") : t("workspace.imageLoopSelectionHint")}</small>
+        </div>
+        <div class="media-work-fields image-loop-fields">
+          ${mediaNumberField(t("workspace.width"), "width", settings.width, 64, 4096, "image-loop")}
+          ${mediaNumberField(t("workspace.height"), "height", settings.height, 64, 4096, "image-loop")}
+          ${mediaNumberField(t("workspace.frameRate"), "frameRate", settings.frameRate, 1, 120, "image-loop")}
+          ${mediaNumberField(t("workspace.imageDuration"), "imageDurationSeconds", settings.imageDurationSeconds, 0.1, 600, "image-loop", 0.1)}
+          ${mediaNumberField(
+            t("workspace.totalDuration"),
+            "totalDurationSeconds",
+            linkedDuration ?? settings.totalDurationSeconds,
+            0.1,
+            86400,
+            "image-loop",
+            0.1,
+            Boolean(linkedDuration),
+          )}
+          <label class="field-group">
+            <span>${t("workspace.fitMode")}</span>
+            <select class="field" data-image-loop-field="fitMode">
+              <option value="cover" ${settings.fitMode === "cover" ? "selected" : ""}>${t("workspace.fitCover")}</option>
+              <option value="contain" ${settings.fitMode === "contain" ? "selected" : ""}>${t("workspace.fitContain")}</option>
+            </select>
+          </label>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderMediaMergeSettings(state, ui) {
+  const settings = ui.mediaMergeSettings;
+  const workspaceAssets = state.workspaceAssets || state.assets;
+  const videoAssets = workspaceAssets.filter(isVideoAsset);
+  const audioAssets = workspaceAssets.filter(isAudioAsset);
+  const resolved = resolvedMediaMergeSources(state, ui);
+  return `
+    <div class="media-work-panel">
+      <section class="output-setting-group media-work-card">
+        <div class="media-merge-source-grid">
+          ${mediaSourceSelect(
+            t("workspace.videoSource"),
+            "videoAssetID",
+            videoAssets,
+            resolved.videoAsset?.id,
+            settings.videoSourceStepID,
+          )}
+          ${mediaSourceSelect(
+            t("workspace.audioSource"),
+            "audioAssetID",
+            audioAssets,
+            resolved.audioAsset?.id,
+            settings.audioSourceStepID,
+          )}
+        </div>
+        <div class="media-work-fields media-merge-fields">
+          <label class="field-group">
+            <span>${t("workspace.audioMode")}</span>
+            <select class="field" data-media-merge-field="audioMode">
+              <option value="replace" ${settings.audioMode === "replace" ? "selected" : ""}>${t("workspace.audioReplace")}</option>
+              <option value="mix" ${settings.audioMode === "mix" ? "selected" : ""}>${t("workspace.audioMix")}</option>
+            </select>
+          </label>
+          <label class="field-group">
+            <span>${t("workspace.durationMode")}</span>
+            <select class="field" data-media-merge-field="durationMode">
+              <option value="shortest" ${settings.durationMode === "shortest" ? "selected" : ""}>${t("workspace.durationShortest")}</option>
+              <option value="video" ${settings.durationMode === "video" ? "selected" : ""}>${t("workspace.durationVideo")}</option>
+            </select>
+          </label>
+          ${mediaNumberField(t("workspace.audioVolume"), "audioVolume", Math.round(settings.audioVolume * 100), 0, 200, "media-merge")}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function mediaSourceSelect(label, field, assets, selectedID, linkedStepID) {
+  return `
+    <label class="field-group">
+      <span>${label}</span>
+      <select class="field" data-media-merge-field="${field}">
+        <option value="">${linkedStepID ? t("workspace.flowLinkedSource") : t("workspace.selectMediaSource")}</option>
+        ${assets.map((asset) => `
+          <option value="${escapeHTML(asset.id)}" ${asset.id === selectedID ? "selected" : ""}>
+            ${escapeHTML(asset.title)}
+          </option>
+        `).join("")}
+      </select>
+    </label>
+  `;
+}
+
+function mediaNumberField(label, field, value, min, max, kind, step = 1, disabled = false) {
+  const attribute = kind === "image-loop"
+    ? `data-image-loop-field="${field}"`
+    : `data-media-merge-field="${field}"`;
+  return `
+    <label class="field-group">
+      <span>${label}</span>
+      <input
+        class="field"
+        type="number"
+        min="${min}"
+        max="${max}"
+        step="${step}"
+        ${attribute}
+        value="${value}"
+        ${disabled ? "disabled" : ""}
+      />
+    </label>
+  `;
+}
+
+export function resolvedImageLoopSourceAssets(state, ui) {
+  const workspaceAssets = state.workspaceAssets || state.assets;
+  const sourceTab = flowSourceTab(ui, ui.imageLoopSettings?.sourceStepID);
+  if (sourceTab) {
+    const sourceIDs = new Set(sourceTab.assetIDs || []);
+    return workspaceAssets.filter((asset) => sourceIDs.has(asset.id) && isImageAssetKind(asset));
+  }
+  const selectedIDs = new Set(state.selectedAssetIDs || []);
+  const selected = state.assets.filter((asset) => selectedIDs.has(asset.id) && isImageAssetKind(asset));
+  if (selected.length) return selected;
+  const primary = selectedAsset(state);
+  if (isImageAssetKind(primary)) return [primary];
+  return state.assets.filter(isImageAssetKind);
+}
+
+export function resolvedImageLoopDurationSeconds(state, ui) {
+  return linkedImageLoopDurationSeconds(state, ui) ?? Number(ui.imageLoopSettings.totalDurationSeconds);
+}
+
+function linkedImageLoopDurationSeconds(state, ui) {
+  const sourceTab = flowSourceTab(ui, ui.imageLoopSettings?.durationSourceStepID);
+  if (!sourceTab) return null;
+  const sourceIDs = new Set(sourceTab.assetIDs || []);
+  const workspaceAssets = state.workspaceAssets || state.assets;
+  const audio = workspaceAssets.filter((asset) => sourceIDs.has(asset.id) && isAudioAsset(asset)).at(-1);
+  return Number.isFinite(Number(audio?.mediaDurationSeconds)) ? Number(audio.mediaDurationSeconds) : null;
+}
+
+export function resolvedMediaMergeSources(state, ui) {
+  const settings = ui.mediaMergeSettings || {};
+  const workspaceAssets = state.workspaceAssets || state.assets;
+  const explicitVideo = workspaceAssets.find(
+    (asset) => asset.id === settings.videoAssetID && isVideoAsset(asset),
+  );
+  const explicitAudio = workspaceAssets.find(
+    (asset) => asset.id === settings.audioAssetID && isAudioAsset(asset),
+  );
+  return {
+    videoAsset: explicitVideo || latestFlowAsset(state, ui, settings.videoSourceStepID, isVideoAsset),
+    audioAsset: explicitAudio || latestFlowAsset(state, ui, settings.audioSourceStepID, isAudioAsset),
+  };
+}
+
+function latestFlowAsset(state, ui, stepID, predicate) {
+  const sourceTab = flowSourceTab(ui, stepID);
+  if (!sourceTab) return state.assets.filter(predicate).at(-1) || null;
+  const sourceIDs = new Set(sourceTab.assetIDs || []);
+  return (state.workspaceAssets || state.assets)
+    .filter((asset) => sourceIDs.has(asset.id) && predicate(asset))
+    .at(-1) || null;
+}
+
+function flowSourceTab(ui, stepID) {
+  if (!stepID) return null;
+  return (ui.workspaceTabs || []).find((tab) => tab.flow?.stepID === stepID) || null;
 }
 
 function renderMusicPromptEditor(settings) {
@@ -1018,10 +1257,13 @@ function renderInspectorAssetIcon(asset) {
 }
 
 function renderFilmstrip(state, generationType) {
-  const subtitleMode = generationType === "subtitle";
   const importDisabled = generationType === "music";
   const importLabel = t("workspace.importMedia");
-  const importAction = subtitleMode ? "importSubtitleMedia" : "importImage";
+  const importAction = generationType === "subtitle"
+    ? "importSubtitleMedia"
+    : generationType === "mediaMerge"
+      ? "importMedia"
+      : "importImage";
   return `<div class="filmstrip">
     <div class="filmstrip-assets" data-scroll-id="filmstrip">
       ${state.assets
@@ -1149,6 +1391,7 @@ function renderAssetInspector(state) {
       }
       <div class="inspector-group">
         <h3>${t(isSubtitle ? "inspector.subtitleInfo" : isAudio ? "inspector.audioInfo" : isVideo ? "inspector.videoInfo" : "inspector.imageInfo")}</h3>
+        ${detailRow(t("inspector.fileName"), asset.fileName || "–")}
         ${isAudio || isSubtitle ? "" : detailRow(t("inspector.dimensions"), `${asset.pixelWidth} × ${asset.pixelHeight}`)}
         ${isAudio || isSubtitle ? detailRow(t("inspector.duration"), formatDuration((asset.mediaDurationSeconds || 0) * 1_000)) : ""}
         ${isAudio ? detailRow(t("inspector.audioFormat"), String(asset.audioFormat || "").toUpperCase()) : ""}

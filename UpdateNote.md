@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+- 設定頁新增 Civitai API Token 管理：Token 只保存於 macOS Keychain，模型中心會以 HTTPS Bearer Authorization 直接下載 Civitai LoRA；移除 401 時開啟網站手動下載的流程，並保留 `CIVITAI_TOKEN` 作為舊版相容 fallback。
+- MiniMax Music 3 Block 5 已落地：App 改由隨附的 `GenImageMiniMaxMusic3Worker` Swift 子行程執行 8-bit／4-bit checkpoint，透過 JSON request 與逐 frame、chunk×step、vocoder chunk 的真實進度事件工作；已移除 App 對 Python／`mlx_audio` 的依賴。舊的 Python Runtime 不會自動刪除，如不再需要可手動移除 `~/Library/Application Support/GenImage/Runtime/minimax-music3/` 與 `~/Library/Application Support/GenImage/Runtime/minimax-music3-mlx-audio/`，刪除前請確認沒有其他工作使用；可回收空間依本機內容而定，請以 `du -sh` 查詢。
+- 新增 `mlx-community/MiniMax-Music3-4bit` 完整 MLX affine 4-bit 音樂模型與文生音樂 Profile；新增 `Mothersuperior/minimax-music3-composer-5.7b-distilled` Composer 元件下載方案，預設取用 `lr-6e-5`，並明確避免將 Composer 當成可獨立生成模型。
+- AssetSchemeHandler 對影片與音訊加入背景 HTTP Range 分塊串流，支援漸進播放、拖曳與停止任務保護；媒體匯入與 FFmpeg 相容轉檔改走可取消、可回報進度的工作佇列。
+- MediaCache 啟動時清理沒有對應資產的 UUID 孤兒檔；轉碼影片位元率依來源解析度調整，VideoToolbox 失敗訊息補充硬體編碼器與原始檔匯出／下載提示。Developer ID 實測確認 FFmpeg 使用同一 Team ID 簽章後不需額外 library-validation entitlement，已移除該檔案並保留 ad-hoc 本機建置相容性。
+- 自動流程頁面由建置中骨架改為宣告式範本；首個「簡單 MV」會建立獨立 Workspace，並準備主視覺、背景音樂、圖片循環與影音合併四個相依 Tabs。分頁 schema 升級為 v3，每個 Tab 個別保存工作類型、Profile、Prompt 與各類參數，切換分頁或重新啟動不會互相覆蓋。
+- 新增不依賴模型的圖片循環與影音合併工作。`MediaCompositionService` 透過內建 FFmpeg 支援多圖循環、單張秒數、總長度、解析度、FPS、Cover／Contain，以及音軌取代／混合、音量與長度策略；工作沿用既有 Job 取消、進度、`Video-YYYYMMDD-HHmm` 命名與資產 lineage。
+- 影片與音訊來源全面接入內建 FFmpeg 相容層：匯入時以 `ffprobe` 取得 Codec、音軌、時間與旋轉後尺寸；可播放格式沿用原檔，H.264／HEVC 優先無損改封裝，其餘影片使用 VideoToolbox H.264／AAC、音訊使用 M4A AAC 建立播放代理。`MediaAsset` 分離原始 `fileURL` 與代理 `playbackURL`，字幕輸出與刪除仍以原檔為準，代理只存於 App 管理快取並隨資產或專案清理。
+- 參考 PicViewer 導入 App 內建的 LGPL 動態版 FFmpeg 相容層：`MediaCompatibilityService` 統一 `ffmpeg`／`ffprobe` 定位、媒體探測、字幕音訊正規化、音樂輸出轉碼與 LTX 控制影片；正式 App 優先使用 Bundle 內工具，開發模式才回退環境與系統路徑。建置流程會封裝並依序簽署 dylib、工具與 App，預建二進位不進入 GitHub Source archive。
 - 字幕翻譯目標語言由 5 種擴充為 25 種；App 與獨立 MCP server 共用 `SubtitleTranslationLanguage` 清單，避免介面、驗證與工具 Schema 不一致。
 - 工作區刪除圖示改為符合主題的柔和紅色；媒體刪除對話框依安全順序排列「刪除檔案／取消／只移除」；MCP 未啟動時仍顯示 API 區塊並改為停用狀態。
 - 媒體移除改為顯示三選一對話框：只從工作區移除並保留檔案、從工作區移除並刪除磁碟檔案，或取消；四語系介面同步更新。

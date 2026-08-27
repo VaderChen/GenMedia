@@ -43,6 +43,6 @@ struct MediaAudioPreparerTests {
             paths.temporaryDirectory.path
                 == "/tmp/genmedia-tests/genmedia-asr-12345678-1234-1234-1234-1234567890AB"
         )
-        #expect(paths.audioURL == paths.temporaryDirectory.appendingPathComponent("audio.m4a"))
+        #expect(paths.audioURL == paths.temporaryDirectory.appendingPathComponent("audio.wav"))
     }
 }

@@ -129,35 +129,12 @@ extension AppStore {
                 installation.errorMessage = error.localizedDescription
                 installations[model.id] = installation
                 if let installerError = error as? ModelInstallerError,
-                   case let .authenticationRequired(downloadURL, _) = installerError {
-                    statusMessage = "Civitai 需要登入；已準備開啟下載網址。"
-                    presentCivitaiAuthenticationDialog(
-                        for: model,
-                        downloadURL: downloadURL
-                    )
+                   case .authenticationRequired = installerError {
+                    statusMessage = "Civitai LoRA 下載需要有效的 API Token，請至設定輸入後重試。"
                 } else {
                     statusMessage = "模型下載失敗：\(error.localizedDescription)"
                 }
             }
-        }
-    }
-
-    private func presentCivitaiAuthenticationDialog(
-        for model: ModelDescriptor,
-        downloadURL: URL
-    ) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Civitai 需要登入才能下載 LoRA"
-        alert.informativeText = "「\(model.displayName)」的下載網址需要 Civitai 登入或 API Token。按下「開啟下載網址」後，可在瀏覽器登入並手動下載；若要回到模型中心自動下載，請設定 CIVITAI_TOKEN 後再重試。"
-        alert.addButton(withTitle: "開啟下載網址")
-        alert.addButton(withTitle: "取消")
-        if alert.runModal() == .alertFirstButtonReturn {
-            guard NSWorkspace.shared.open(downloadURL) else {
-                statusMessage = "無法開啟 Civitai 下載網址。"
-                return
-            }
-            statusMessage = "已在預設瀏覽器開啟 Civitai 下載網址。"
         }
     }
 

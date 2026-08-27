@@ -7,6 +7,7 @@ GenMedia is a local AI media generation app with **native Apple Silicon support*
 - Swift handles models, profiles, job queues, files, and MLX/Core ML inference.
 - `WKWebView` embeds the HTML, CSS, and JavaScript UI without requiring a network connection or npm runtime.
 - Text-to-image, image-to-text, image-to-image, text-to-video, image-to-video, text-to-music, subtitle generation, and upscaling can run independently or be chained through asset lineage.
+- Automatic flows create workspace tabs with independent settings. The Simple MV template prepares linked key-visual, background-music, image-loop, and media-merge steps.
 - Every operation preserves a profile snapshot, making the model and architecture revision traceable after updates.
 - A dedicated settings page supports Traditional Chinese, English, Japanese, Korean, and six persistent color themes.
 - Settings provides a switch for a localhost-only MCP HTTP API, while a standalone JSON-RPC 2.0 stdio server remains available when the app is not running.
@@ -24,7 +25,12 @@ Requirements: macOS 14+, Apple Silicon, and Xcode 16+.
 ./run.command
 ```
 
-`build.command` creates the release executables and a standard `GenMedia.app` in `dist/`. The app contains WebUI resources, the MLX Metal runtime, the MCP server, and model diagnostic tools.
+`build.command` creates the release executables and a standard `GenMedia.app` in `dist/`. The app contains WebUI resources, the MLX Metal runtime, the MCP server, model diagnostic tools, and shared LGPL `ffmpeg`/`ffprobe` binaries as its media compatibility layer. Prepare the bundled FFmpeg once before the first app-bundle build:
+
+```bash
+brew install pkg-config
+./scripts/build-ffmpeg-macos.sh
+```
 
 ```bash
 # Build the release executables and app
@@ -41,10 +47,10 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 
 ### Video Runtime
 
-Video generation uses a replaceable external `ltx-2-mlx` runtime. The Swift app manages profiles, parameter validation, the job queue, cancellation, progress, assets, and video playback. Install the CLI and FFmpeg before first use:
+Video generation uses a replaceable external `ltx-2-mlx` runtime. The Swift app manages profiles, parameter validation, the job queue, cancellation, progress, assets, and video playback. Only the video CLI must be installed before first use:
 
 ```bash
-brew install uv ffmpeg
+brew install uv
 ./scripts/install-ltx-runtime.command
 ```
 
@@ -54,17 +60,33 @@ The app searches `GENIMAGE_LTX_RUNTIME`, `GENIMAGE_LTX_RUNTIME_ROOT/.venv/bin/lt
 GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 ```
 
-`ltx-2-mlx` uses its Gemma text encoder configuration by default. If a local Gemma model is available, set `GENIMAGE_LTX_GEMMA_MODEL` to its directory or Hugging Face ID. The app DMG currently does not bundle the Python runtime, Gemma weights, or FFmpeg. Treat these as optional external components and review their runtime and model licenses separately before distribution.
+`ltx-2-mlx` uses its Gemma text encoder configuration by default. If a local Gemma model is available, set `GENIMAGE_LTX_GEMMA_MODEL` to its directory or Hugging Face ID. The app DMG does not bundle the Python runtime or Gemma weights, but it does include the dynamic LGPL FFmpeg build. Review the video runtime and model licenses separately before distribution.
+
+### Compatible Media Import
+
+Imported video and audio are inspected by bundled `ffprobe` for container, codecs, tracks, duration, and display-oriented dimensions; long conversions run as cancellable jobs with progress. WebKit-playable sources remain untouched; H.264 or HEVC with only container or audio incompatibilities is remuxed losslessly to MP4; other video receives a VideoToolbox H.264/AAC playback proxy, while incompatible audio receives an M4A AAC proxy. Playback proxies are streamed in background chunks through `AssetSchemeHandler` with HTTP Range support for progressive playback and seeking. The original path remains the subtitle source, so sidecar subtitles still use the source directory and filename. Startup removes MediaCache orphans without matching assets, while closing a project or removing an asset cleans only app-managed compatibility cache files.
+
+### Automatic Flows and Media Composition
+
+Automatic flows use declarative steps to create a new workspace and its tabs. Every tab preserves its own task type, Profile assignment, Prompt, and image, video, music, or media-processing settings, so switching tabs or relaunching the app does not overwrite another draft. The first Simple MV template links text-to-image, text-to-music, image-loop video, and media merge.
+
+Image-loop and media-merge tasks do not require an AI model. `MediaCompositionService` runs them through the bundled FFmpeg. Image loops support multiple images, per-image timing, total duration, resolution, frame rate, and Cover or Contain fitting. Media merge supports replacing or mixing the original audio, volume control, and duration policies. Automatic-flow dependencies pass asset IDs rather than guessing filenames.
 
 ### Subtitle Generation
 
-The subtitle workflow accepts video or audio, extracts its audio track, and lets `SubtitleGenerationRouter` select a native Core ML ASR adapter. It preserves segment timing and exports SRT or WebVTT. Supported ASR profiles are multilingual Whisper Large v3 Turbo, Chinese Paraformer Large, and Japanese Parakeet 0.6B; the source language can be detected automatically or selected by the profile.
+The subtitle workflow accepts video or audio, uses the bundled `ffprobe` to inspect its tracks, and normalizes the selected audio through the bundled `ffmpeg` to 16 kHz mono PCM before `SubtitleGenerationRouter` selects a native Core ML ASR adapter. It preserves segment timing and exports SRT or WebVTT. Supported ASR profiles are multilingual Whisper Large v3 Turbo, Chinese Paraformer Large, and Japanese Parakeet 0.6B; the source language can be detected automatically or selected by the profile.
 
 After transcription, an optional local Qwen3.5 or Qwen3.8 MLX text model can translate the unchanged timeline into 25 target languages: Traditional Chinese, Simplified Chinese, English, Japanese, Korean, Spanish, French, German, Italian, Portuguese, Russian, Arabic, Hindi, Bengali, Indonesian, Vietnamese, Thai, Turkish, Polish, Dutch, Swedish, Czech, Ukrainian, Malay, and Filipino. The result is stored in the active workspace as a `generatedSubtitle` asset whose parent is the source video or audio asset.
 
 `GenImageASRPoC` is a standalone WhisperKit validation utility for checking media decoding, language recognition, and timestamps without modifying the main app workspace. The production app follows the same Swift/Core ML boundary. See [ASR Subtitle PoC](docs/ASR_POC.en.md).
 
 Qwen3-VL, Qwen3.5, and Qwen3.8 are multimodal models, so Model Center classifies each under both image-to-text and text-to-text and provides a profile for each capability. Managed downloads include `processor_config.json`, image/video preprocessing configuration, tokenizer data, chat templates, and the complete weight index; installation is reported complete only after required-file validation succeeds.
+
+### Civitai LoRA
+
+Model Center also includes several Civitai LoRAs based on `ZImageTurbo` (Asian Beauties, Turbo Lightning, Flat AnimeStyle, and Diorama). Paste an API token into the **Civitai LoRA** card in Settings and save it. The token is stored only in macOS Keychain and is never written to model manifests, workspaces, or logs. Model Center then downloads the file directly over HTTPS with an `Authorization: Bearer` header instead of opening the Civitai website for manual download.
+
+For legacy headless launch scripts, `CIVITAI_TOKEN` remains supported as a compatibility fallback.
 
 ### Profiles, Jobs, and Memory
 
@@ -91,9 +113,11 @@ Text-to-music is dispatched by `MusicGenerationRouter` to an ACE-Step 1.5 or Min
 
 - **ACE-Step 1.5 Turbo MLX**: the recommended profile, generating 10–300 second songs or instrumentals through the app's built-in Apple Silicon-native Swift/MLX runtime with no additional service installation. Its code and model use the commercially usable MIT License. Long audio uses overlap-discard tiled VAE decoding to control memory use.
 
-- **MiniMax Music 3 MLX 8-bit**: runs through the external `mlx-minimax-music3` CLI. Its 5–300 second setting is a maximum duration; the model may end naturally earlier based on the song structure, and the app reports the actual output duration after completion. Its model remains subject to the Community License.
+- **MiniMax Music 3 MLX 8-bit**: runs through the independent Swift Worker shipped with the app. Its 5–300 second setting is a maximum duration; the model may end naturally earlier based on the song structure, and the app reports the actual output duration after completion. Its model remains subject to the Community License.
+- **MiniMax Music 3 MLX 4-bit**: runs through the independent Swift Worker shipped with the app and uses the complete affine 4-bit MLX checkpoint. Its 5–300 second setting is a maximum duration; the model may still end naturally earlier based on the song structure. The model remains subject to the MiniMax Music 3 Community License.
+- **MiniMax Music 3 Composer 5.7B Distilled**: is available in Model Center as an optional Composer acceleration component. The installer selects the `lr-6e-5` weights; it requires a complete Music 3 checkpoint and a compatible runtime, and cannot generate music by itself.
 
-The native ACE-Step runtime ships with the app. Models, the MiniMax Music 3 runtime, and FFmpeg remain optional external components.
+The native ACE-Step runtime, MiniMax Music 3 Swift Worker, and LGPL FFmpeg compatibility layer ship with the app. MiniMax Music 3 models remain optional components.
 
 ## Validation
 
@@ -135,6 +159,7 @@ This internal refactor changes code boundaries and ownership only; existing gene
 Sources/
 ├── GenImageCore/
 │   ├── ApplicationSupport.swift  # The one definition of where app data lives
+│   ├── CivitaiTokenStore.swift   # macOS Keychain storage for the Civitai token
 │   ├── DomainModels.swift        # Assets, recipes, jobs, models, and profiles
 │   ├── InferenceServices.swift   # Image, text, video, music, and subtitle interfaces
 │   ├── ModelCatalog.swift        # Built-in models and profiles
@@ -151,6 +176,9 @@ Sources/
 │   ├── MusicGenerationRouter.swift
 │   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── MediaCompatibilityService.swift # Bundled FFmpeg/ffprobe lookup, probing, transcoding
+│   ├── MediaSourceCompatibilityService.swift # Direct source playback, remuxing, playback proxies
+│   ├── MediaCompositionService.swift # Image-loop video and media merging
 │   ├── MediaAudioPreparer.swift
 │   ├── WhisperSubtitleTranscriber.swift
 │   ├── ParaformerChineseSubtitleTranscriber.swift
@@ -162,7 +190,10 @@ Sources/
 │   └── CoreMLUpscaleService.swift
 ├── GenImageApp/
     ├── AppStore.swift            # Type declaration, stored properties, init
+    ├── AppStore+Credentials.swift # Settings credential operations
     ├── AppStore+SubtitleGeneration.swift
+    ├── AppStore+MediaImport.swift
+    ├── AppStore+MediaComposition.swift
     ├── AppStore+Workspaces.swift
     ├── AppStore+*.swift          # Other responsibility-based AppStore behavior
     ├── HybridBridgeController.swift
@@ -170,7 +201,7 @@ Sources/
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # Secure local image, video, and audio delivery to WebUI
     └── Resources/WebUI/
-        ├── js/automatic-flow.js  # Automatic-flow page scaffold
+        ├── js/automatic-flow.js  # Templates, Profile preflight, workspace plans
         └── …                     # Remaining HTML/CSS/JavaScript frontend
 ├── GenImageASRPoC/
     └── main.swift                # Standalone ASR validation utility
@@ -181,12 +212,15 @@ Patches/
 ├── MLX-Swift-LM-Qwen35-Text-Only.patch # Qwen3.5 text-only input compatibility
 └── manifest.txt                  # Dependency patch manifest applied during builds
 scripts/
-└── apply-runtime-patches.command  # Apply and verify dependency patches from the manifest
+├── apply-runtime-patches.command  # Apply and verify dependency patches from the manifest
+├── install-ltx-runtime.command     # Install the LTX video runtime
+├── install-minimax-music3-mlx-audio-runtime.command # Install the dedicated MiniMax 4-bit runtime
+└── build-ffmpeg-macos.sh          # Build a bundle-ready, relinkable LGPL FFmpeg distribution
 ```
 
 ## Current Status
 
-The app is connected to local inference for Z-Image Turbo text-to-image, Qwen3-VL/Qwen3.5/Qwen3.8 multimodal image-to-text and text-to-text, Qwen 2511 image-to-image, LTX-2.3 MLX text-to-video and image-to-video, ACE-Step 1.5 Turbo MLX and MiniMax Music 3 MLX 8-bit text-to-music, Whisper/Paraformer/Parakeet subtitle generation, and Core ML Real-ESRGAN upscaling. Videos are added as MP4 assets; music exports as MP3, M4A, AAC, or FLAC; subtitles export as SRT or WebVTT with language, timing, profile snapshots, and lineage.
+The app is connected to local inference for Z-Image Turbo text-to-image, Qwen3-VL/Qwen3.5/Qwen3.8 multimodal image-to-text and text-to-text, Qwen 2511 image-to-image, LTX-2.3 MLX text-to-video and image-to-video, ACE-Step 1.5 Turbo MLX and MiniMax Music 3 MLX 8-bit/4-bit text-to-music, Whisper/Paraformer/Parakeet subtitle generation, and Core ML Real-ESRGAN upscaling. Videos are added as MP4 assets; music exports as MP3, M4A, AAC, or FLAC; subtitles export as SRT or WebVTT with language, timing, profile snapshots, and lineage.
 
 More information:
 
@@ -204,3 +238,4 @@ This project uses a dual GPLv3 and commercial licensing model:
 
 - Open-source use is licensed under the [GNU General Public License v3.0](LICENSE).
 - If you cannot or do not want to comply with GPLv3, such as for closed-source integration, proprietary distribution, or customized commercial terms, contact the copyright holder to obtain a separate commercial license.
+- Bundled FFmpeg and LAME remain under their respective LGPL terms. License texts, exact source versions, and build information are included under `Contents/Resources/Licenses/` in the app.

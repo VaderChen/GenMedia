@@ -7,6 +7,8 @@ cd "$SCRIPT_DIR"
 
 export COPYFILE_DISABLE=1
 
+FFMPEG_ROOT="${GENMEDIA_FFMPEG_ROOT:-$SCRIPT_DIR/third_party/ffmpeg}"
+
 ensure_metal_toolchain() {
   local metal_path=""
   local metallib_path=""
@@ -45,6 +47,100 @@ ensure_metal_toolchain() {
   print "Xcode Metal Toolchain 安裝完成。"
 }
 
+prepare_bundled_ffmpeg() {
+  local source_bin_dir="$FFMPEG_ROOT/bin"
+  local source_lib_dir="$FFMPEG_ROOT/lib"
+  local source_license_dir="$FFMPEG_ROOT/share/licenses"
+  local resource_bin_dir="$RESOURCES_DIR/bin"
+  local resource_lib_dir="$RESOURCES_DIR/lib"
+  local tool version_line configuration_line encoders library dependency
+
+  if [[ ! -d "$source_bin_dir" ]]; then
+    print -u2 "錯誤：找不到 GenMedia 內建 FFmpeg：$source_bin_dir"
+    print -u2 "請先執行：./scripts/build-ffmpeg-macos.sh"
+    exit 1
+  fi
+  for tool in ffmpeg ffprobe; do
+    if [[ ! -x "$source_bin_dir/$tool" ]]; then
+      print -u2 "錯誤：FFmpeg 目錄缺少可執行檔：$source_bin_dir/$tool"
+      exit 1
+    fi
+    version_line="$($source_bin_dir/$tool -version | head -1 || true)"
+    configuration_line="$($source_bin_dir/$tool -version | sed -n 's/^configuration: //p' || true)"
+    if [[ "$configuration_line" == *"--enable-gpl"* || \
+          "$configuration_line" == *"--enable-nonfree"* || \
+          "$configuration_line" == *"libx264"* || \
+          "$configuration_line" == *"libx265"* || \
+          "$configuration_line" == *"libxvid"* ]]; then
+      print -u2 "錯誤：拒絕打包非 LGPL FFmpeg：$version_line"
+      exit 1
+    fi
+    print "檢查 LGPL FFmpeg：$version_line"
+  done
+
+  encoders="$($source_bin_dir/ffmpeg -hide_banner -encoders 2>/dev/null || true)"
+  for encoder in libmp3lame aac flac h264_videotoolbox pcm_s16le; do
+    if [[ "$encoders" != *"$encoder"* ]]; then
+      print -u2 "錯誤：內建 FFmpeg 缺少必要 Encoder：$encoder"
+      exit 1
+    fi
+  done
+
+  typeset -a source_libraries
+  source_libraries=("$source_lib_dir"/*.dylib(N))
+  if (( ${#source_libraries[@]} == 0 )); then
+    print -u2 "錯誤：FFmpeg 目錄缺少動態函式庫：$source_lib_dir"
+    exit 1
+  fi
+
+  mkdir -p "$resource_bin_dir" "$resource_lib_dir"
+  /bin/cp "$source_bin_dir/ffmpeg" "$source_bin_dir/ffprobe" "$resource_bin_dir/"
+  chmod 755 "$resource_bin_dir/ffmpeg" "$resource_bin_dir/ffprobe"
+  for library in "${source_libraries[@]}"; do
+    /bin/cp -P "$library" "$resource_lib_dir/${library:t}"
+  done
+
+  typeset -A required_licenses
+  required_licenses=(
+    "$source_license_dir/ffmpeg/COPYING.LGPLv2.1" "LGPL-2.1-FFmpeg.txt"
+    "$source_license_dir/ffmpeg/BUILD-INFO.txt" "FFmpeg-BUILD-INFO.txt"
+    "$source_license_dir/lame/COPYING" "LAME-COPYING.txt"
+    "$source_license_dir/lame/LICENSE" "LAME-LICENSE.txt"
+  )
+  for license_source license_name in "${(@kv)required_licenses}"; do
+    if [[ ! -s "$license_source" ]]; then
+      print -u2 "錯誤：FFmpeg 套件缺少授權文件：$license_source"
+      exit 1
+    fi
+    /bin/cp "$license_source" "$LICENSES_DIR/$license_name"
+  done
+
+  while IFS= read -r library; do
+    /usr/bin/install_name_tool -id "@rpath/${library:t}" "$library"
+    while IFS= read -r dependency; do
+      [[ -e "$resource_lib_dir/${dependency:t}" ]] || continue
+      /usr/bin/install_name_tool \
+        -change "$dependency" "@rpath/${dependency:t}" "$library"
+    done < <(
+      /usr/bin/otool -L "$library" \
+        | sed -n 's/^[[:space:]]*\([^[:space:]]*\.dylib\).*$/\1/p'
+    )
+  done < <(find "$resource_lib_dir" -maxdepth 1 -type f -name '*.dylib' -print)
+
+  for tool in ffmpeg ffprobe; do
+    /usr/bin/install_name_tool \
+      -add_rpath '@executable_path/../lib' "$resource_bin_dir/$tool" 2>/dev/null || true
+    while IFS= read -r dependency; do
+      [[ -e "$resource_lib_dir/${dependency:t}" ]] || continue
+      /usr/bin/install_name_tool \
+        -change "$dependency" "@rpath/${dependency:t}" "$resource_bin_dir/$tool"
+    done < <(
+      /usr/bin/otool -L "$resource_bin_dir/$tool" \
+        | sed -n 's/^[[:space:]]*\([^[:space:]]*\.dylib\).*$/\1/p'
+    )
+  done
+}
+
 PACKAGE_APP=true
 case "${1:-}" in
   --no-app)
@@ -81,10 +177,12 @@ fi
 ensure_metal_toolchain
 
 QWEN_WORKER_PACKAGE="$SCRIPT_DIR/RuntimeSupport/Qwen2511Worker"
+MINIMAX_WORKER_PACKAGE="$SCRIPT_DIR/RuntimeSupport/MiniMaxMusic3Worker"
 
 print "正在準備 Swift 套件依賴…"
 swift package resolve
 swift package --package-path "$QWEN_WORKER_PACKAGE" resolve
+swift package --package-path "$MINIMAX_WORKER_PACKAGE" resolve
 
 # 相依套件的原始碼修正貼在 .build/checkouts/ 內，每次 resolve 之後都要重跑。
 # 清單在 Patches/manifest.txt；任何一項無法套用或驗證不過都會中止建置。
@@ -116,6 +214,34 @@ fi
   --bin-path "$QWEN_WORKER_BIN_DIR" \
   --output "$QWEN_METALLIB" \
   --deployment-target 26.0
+
+print "正在編譯 MiniMax Music 3 Runtime Worker…"
+swift build --package-path "$MINIMAX_WORKER_PACKAGE" -c release
+MINIMAX_WORKER_BIN_DIR="$(swift build --package-path "$MINIMAX_WORKER_PACKAGE" -c release --show-bin-path)"
+MINIMAX_WORKER="$MINIMAX_WORKER_BIN_DIR/GenImageMiniMaxMusic3Worker"
+if [[ ! -x "$MINIMAX_WORKER" ]]; then
+  print -u2 "錯誤：找不到 MiniMax Music 3 Runtime Worker：$MINIMAX_WORKER"
+  exit 1
+fi
+
+MINIMAX_METALLIB_SCRIPT="$SCRIPT_DIR/.build/checkouts/Z-Image.swift/scripts/build_mlx_metallib.sh"
+MINIMAX_MLX_SWIFT="$MINIMAX_WORKER_PACKAGE/.build/checkouts/mlx-swift"
+MINIMAX_METALLIB="$MINIMAX_WORKER_BIN_DIR/mlx.metallib"
+if [[ ! -x "$MINIMAX_METALLIB_SCRIPT" || ! -d "$MINIMAX_MLX_SWIFT" ]]; then
+  print -u2 "錯誤：找不到 MiniMax Worker 的 MLX Metal 編譯來源。"
+  exit 1
+fi
+"$MINIMAX_METALLIB_SCRIPT" \
+  --configuration release \
+  --project-root "$MINIMAX_WORKER_PACKAGE" \
+  --mlx-swift-path "$MINIMAX_MLX_SWIFT" \
+  --bin-path "$MINIMAX_WORKER_BIN_DIR" \
+  --output "$MINIMAX_METALLIB" \
+  --deployment-target 26.0
+if ! /usr/bin/cmp -s "$QWEN_METALLIB" "$MINIMAX_METALLIB"; then
+  print -u2 "錯誤：Qwen 與 MiniMax Worker 的 mlx.metallib 不一致，不能共用 Helpers Runtime。"
+  exit 1
+fi
 
 BIN_DIR="$(swift build -c release --show-bin-path)"
 METALLIB_SOURCE="$SCRIPT_DIR/RuntimeSupport/mlx.metallib"
@@ -227,13 +353,17 @@ if [[ "$PACKAGE_APP" == true ]]; then
   /bin/cp "$BIN_DIR/GenImageMCP" "$HELPERS_DIR/GenImageMCP"
   /bin/cp "$BIN_DIR/GenImageDoctor" "$HELPERS_DIR/GenImageDoctor"
   /bin/cp "$QWEN_WORKER" "$HELPERS_DIR/GenImageQwen2511Worker"
+  /bin/cp "$MINIMAX_WORKER" "$HELPERS_DIR/GenImageMiniMaxMusic3Worker"
   /bin/cp "$METALLIB_SOURCE" "$MACOS_DIR/mlx.metallib"
-  /bin/cp "$QWEN_METALLIB" "$HELPERS_DIR/mlx.metallib"
+  # Qwen and MiniMax Workers both use mlx-swift 0.31.6, so they share one
+  # helper metallib. Build both independently above to catch version drift.
+  /bin/cp "$MINIMAX_METALLIB" "$HELPERS_DIR/mlx.metallib"
   chmod 755 \
     "$MACOS_DIR/GenImage" \
     "$HELPERS_DIR/GenImageMCP" \
     "$HELPERS_DIR/GenImageDoctor" \
-    "$HELPERS_DIR/GenImageQwen2511Worker"
+    "$HELPERS_DIR/GenImageQwen2511Worker" \
+    "$HELPERS_DIR/GenImageMiniMaxMusic3Worker"
 
   APP_RESOURCE_BUNDLE="$BIN_DIR/GenImage_GenImageApp.bundle"
   WEBUI_SOURCE=""
@@ -272,7 +402,13 @@ if [[ "$PACKAGE_APP" == true ]]; then
   for resource_bundle in "${QWEN_RESOURCE_BUNDLES[@]}"; do
     /usr/bin/ditto --norsrc --noqtn "$resource_bundle" "$QWEN_RESOURCES_DIR/${resource_bundle:t}"
   done
+  typeset -a MINIMAX_RESOURCE_BUNDLES
+  MINIMAX_RESOURCE_BUNDLES=("$MINIMAX_WORKER_BIN_DIR"/*.bundle(N))
+  for resource_bundle in "${MINIMAX_RESOURCE_BUNDLES[@]}"; do
+    /usr/bin/ditto --norsrc --noqtn "$resource_bundle" "$HELPERS_DIR/${resource_bundle:t}"
+  done
   /usr/bin/ditto --norsrc --noqtn "$SCRIPT_DIR/LICENSE" "$LICENSES_DIR/GPL-3.0.txt"
+  prepare_bundled_ffmpeg
 
   # SwiftPM emits resource-only directories with a .bundle suffix but no
   # Info.plist. Add the minimal bundle metadata required by macOS codesign;
@@ -338,12 +474,29 @@ if [[ "$PACKAGE_APP" == true ]]; then
     fi
   done
 
+  typeset -a FFMPEG_SIGNING_ARGUMENTS
+  FFMPEG_SIGNING_ARGUMENTS=("${SIGNING_ARGUMENTS[@]}")
+  if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
+    FFMPEG_SIGNING_ARGUMENTS=(--force --sign -)
+  fi
+
+  while IFS= read -r dynamic_library; do
+    /usr/bin/codesign "${FFMPEG_SIGNING_ARGUMENTS[@]}" "$dynamic_library"
+  done < <(find "$RESOURCES_DIR/lib" -maxdepth 1 -type f -name '*.dylib' -print)
+
+  for ffmpeg_tool in \
+    "$RESOURCES_DIR/bin/ffmpeg" \
+    "$RESOURCES_DIR/bin/ffprobe"; do
+    /usr/bin/codesign "${FFMPEG_SIGNING_ARGUMENTS[@]}" "$ffmpeg_tool"
+  done
+
   for code_object in \
     "$MACOS_DIR/mlx.metallib" \
     "$HELPERS_DIR/mlx.metallib" \
     "$HELPERS_DIR/GenImageMCP" \
     "$HELPERS_DIR/GenImageDoctor" \
     "$HELPERS_DIR/GenImageQwen2511Worker" \
+    "$HELPERS_DIR/GenImageMiniMaxMusic3Worker" \
     "$MACOS_DIR/GenImage"; do
     /usr/bin/codesign "${SIGNING_ARGUMENTS[@]}" "$code_object"
   done
@@ -362,6 +515,7 @@ print "GenImage：$BIN_DIR/GenImage"
 print "GenImage MCP：$BIN_DIR/GenImageMCP"
 print "模型診斷工具：$BIN_DIR/GenImageDoctor"
 print "Qwen 2511 Runtime：$QWEN_WORKER"
+print "MiniMax Music 3 Runtime：$MINIMAX_WORKER"
 print "MLX Metal Runtime：$METALLIB_TARGET"
 if [[ "$PACKAGE_APP" == true ]]; then
   print "App Bundle：$APP_BUNDLE"

@@ -82,6 +82,33 @@ export function renderSettings(state, ui) {
           </div>
         </section>
 
+        <section class="settings-card vertical civitai-settings-card">
+          <div>
+            <h2>${t("settings.civitai")}</h2>
+            <p>${t("settings.civitaiNote")}</p>
+            <p><a class="settings-external-link" href="https://civitai.com/" target="_blank" rel="noreferrer">${t("settings.civitaiWebsite")}</a></p>
+          </div>
+          <div class="settings-token-control">
+            <label class="settings-token-label" for="civitai-api-token">${t("settings.civitaiToken")}</label>
+            <input
+              id="civitai-api-token"
+              class="field"
+              type="password"
+              value=""
+              placeholder="${t("settings.civitaiTokenPlaceholder")}"
+              data-civitai-token
+              autocomplete="new-password"
+              spellcheck="false"
+            />
+            <div class="button-row settings-token-actions">
+              <button class="primary-button compact" data-action="saveCivitaiToken">${t("settings.civitaiSave")}</button>
+              <button class="danger-button compact" data-action="clearCivitaiToken" ${state.civitaiTokenConfigured ? "" : "disabled"}>${t("settings.civitaiClear")}</button>
+            </div>
+          </div>
+          <p class="settings-token-status ${state.civitaiTokenConfigured ? "is-configured" : ""}">${state.civitaiTokenConfigured ? t("settings.civitaiConfigured") : t("settings.civitaiNotConfigured")}</p>
+          <p>${t("settings.civitaiTokenNote")}</p>
+        </section>
+
         <section class="settings-card vertical mcp-settings-card">
           <div class="mcp-setting-header">
             <div>

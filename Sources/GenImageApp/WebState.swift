@@ -12,6 +12,7 @@ struct WebAsset: Encodable {
     let parentAssetID: UUID?
     let kind: AssetKind
     let title: String
+    let fileName: String?
     let pixelWidth: Int
     let pixelHeight: Int
     let mediaDurationSeconds: Double?
@@ -29,6 +30,7 @@ struct WebAsset: Encodable {
         parentAssetID = asset.parentAssetID
         kind = asset.kind
         title = asset.title
+        fileName = asset.fileURL?.lastPathComponent
         pixelWidth = asset.pixelWidth
         pixelHeight = asset.pixelHeight
         mediaDurationSeconds = asset.mediaDurationSeconds
@@ -39,7 +41,9 @@ struct WebAsset: Encodable {
         languageCode = asset.languageCode
         textContent = asset.textContent
         createdAt = asset.createdAt
-        previewURL = asset.fileURL == nil ? nil : "genimage-asset://\(asset.id.uuidString)"
+        previewURL = asset.playbackURL == nil && asset.fileURL == nil
+            ? nil
+            : "genimage-asset://\(asset.id.uuidString)"
     }
 }
 
@@ -52,6 +56,7 @@ struct WebOperation: Encodable {
     let id: UUID
     let action: WorkflowAction
     let inputAssetID: UUID?
+    let inputAssetIDs: [UUID]?
     let outputAssetIDs: [UUID]
     let profileName: String?
     let profileRevision: Int?
@@ -151,6 +156,7 @@ struct WebAppState: Encodable {
     let selectedWorkspaceID: UUID
     let modelRootPath: String
     let outputDirectoryPath: String
+    let civitaiTokenConfigured: Bool
     let assets: [WebAsset]
     let selectedAssetID: UUID?
     let comparisonAssetID: UUID?
@@ -180,6 +186,7 @@ struct WebAppState: Encodable {
         selectedWorkspaceID = store.selectedProjectID
         modelRootPath = store.modelRootPath
         outputDirectoryPath = store.outputDirectoryPath
+        civitaiTokenConfigured = CivitaiTokenStore.isConfigured()
         assets = store.projectAssets.map(WebAsset.init)
         selectedAssetID = store.selectedAssetID
         comparisonAssetID = store.comparisonAssetID
@@ -203,6 +210,7 @@ struct WebAppState: Encodable {
                 id: $0.id,
                 action: $0.action,
                 inputAssetID: $0.inputAssetID,
+                inputAssetIDs: $0.inputAssetIDs,
                 outputAssetIDs: $0.outputAssetIDs,
                 profileName: $0.profileSnapshot?.name,
                 profileRevision: $0.profileSnapshot?.profileRevision

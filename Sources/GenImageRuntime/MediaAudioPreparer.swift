@@ -1,4 +1,3 @@
-@preconcurrency import AVFoundation
 import Foundation
 
 struct PreparedMediaAudio: Sendable {
@@ -69,7 +68,7 @@ enum MediaAudioPreparer {
             temporaryDirectory: temporaryDirectory,
             audioURL: temporaryDirectory
                 .appendingPathComponent("audio", isDirectory: false)
-                .appendingPathExtension("m4a")
+                .appendingPathExtension("wav")
         )
     }
 
@@ -78,16 +77,15 @@ enum MediaAudioPreparer {
             throw MediaAudioPreparationError.inputMissing(sourceURL)
         }
 
-        let asset = AVURLAsset(url: sourceURL)
-        let audioTracks: [AVAssetTrack]
-        let duration: CMTime
+        let probe: MediaProbeResult
         do {
-            audioTracks = try await asset.loadTracks(withMediaType: .audio)
-            duration = try await asset.load(.duration)
+            probe = try await MediaCompatibilityService.probe(sourceURL: sourceURL)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw MediaAudioPreparationError.inputUnreadable(sourceURL, error.localizedDescription)
         }
-        guard !audioTracks.isEmpty else {
+        guard probe.hasAudio else {
             throw MediaAudioPreparationError.noAudioTrack(sourceURL)
         }
 
@@ -100,45 +98,43 @@ enum MediaAudioPreparer {
             withIntermediateDirectories: true
         )
 
-        guard let exporter = AVAssetExportSession(
-            asset: asset,
-            presetName: AVAssetExportPresetAppleM4A
-        ) else {
-            throw MediaAudioPreparationError.exportFailed(
-                sourceURL,
-                "系統無法建立 Apple M4A 轉換工作。"
-            )
-        }
-        let handle = ExportSessionHandle(exporter)
-        handle.session.outputURL = paths.audioURL
-        handle.session.outputFileType = .m4a
-        handle.session.shouldOptimizeForNetworkUse = false
-
+        let logURL = paths.temporaryDirectory.appendingPathComponent("ffmpeg.log")
+        defer { try? FileManager.default.removeItem(at: logURL) }
         do {
-            try await withCheckedThrowingContinuation { continuation in
-                handle.session.exportAsynchronously {
-                    switch handle.session.status {
-                    case .completed:
-                        continuation.resume()
-                    case .cancelled:
-                        continuation.resume(throwing: CancellationError())
-                    case .failed, .waiting, .exporting, .unknown:
-                        continuation.resume(
-                            throwing: handle.session.error
-                                ?? MediaAudioPreparationError.exportFailed(
-                                    sourceURL,
-                                    "ExportSession 狀態：\(handle.session.status.rawValue)"
-                                )
-                        )
-                    @unknown default:
-                        continuation.resume(
-                            throwing: MediaAudioPreparationError.exportFailed(
-                                sourceURL,
-                                "ExportSession 回傳未知狀態。"
-                            )
-                        )
-                    }
+            let log = try RuntimeLog(at: logURL)
+            defer { log.close() }
+            let startedAt = Date()
+            let timeout = max(5 * 60, probe.durationSeconds * 2)
+            let status = try await MediaCompatibilityService.runFFmpeg(
+                arguments: [
+                    "-y",
+                    "-nostdin",
+                    "-hide_banner",
+                    "-loglevel", "error",
+                    "-i", sourceURL.path,
+                    "-map", "0:a:0",
+                    "-vn",
+                    "-ac", String(speechRecognitionFormat.channelCount),
+                    "-ar", String(Int(speechRecognitionFormat.sampleRate)),
+                    "-c:a", "pcm_s16le",
+                    "-f", "wav",
+                    paths.audioURL.path
+                ],
+                log: log,
+                pollInterval: .milliseconds(100)
+            ) {
+                if Date().timeIntervalSince(startedAt) >= timeout {
+                    throw MediaAudioPreparationError.exportTimedOut(sourceURL)
                 }
+            }
+            guard status == 0 else {
+                throw MediaAudioPreparationError.exportFailed(
+                    sourceURL,
+                    log.message(fallback: "FFmpeg 未提供錯誤訊息。")
+                )
+            }
+            guard RuntimeLog.fileSize(at: paths.audioURL) > 44 else {
+                throw MediaAudioPreparationError.outputMissing(paths.audioURL)
             }
         } catch {
             try? FileManager.default.removeItem(at: paths.temporaryDirectory)
@@ -148,17 +144,9 @@ enum MediaAudioPreparer {
         return PreparedMediaAudio(
             sourceURL: sourceURL,
             audioURL: paths.audioURL,
-            durationSeconds: duration.isNumeric ? max(0, duration.seconds) : 0,
+            durationSeconds: probe.durationSeconds,
             temporaryDirectory: paths.temporaryDirectory
         )
-    }
-}
-
-private final class ExportSessionHandle: @unchecked Sendable {
-    let session: AVAssetExportSession
-
-    init(_ session: AVAssetExportSession) {
-        self.session = session
     }
 }
 
@@ -166,7 +154,9 @@ enum MediaAudioPreparationError: LocalizedError, Sendable {
     case inputMissing(URL)
     case inputUnreadable(URL, String)
     case noAudioTrack(URL)
+    case exportTimedOut(URL)
     case exportFailed(URL, String)
+    case outputMissing(URL)
 
     var errorDescription: String? {
         switch self {
@@ -176,8 +166,12 @@ enum MediaAudioPreparationError: LocalizedError, Sendable {
             "無法讀取媒體「\(url.lastPathComponent)」：\(reason)"
         case let .noAudioTrack(url):
             "媒體沒有可辨識的音訊軌：\(url.lastPathComponent)"
+        case let .exportTimedOut(url):
+            "準備辨識音訊逾時：\(url.lastPathComponent)"
         case let .exportFailed(url, reason):
             "無法準備「\(url.lastPathComponent)」的辨識音訊：\(reason)"
+        case let .outputMissing(url):
+            "FFmpeg 完成後沒有產生有效的辨識音訊：\(url.path)"
         }
     }
 }

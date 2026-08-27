@@ -78,7 +78,7 @@ function navButton(ui, route, icon, title) {
 }
 
 export function renderRoute(state, ui) {
-  if (ui.route === "automaticFlow") return renderAutomaticFlow();
+  if (ui.route === "automaticFlow") return renderAutomaticFlow(state);
   if (ui.route === "models") return renderModels(state, ui);
   if (ui.route === "profiles") return renderProfiles(state, ui);
   if (ui.route === "downloads") return renderDownloads(state);

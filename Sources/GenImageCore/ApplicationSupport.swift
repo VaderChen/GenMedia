@@ -22,6 +22,8 @@ public enum ApplicationSupport: Sendable {
         case runtime = "Runtime"
         /// 從剪貼簿貼上的圖片。
         case pasted = "Pasted"
+        /// FFmpeg 為 WebKit 建立的可播放媒體代理。
+        case mediaCache = "MediaCache"
         /// 未指定輸出目錄時的預設輸出位置。
         case generated = "Generated"
         /// 開啟中生成專案的索引。
@@ -56,6 +58,33 @@ public enum ApplicationSupport: Sendable {
         let root = rootURL(fileManager: fileManager).resolvingSymlinksInPath().standardizedFileURL
         let rootPath = root.path.hasSuffix("/") ? root.path : root.path + "/"
         return url.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(rootPath)
+    }
+
+    /// 找出 MediaCache 中沒有對應工作區資產的暫存代理檔案。
+    ///
+    /// 只回報檔名主體是 UUID 的一般檔案，避免清掉非本 App 建立的內容或仍在寫入的 `.part` 檔案。
+    public static func orphanMediaCacheFiles(
+        in directory: URL,
+        referencedAssetIDs: Set<UUID>,
+        fileManager: FileManager = .default
+    ) -> [URL] {
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        return entries.filter { entry in
+            guard let resourceValues = try? entry.resourceValues(forKeys: [.isRegularFileKey]),
+                  resourceValues.isRegularFile == true,
+                  let assetID = UUID(uuidString: entry.deletingPathExtension().lastPathComponent)
+            else {
+                return false
+            }
+            return !referencedAssetIDs.contains(assetID)
+        }
     }
 
     /// 把舊根目錄的內容接到現在的根目錄下，回傳實際搬移的項目名稱。

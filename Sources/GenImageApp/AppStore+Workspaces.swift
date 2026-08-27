@@ -2,8 +2,9 @@ import Foundation
 import GenImageCore
 
 extension AppStore {
-    func createWorkspace(name: String) {
-        guard canSwitchWorkspace else { return }
+    @discardableResult
+    func createWorkspace(name: String) -> UUID? {
+        guard canSwitchWorkspace else { return nil }
         let baseName = String(
             name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)
         )
@@ -15,6 +16,7 @@ extension AppStore {
         projects.append(workspace)
         selectWorkspace(workspace.id, announce: false)
         statusMessage = "已新增工作區「\(workspace.name)」。"
+        return workspace.id
     }
 
     func selectWorkspace(_ id: UUID) {
