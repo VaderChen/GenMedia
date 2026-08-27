@@ -21,19 +21,39 @@ LAME_PREFIX="$SOURCE_ROOT/lame-$LAME_VERSION-macos14"
 LAME_DOWNLOAD_URL="https://downloads.sourceforge.net/project/lame/lame/$LAME_VERSION/lame-$LAME_VERSION.tar.gz"
 LAME_LIB_DIR="$LAME_PREFIX/lib"
 BUILD_SUCCEEDED=false
+PKG_CONFIG_FALLBACK_PATH=""
+PKG_CONFIG_COMMAND="${PKG_CONFIG:-$(command -v pkg-config 2>/dev/null || true)}"
+if [[ -z "$PKG_CONFIG_COMMAND" ]]; then
+  PKG_CONFIG_FALLBACK_SOURCE="$SCRIPT_DIR/pkg-config-fallback.sh"
+  PKG_CONFIG_COMMAND="/tmp/genmedia-pkg-config-fallback-$UID"
+  if [[ ! -x "$PKG_CONFIG_FALLBACK_SOURCE" ]]; then
+    print -u2 "找不到 GenMedia pkg-config fallback：$PKG_CONFIG_FALLBACK_SOURCE"
+    exit 1
+  fi
+  /bin/cp "$PKG_CONFIG_FALLBACK_SOURCE" "$PKG_CONFIG_COMMAND"
+  chmod 755 "$PKG_CONFIG_COMMAND"
+  PKG_CONFIG_FALLBACK_PATH="$PKG_CONFIG_COMMAND"
+fi
 
-for command_name in curl tar make clang pkg-config otool vtool install_name_tool; do
+for command_name in curl tar make clang otool vtool install_name_tool; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     print -u2 "缺少 FFmpeg 建置必要指令：$command_name"
     exit 1
   fi
 done
+if [[ ! -x "$PKG_CONFIG_COMMAND" ]]; then
+  print -u2 "找不到可用的 pkg-config 或 GenMedia fallback：$PKG_CONFIG_COMMAND"
+  exit 1
+fi
 
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
   print -u2 "此 FFmpeg 建置腳本只支援 Apple Silicon macOS。"
   exit 1
 fi
 restore_previous_prefix() {
+  if [[ -n "$PKG_CONFIG_FALLBACK_PATH" ]]; then
+    rm -f -- "$PKG_CONFIG_FALLBACK_PATH"
+  fi
   if [[ "$BUILD_SUCCEEDED" == false ]]; then
     rm -rf -- "$PREFIX"
     if [[ -d "$PREFIX_BACKUP" ]]; then
@@ -75,6 +95,7 @@ if [[ -f Makefile ]]; then
 fi
 CFLAGS="-O3 -mmacosx-version-min=14.0" \
 LDFLAGS="-mmacosx-version-min=14.0" \
+PKG_CONFIG="$PKG_CONFIG_COMMAND" \
 ./configure \
   --prefix="$LAME_PREFIX" \
   --enable-shared \
@@ -97,7 +118,8 @@ fi
 
 rm -rf -- "$STAGING_ROOT"
 
-PKG_CONFIG_PATH="$LAME_LIB_DIR/pkgconfig" ./configure \
+./configure \
+  --pkg-config="$PKG_CONFIG_COMMAND" \
   --prefix="$INSTALL_PREFIX" \
   --arch=arm64 \
   --target-os=darwin \
@@ -137,6 +159,10 @@ for library in "${EXTERNAL_LIBRARIES[@]}"; do
   /bin/cp -P "$library" "$PREFIX/lib/${library:t}"
 done
 
+# ExFAT 等外接磁碟可能在複製 dylib 時建立 AppleDouble sidecar；這些
+# `._*.dylib` 並非 Mach-O，不可交給 install_name_tool 或 codesign。
+find "$PREFIX" -name '._*' -delete
+
 while IFS= read -r library; do
   /usr/bin/install_name_tool -id "@rpath/${library:t}" "$library"
   while IFS= read -r dependency; do
@@ -147,7 +173,7 @@ while IFS= read -r library; do
     /usr/bin/otool -L "$library" \
       | sed -n 's/^[[:space:]]*\([^[:space:]]*\.dylib\).*$/\1/p'
   )
-done < <(find "$PREFIX/lib" -maxdepth 1 -type f -name '*.dylib' -print)
+done < <(find "$PREFIX/lib" -maxdepth 1 -type f -name '*.dylib' ! -name '._*' -print)
 
 for tool in ffmpeg ffprobe; do
   /usr/bin/install_name_tool \
@@ -216,6 +242,9 @@ done
 BUILD_SUCCEEDED=true
 if [[ -d "$PREFIX_BACKUP" ]]; then
   rm -rf -- "$PREFIX_BACKUP"
+fi
+if [[ -n "$PKG_CONFIG_FALLBACK_PATH" ]]; then
+  rm -f -- "$PKG_CONFIG_FALLBACK_PATH"
 fi
 trap - EXIT INT TERM
 

@@ -9,6 +9,42 @@ export COPYFILE_DISABLE=1
 
 FFMPEG_ROOT="${GENMEDIA_FFMPEG_ROOT:-$SCRIPT_DIR/third_party/ffmpeg}"
 
+bundled_ffmpeg_ready() {
+  local source_bin_dir="$FFMPEG_ROOT/bin"
+  local source_lib_dir="$FFMPEG_ROOT/lib"
+  local source_license_dir="$FFMPEG_ROOT/share/licenses"
+  local -a source_libraries
+  source_libraries=("$source_lib_dir"/*.dylib(N))
+
+  [[ -x "$source_bin_dir/ffmpeg" && \
+     -x "$source_bin_dir/ffprobe" && \
+     -s "$source_license_dir/ffmpeg/COPYING.LGPLv2.1" && \
+     -s "$source_license_dir/ffmpeg/BUILD-INFO.txt" && \
+     -s "$source_license_dir/lame/COPYING" && \
+     -s "$source_license_dir/lame/LICENSE" && \
+     ${#source_libraries[@]} -gt 0 ]]
+}
+
+ensure_bundled_ffmpeg() {
+  local build_script="$SCRIPT_DIR/scripts/build-ffmpeg-macos.sh"
+
+  if bundled_ffmpeg_ready; then
+    return 0
+  fi
+  if [[ ! -x "$build_script" ]]; then
+    print -u2 "錯誤：找不到可執行的 FFmpeg 建置腳本：$build_script"
+    exit 1
+  fi
+
+  print "尚未準備 GenMedia 內建 FFmpeg，正在自動建立 LGPL 發佈套件…"
+  FFMPEG_PREFIX="$FFMPEG_ROOT" "$build_script"
+  if ! bundled_ffmpeg_ready; then
+    print -u2 "錯誤：FFmpeg 自動建置完成後仍缺少必要檔案：$FFMPEG_ROOT"
+    exit 1
+  fi
+  print "GenMedia 內建 FFmpeg 已準備完成。"
+}
+
 ensure_metal_toolchain() {
   local metal_path=""
   local metallib_path=""
@@ -55,11 +91,7 @@ prepare_bundled_ffmpeg() {
   local resource_lib_dir="$RESOURCES_DIR/lib"
   local tool version_line configuration_line encoders library dependency
 
-  if [[ ! -d "$source_bin_dir" ]]; then
-    print -u2 "錯誤：找不到 GenMedia 內建 FFmpeg：$source_bin_dir"
-    print -u2 "請先執行：./scripts/build-ffmpeg-macos.sh"
-    exit 1
-  fi
+  ensure_bundled_ffmpeg
   for tool in ffmpeg ffprobe; do
     if [[ ! -x "$source_bin_dir/$tool" ]]; then
       print -u2 "錯誤：FFmpeg 目錄缺少可執行檔：$source_bin_dir/$tool"
@@ -99,6 +131,7 @@ prepare_bundled_ffmpeg() {
   for library in "${source_libraries[@]}"; do
     /bin/cp -P "$library" "$resource_lib_dir/${library:t}"
   done
+  find "$resource_bin_dir" "$resource_lib_dir" -name '._*' -delete
 
   typeset -A required_licenses
   required_licenses=(
@@ -125,7 +158,7 @@ prepare_bundled_ffmpeg() {
       /usr/bin/otool -L "$library" \
         | sed -n 's/^[[:space:]]*\([^[:space:]]*\.dylib\).*$/\1/p'
     )
-  done < <(find "$resource_lib_dir" -maxdepth 1 -type f -name '*.dylib' -print)
+  done < <(find "$resource_lib_dir" -maxdepth 1 -type f -name '*.dylib' ! -name '._*' -print)
 
   for tool in ffmpeg ffprobe; do
     /usr/bin/install_name_tool \
@@ -172,6 +205,10 @@ fi
 if [[ "$PACKAGE_APP" == true && ! -x /usr/bin/codesign ]]; then
   print -u2 "錯誤：找不到 macOS codesign，無法簽署 App。"
   exit 1
+fi
+
+if [[ "$PACKAGE_APP" == true ]]; then
+  ensure_bundled_ffmpeg
 fi
 
 ensure_metal_toolchain
@@ -482,7 +519,7 @@ if [[ "$PACKAGE_APP" == true ]]; then
 
   while IFS= read -r dynamic_library; do
     /usr/bin/codesign "${FFMPEG_SIGNING_ARGUMENTS[@]}" "$dynamic_library"
-  done < <(find "$RESOURCES_DIR/lib" -maxdepth 1 -type f -name '*.dylib' -print)
+  done < <(find "$RESOURCES_DIR/lib" -maxdepth 1 -type f -name '*.dylib' ! -name '._*' -print)
 
   for ffmpeg_tool in \
     "$RESOURCES_DIR/bin/ffmpeg" \

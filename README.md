@@ -25,12 +25,7 @@ GenMedia 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App�
 ./run.command
 ```
 
-`build.command` 會建立 Release 執行檔，並在 `dist/` 輸出標準 `GenMedia.app`。App 內含 WebUI 資源、MLX Metal runtime、MCP server、模型診斷工具，以及 LGPL 動態版 `ffmpeg`／`ffprobe` 統一媒體相容層。第一次建立 App bundle 前先準備內建 FFmpeg：
-
-```bash
-brew install pkg-config
-./scripts/build-ffmpeg-macos.sh
-```
+`build.command` 會建立 Release 執行檔，並在 `dist/` 輸出標準 `GenMedia.app`。App 內含 WebUI 資源、MLX Metal runtime、MCP server、模型診斷工具，以及 LGPL 動態版 `ffmpeg`／`ffprobe` 統一媒體相容層。第一次建立 App bundle 時，`build.command` 會自動下載來源並建立內建 FFmpeg，不需先手動準備 FFmpeg 或安裝 `pkg-config`。
 
 ```bash
 # 建置 Release 執行檔與 App
@@ -44,6 +39,13 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ```
 
 `run.command` 會自動使用 `--no-app`，日常啟動不會重複建立 App bundle。對外發佈的 DMG 由獨立本機流程完成 Developer ID Application 簽章、Apple Notarization、Staple 與 Gatekeeper 驗證。
+
+### FFmpeg 建置問題排除
+
+- 第一次執行 `./build.command` 需要網路下載 FFmpeg 與 LAME 原始碼；之後會沿用暫存來源與 `third_party/ffmpeg` 產物。缺少或不完整時會自動重建。
+- 不需安裝 Homebrew `pkg-config`。專案提供只供 LAME 組態檢查的 fallback，並以無空白的暫存路徑執行，因此專案路徑包含空白也能建置。
+- ExFAT 等外接磁碟建立的 `._*` AppleDouble sidecar 會在處理 dylib 前自動清除，避免被誤判為 Mach-O。
+- 建置中止或失敗時會還原先前可用的 FFmpeg。排除網路或 Xcode 問題後直接重跑 `./build.command` 即可；若要改用其他輸出位置，可設定 `GENMEDIA_FFMPEG_ROOT`。
 
 ### 影片 Runtime
 

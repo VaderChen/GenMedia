@@ -2,6 +2,11 @@ import Foundation
 import MLX
 
 public enum MiniMaxMusic3ChunkLayout {
+    // This is the chunk size in autoregressive frame_hiddens, before the
+    // condition encoder. The encoder expands those frames: 200 hiddens become
+    // 689 latent frames (the first real multi-chunk fixture), while the final
+    // partial window can become 378 latent frames. A latent chunk is therefore
+    // not expected to contain exactly CHUNK_FRAMES latent frames.
     public static let chunkFrames = 200
     public static let chunkHop = 100
     public static let latentHopLength = 512

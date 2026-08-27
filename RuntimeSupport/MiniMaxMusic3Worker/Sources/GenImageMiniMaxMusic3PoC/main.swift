@@ -44,9 +44,30 @@ private func comparisonThreshold(
     }
 }
 
+// Final audio is judged by error energy rather than the single worst sample.
+// The relative max diff remains the primary metric for deterministic tensors.
+private func audioSNRThreshold(
+    referenceDType: DType,
+    actualDType: DType,
+    declaredInputDType: String?
+) -> (value: Double, label: String) {
+    switch declaredInputDType {
+    case "bfloat16":
+        return (30.0, "bf16 audio")
+    case "float32":
+        return (80.0, "fp32 audio")
+    default:
+        if referenceDType == .bfloat16 || actualDType == .bfloat16 {
+            return (30.0, "bf16 audio")
+        }
+        return (80.0, "fp32 audio")
+    }
+}
+
 private struct Arguments {
     enum Command: String {
         case decode
+        case decodeChunks = "decode-chunks"
         case forward
         case denoise
         case generate
@@ -176,6 +197,7 @@ private struct Arguments {
     static let usage = """
     用法：
       GenImageMiniMaxMusic3PoC decode --model-dir <模型目錄> --input <reference.safetensors> --output <actual.safetensors> [--wav-output <audio.wav>]
+      GenImageMiniMaxMusic3PoC decode-chunks --model-dir <模型目錄> --input <reference.safetensors> --output <actual.safetensors>
       GenImageMiniMaxMusic3PoC forward --model-dir <模型目錄> --input <reference.safetensors> --output <actual.safetensors>
       GenImageMiniMaxMusic3PoC denoise --model-dir <模型目錄> --input <reference.safetensors> --output <actual.safetensors> [--steps <N>] [--cfg <scale>] [--overlap <N>]
       GenImageMiniMaxMusic3PoC generate --model-dir <模型目錄> --output <actual.safetensors> [--wav-output <audio.wav>] [--prompt <文字>] [--lyrics <歌詞>] [--seed <N>] [--audio-duration <seconds>] [--steps <N>] [--ar-cfg <scale>] [--flow-cfg <scale>] [--top-k <N>] [--input-dtype bfloat16|float32]
@@ -243,6 +265,112 @@ private func runDecode(_ arguments: Arguments) throws {
     print("actual=\(outputURL.path)")
     print("weights=\(decoder.weightReport?.tensorCount ?? 0) tensors")
     print("latent shape=\(latent.shape) dtype=\(latent.dtype)")
+    print("audio shape=\(audio.shape) dtype=\(audio.dtype)")
+}
+
+private struct ChunkDecodeDiagnostic: Codable {
+    let latentFrames: Int
+    let waveformSamples: Int
+    let cropLeft: Int
+    let cropRight: Int
+    let rawEnd: Int
+    let retainedSamples: Int
+
+    enum CodingKeys: String, CodingKey {
+        case latentFrames = "latent_frames"
+        case waveformSamples = "waveform_samples"
+        case cropLeft = "crop_left"
+        case cropRight = "crop_right"
+        case rawEnd = "raw_end"
+        case retainedSamples = "retained_samples"
+    }
+}
+
+private func runDecodeChunks(_ arguments: Arguments) throws {
+    guard let modelDirectory = arguments.modelDirectory else {
+        throw PoCError.missingArgument("--model-dir")
+    }
+    guard let inputURL = arguments.inputURL else {
+        throw PoCError.missingArgument("--input")
+    }
+    guard let outputURL = arguments.outputURL else {
+        throw PoCError.missingArgument("--output")
+    }
+    let (inputArrays, inputMetadata) = try MLX.loadArraysAndMetadata(url: inputURL)
+    guard let chunkCountValue = inputMetadata["chunk_count"],
+          let chunkCount = Int(chunkCountValue),
+          chunkCount > 0 else {
+        throw PoCError.usage("decode-chunks fixture 必須包含至少一個 chunk。")
+    }
+    var latentChunks = try (0..<chunkCount).map { index in
+        try tensor("latent_chunk_\(index)", from: inputArrays, url: inputURL)
+    }
+    let decoder = try MiniMaxMusic3Decoder(modelDirectory: modelDirectory)
+    if inputMetadata["input_dtype"] == "float32" {
+        let converted = Dictionary(uniqueKeysWithValues:
+            decoder.vocoder.parameters().flattened().map { key, value in
+                (key, value.asType(.float32))
+            }
+        )
+        try decoder.vocoder.update(
+            parameters: ModuleParameters.unflattened(converted),
+            verify: .all
+        )
+        latentChunks = latentChunks.map { $0.asType(.float32) }
+        MLX.eval(decoder.vocoder, latentChunks)
+    }
+    var diagnostics: [ChunkDecodeDiagnostic] = []
+    for (index, latentChunk) in latentChunks.enumerated() {
+        let waveform = try decoder.decodeChunk(latentChunk)
+        let crop = try MiniMaxMusic3ChunkLayout.waveformCrop(
+            chunkIndex: index,
+            chunkCount: chunkCount,
+            hopLength: decoder.vocoder.configuration.hopLength
+        )
+        let rawEnd = waveform.shape[2] - crop.right
+        let retainedSamples = rawEnd <= crop.left
+            ? waveform.shape[2]
+            : rawEnd - crop.left
+        diagnostics.append(ChunkDecodeDiagnostic(
+            latentFrames: latentChunk.shape[2],
+            waveformSamples: waveform.shape[2],
+            cropLeft: crop.left,
+            cropRight: crop.right,
+            rawEnd: rawEnd,
+            retainedSamples: retainedSamples
+        ))
+    }
+
+    let audio = try decoder.decodeChunks(latentChunks)
+    MLX.eval(audio)
+    try FileManager.default.createDirectory(
+        at: outputURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    var outputArrays = ["audio": audio]
+    for (index, latentChunk) in latentChunks.enumerated() {
+        outputArrays["latent_chunk_\(index)"] = latentChunk
+    }
+    var outputMetadata = inputMetadata
+    outputMetadata["runtime"] = "swift-mlx-0.31.6"
+    outputMetadata["swift_chunk_diagnostics"] = String(
+        decoding: try JSONEncoder().encode(diagnostics),
+        as: UTF8.self
+    )
+    try MLX.save(arrays: outputArrays, metadata: outputMetadata, url: outputURL)
+
+    print("actual=\(outputURL.path)")
+    print("weights=\(decoder.weightReport?.tensorCount ?? 0) tensors")
+    print("chunks=\(chunkCount)")
+    for (index, diagnostic) in diagnostics.enumerated() {
+        print(
+            "chunk[\(index)] latent=\(diagnostic.latentFrames) "
+                + "waveform=\(diagnostic.waveformSamples) "
+                + "crop=(\(diagnostic.cropLeft),\(diagnostic.cropRight)) "
+                + "raw_end=\(diagnostic.rawEnd) "
+                + "retained=\(diagnostic.retainedSamples)"
+        )
+    }
     print("audio shape=\(audio.shape) dtype=\(audio.dtype)")
 }
 
@@ -1042,6 +1170,7 @@ private func runCompare(_ arguments: Arguments) throws {
     var maxAbsDiff = 0.0
     var sumAbsDiff = 0.0
     var maxReferenceAbs = 0.0
+    var errorSquaredSum = 0.0
     var dot = 0.0
     var referenceSquaredSum = 0.0
     var actualSquaredSum = 0.0
@@ -1064,6 +1193,7 @@ private func runCompare(_ arguments: Arguments) throws {
         maxAbsDiff = max(maxAbsDiff, absoluteDifference)
         sumAbsDiff += absoluteDifference
         maxReferenceAbs = max(maxReferenceAbs, abs(referenceDouble))
+        errorSquaredSum += absoluteDifference * absoluteDifference
         dot += referenceDouble * actualDouble
         referenceSquaredSum += referenceDouble * referenceDouble
         actualSquaredSum += actualDouble * actualDouble
@@ -1085,6 +1215,23 @@ private func runCompare(_ arguments: Arguments) throws {
         actualDType: actual.dtype,
         declaredInputDType: declaredInputDType
     )
+    let finalAudio = arguments.key == "audio" || arguments.key == "waveform"
+    let snrThreshold = audioSNRThreshold(
+        referenceDType: reference.dtype,
+        actualDType: actual.dtype,
+        declaredInputDType: declaredInputDType
+    )
+    let snrDB: Double
+    if nonFiniteMismatchCount > 0 {
+        snrDB = -.infinity
+    } else if errorSquaredSum == 0 {
+        snrDB = .infinity
+    } else if referenceSquaredSum == 0 {
+        snrDB = -.infinity
+    } else {
+        // 20*log10(RMS(reference)/RMS(error)); sample count cancels.
+        snrDB = 10.0 * log10(referenceSquaredSum / errorSquaredSum)
+    }
     let cosine: Double
     if finiteCount == 0 {
         cosine = nonFiniteMismatchCount == 0 ? 1 : 0
@@ -1096,17 +1243,30 @@ private func runCompare(_ arguments: Arguments) throws {
 
     print("shape: PASS \(reference.shape)")
     print("reference dtype=\(reference.dtype) actual dtype=\(actual.dtype)")
+    if finalAudio {
+        print(String(format: "SNR: %.10g dB (primary)", snrDB))
+    }
     print(String(format: "relative max diff: %.10g", relativeMaxDiff))
     print(String(format: "max abs diff: %.10g", maxAbsDiff))
     print(String(format: "mean abs diff: %.10g", meanAbsDiff))
     print(String(format: "cosine similarity: %.10g", cosine))
     print("non-finite mismatches: \(nonFiniteMismatchCount)")
-    print(String(
-        format: "relative max diff threshold: %.10g [%@] (%@)",
-        threshold.value,
-        threshold.label,
-        nonFiniteMismatchCount == 0 && relativeMaxDiff <= threshold.value ? "PASS" : "FAIL"
-    ))
+    if finalAudio {
+        print(String(
+            format: "SNR threshold: %.1f dB [%@] (%@)",
+            snrThreshold.value,
+            snrThreshold.label,
+            nonFiniteMismatchCount == 0 && snrDB >= snrThreshold.value ? "PASS" : "FAIL"
+        ))
+        print("relative max diff: auxiliary for final audio")
+    } else {
+        print(String(
+            format: "relative max diff threshold: %.10g [%@] (%@)",
+            threshold.value,
+            threshold.label,
+            nonFiniteMismatchCount == 0 && relativeMaxDiff <= threshold.value ? "PASS" : "FAIL"
+        ))
+    }
 }
 
 @main
@@ -1117,6 +1277,8 @@ private enum GenImageMiniMaxMusic3PoC {
             switch arguments.command {
             case .decode:
                 try runDecode(arguments)
+            case .decodeChunks:
+                try runDecodeChunks(arguments)
             case .forward:
                 try runForward(arguments)
             case .denoise:

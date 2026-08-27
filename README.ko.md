@@ -25,12 +25,7 @@ GenMedia는 **Apple Silicon을 네이티브로 지원**하는 로컬 AI 미디�
 ./run.command
 ```
 
-`build.command`는 Release 실행 파일과 표준 `GenMedia.app`를 `dist/`에 생성합니다. App에는 WebUI 리소스, MLX Metal 런타임, MCP 서버, 모델 진단 도구와 통합 미디어 호환 계층인 LGPL 동적 `ffmpeg`/`ffprobe`가 포함됩니다. 첫 App bundle 빌드 전에 내장 FFmpeg를 한 번 준비하세요.
-
-```bash
-brew install pkg-config
-./scripts/build-ffmpeg-macos.sh
-```
+`build.command`는 Release 실행 파일과 표준 `GenMedia.app`를 `dist/`에 생성합니다. App에는 WebUI 리소스, MLX Metal 런타임, MCP 서버, 모델 진단 도구와 통합 미디어 호환 계층인 LGPL 동적 `ffmpeg`/`ffprobe`가 포함됩니다. 첫 App bundle 빌드 시 `build.command`가 소스를 자동으로 다운로드하고 내장 FFmpeg 배포판을 준비합니다. FFmpeg를 수동으로 준비하거나 `pkg-config`를 설치할 필요가 없습니다.
 
 ```bash
 # Release 실행 파일과 App 빌드
@@ -44,6 +39,13 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ```
 
 `run.command`는 자동으로 `--no-app`를 사용하므로 일반적인 개발 실행에서 App bundle을 반복 생성하지 않습니다. 배포용 DMG는 Developer ID Application 서명, Apple 공증, Staple, Gatekeeper 검증을 수행하는 별도의 로컬 흐름에서 처리합니다.
+
+### FFmpeg 빌드 문제 해결
+
+- 첫 `./build.command` 실행에는 FFmpeg와 LAME 소스를 내려받기 위한 네트워크 연결이 필요합니다. 이후 빌드는 캐시된 소스와 `third_party/ffmpeg`를 재사용하며, 없거나 불완전할 때만 자동으로 다시 빌드합니다.
+- Homebrew `pkg-config`는 필요하지 않습니다. LAME 구성 확인 전용 fallback을 공백이 없는 임시 경로에서 실행하므로 프로젝트 경로에 공백이 있어도 빌드할 수 있습니다.
+- ExFAT 같은 외부 파일 시스템이 만드는 `._*` AppleDouble sidecar는 dylib 처리 전에 제거되어 Mach-O 파일로 잘못 인식되지 않습니다.
+- 빌드가 중단되거나 실패하면 이전의 사용 가능한 FFmpeg 배포판을 복원합니다. 네트워크 또는 Xcode 문제를 해결한 뒤 `./build.command`를 다시 실행하세요. `GENMEDIA_FFMPEG_ROOT`로 출력 위치를 변경할 수 있습니다.
 
 ### 비디오 Runtime
 

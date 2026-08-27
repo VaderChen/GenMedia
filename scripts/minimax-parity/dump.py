@@ -17,27 +17,32 @@ import mlx.core as mx
 import mlx.nn as nn
 from tokenizers import Tokenizer
 
-from mlx_minimax_music3.flow_transformer import FlowTransformer, FlowTransformerConfig
-from mlx_minimax_music3.language_model import LanguageModel, LanguageModelConfig
-from mlx_minimax_music3.condition_encoder import (
-    ConditionEncoder,
-    ConditionEncoderConfig,
-)
-from mlx_minimax_music3.config import GenerationConfig, ModelConfig
-from mlx_minimax_music3.prompt import build_cfg_token_ids, build_prompt_text
-from mlx_minimax_music3.rvq_decoder import RVQDecoderConfig, RVQDepthDecoder
-from mlx_minimax_music3.sampling import sample_top_k, semantic_guided_logits
-from mlx_minimax_music3.scheduler import (
-    blend_overlap,
-    carry_window,
-    chunk_starts,
-    euler_step,
-    flow_timesteps,
-    restore_overlap,
-    waveform_crop,
-)
-from mlx_minimax_music3.vocoder import Vocoder, VocoderConfig
-from mlx_minimax_music3.audio import write_wav
+try:
+    from mlx_minimax_music3.flow_transformer import FlowTransformer, FlowTransformerConfig
+    from mlx_minimax_music3.language_model import LanguageModel, LanguageModelConfig
+    from mlx_minimax_music3.condition_encoder import (
+        ConditionEncoder,
+        ConditionEncoderConfig,
+    )
+    from mlx_minimax_music3.config import GenerationConfig, ModelConfig
+    from mlx_minimax_music3.prompt import build_cfg_token_ids, build_prompt_text
+    from mlx_minimax_music3.rvq_decoder import RVQDecoderConfig, RVQDepthDecoder
+    from mlx_minimax_music3.sampling import sample_top_k, semantic_guided_logits
+    from mlx_minimax_music3.scheduler import (
+        blend_overlap,
+        carry_window,
+        chunk_starts,
+        euler_step,
+        flow_timesteps,
+        restore_overlap,
+        waveform_crop,
+    )
+    from mlx_minimax_music3.vocoder import Vocoder, VocoderConfig
+    from mlx_minimax_music3.audio import write_wav
+except ModuleNotFoundError as error:
+    _REFERENCE_RUNTIME_IMPORT_ERROR: ModuleNotFoundError | None = error
+else:
+    _REFERENCE_RUNTIME_IMPORT_ERROR = None
 
 
 def load_vocoder(model_directory: Path) -> Vocoder:
@@ -305,6 +310,7 @@ def parse_arguments() -> argparse.Namespace:
         nargs="?",
         choices=(
             "decode",
+            "decode-chunks",
             "transformer-forward",
             "denoise",
             "generate",
@@ -358,6 +364,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=4)
     parser.add_argument("--ar-cfg", type=float, default=1.5)
     parser.add_argument("--audio-duration", type=float, default=0.2)
+    parser.add_argument("--expected-chunks", type=int)
     return parser.parse_args()
 
 
@@ -400,6 +407,150 @@ def dump_decode(arguments: argparse.Namespace) -> None:
     )
     print(f"reference={arguments.output}")
     print(f"latent shape={latent.shape} dtype={latent.dtype}")
+    print(f"audio shape={audio.shape} dtype={audio.dtype}")
+
+
+def dump_decode_chunks(arguments: argparse.Namespace) -> None:
+    """Dump real denoiser chunks and the Python multi-chunk vocoder result.
+
+    This follows the upstream MiniMax Music 3 generation path through
+    autoregressive frame generation and flow denoising. The fixture therefore
+    does not use synthetic, independently sampled latent chunks.
+    """
+
+    from mlx_audio.music import load as load_music_model
+    from mlx_audio.music.models.minimax_music3.ar import generate_frame_hiddens
+    from mlx_audio.music.models.minimax_music3.config import (
+        CHUNK_FRAMES,
+        CROP_LEFT_LATENT,
+        CROP_RIGHT_LATENT,
+        DIT_CFG_SCALE,
+        LATENT_HOP_LENGTH,
+        OVERLAP_LATENT_LENGTH,
+    )
+    from mlx_audio.music.models.minimax_music3.euler import denoise_chunk
+    from mlx_audio.music.models.minimax_music3.minimax_music3 import _chunk_starts
+
+    model_directory = require_model_directory(arguments)
+    if arguments.audio_duration <= 0:
+        raise ValueError("--audio-duration must be positive")
+    if arguments.steps < 1:
+        raise ValueError("--steps must be positive")
+    if arguments.expected_chunks is not None and arguments.expected_chunks < 1:
+        raise ValueError("--expected-chunks must be positive")
+
+    model = load_music_model(model_directory, strict=True)
+    maximum_frames = max(1, int(arguments.audio_duration * model.config.frame_rate))
+    text_ids = model._text_ids(arguments.prompt, arguments.lyrics)
+    frame_hiddens = generate_frame_hiddens(
+        model.language_model,
+        model.rvq_depth_decoder,
+        model.config,
+        text_ids,
+        max_frames=maximum_frames,
+        seed=arguments.seed,
+    )
+    mx.eval(frame_hiddens)
+
+    starts = _chunk_starts(frame_hiddens.shape[1])
+    latent_chunks = []
+    previous_latent = None
+    previous_condition = None
+    mx.random.seed(arguments.seed + 7)
+    for start in starts:
+        end = min(start + CHUNK_FRAMES, frame_hiddens.shape[1])
+        condition = model.condition_encoder(frame_hiddens[:, start:end])
+        noise = mx.random.normal(
+            (1, model.config.dit_in_channels, condition.shape[1])
+        ).astype(condition.dtype)
+        latents, condition = denoise_chunk(
+            model.transformer,
+            noise,
+            condition,
+            num_inference_steps=arguments.steps,
+            guidance_scale=DIT_CFG_SCALE,
+            previous_latent=previous_latent,
+            previous_condition=previous_condition,
+        )
+        carry_start = max(0, latents.shape[-1] - 2 * OVERLAP_LATENT_LENGTH)
+        carry_end = max(carry_start, latents.shape[-1] - OVERLAP_LATENT_LENGTH)
+        previous_latent = latents[..., carry_start:carry_end]
+        previous_condition = condition[:, carry_start:carry_end]
+        latent_chunks.append(latents)
+        mx.eval(previous_latent, previous_condition, latents)
+
+    if arguments.expected_chunks is not None and len(latent_chunks) != arguments.expected_chunks:
+        raise RuntimeError(
+            f"expected {arguments.expected_chunks} chunks, got {len(latent_chunks)} "
+            f"from {frame_hiddens.shape[1]} real frames"
+        )
+
+    waveforms = []
+    diagnostics = []
+    chunk_count = len(latent_chunks)
+    for index, latents in enumerate(latent_chunks):
+        waveform = model.vocoder(latents)
+        left = 0 if index == 0 else CROP_LEFT_LATENT * LATENT_HOP_LENGTH
+        right = 0 if index == chunk_count - 1 else CROP_RIGHT_LATENT * LATENT_HOP_LENGTH
+        raw_end = waveform.shape[-1] - right if right else waveform.shape[-1]
+        cropped = waveform[..., left:raw_end]
+        waveforms.append(cropped)
+        diagnostics.append(
+            {
+                "latent_frames": int(latents.shape[-1]),
+                "waveform_samples": int(waveform.shape[-1]),
+                "crop_left": int(left),
+                "crop_right": int(right),
+                "raw_end": int(raw_end),
+                "retained_samples": int(cropped.shape[-1]),
+            }
+        )
+        mx.eval(cropped)
+
+    audio = mx.clip(
+        mx.concatenate(waveforms, axis=-1).astype(mx.float32),
+        -1.0,
+        1.0,
+    )
+    mx.eval(audio)
+    values = {
+        "audio": audio,
+        "frame_hiddens": frame_hiddens,
+    }
+    values.update(
+        {f"latent_chunk_{index}": chunk for index, chunk in enumerate(latent_chunks)}
+    )
+    metadata = {
+        "stage": "decode_chunks",
+        "reference": "Blaizzy/mlx-audio@784b29e2691a93ca7483147d86f61859dfaa6296",
+        "model": str(model_directory),
+        "seed": str(arguments.seed),
+        "audio_duration": str(arguments.audio_duration),
+        "steps": str(arguments.steps),
+        "input_dtype": str(latent_chunks[0].dtype).removeprefix("mlx.core."),
+        "sampling_rate": str(model.config.sample_rate),
+        "num_frames": str(frame_hiddens.shape[1]),
+        "chunk_count": str(chunk_count),
+        "latent_layout": "BCL",
+        "audio_layout": "BCS",
+        "chunk_diagnostics": json.dumps(diagnostics, separators=(",", ":")),
+    }
+    arguments.output.parent.mkdir(parents=True, exist_ok=True)
+    mx.save_safetensors(str(arguments.output), values, metadata=metadata)
+
+    print(f"reference={arguments.output}")
+    print(
+        f"real frames={frame_hiddens.shape[1]} requested maximum={maximum_frames} "
+        f"chunks={chunk_count}"
+    )
+    for index, diagnostic in enumerate(diagnostics):
+        print(
+            f"chunk[{index}] latent={diagnostic['latent_frames']} "
+            f"waveform={diagnostic['waveform_samples']} "
+            f"crop=({diagnostic['crop_left']},{diagnostic['crop_right']}) "
+            f"raw_end={diagnostic['raw_end']} "
+            f"retained={diagnostic['retained_samples']}"
+        )
     print(f"audio shape={audio.shape} dtype={audio.dtype}")
 
 
@@ -1119,7 +1270,13 @@ def dump_generate(arguments: argparse.Namespace) -> None:
 
 def main() -> None:
     arguments = parse_arguments()
-    if arguments.command == "decode":
+    if arguments.command == "decode-chunks":
+        dump_decode_chunks(arguments)
+    elif _REFERENCE_RUNTIME_IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "mlx_minimax_music3 reference runtime is required for this command"
+        ) from _REFERENCE_RUNTIME_IMPORT_ERROR
+    elif arguments.command == "decode":
         dump_decode(arguments)
     elif arguments.command == "transformer-forward":
         dump_transformer_forward(arguments)
