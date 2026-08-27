@@ -26,6 +26,8 @@ export function actionLabel(value) {
   if (value === "generateVideo") return t("workspace.generateVideo");
   if (value === "generateMusic") return t("workspace.generateMusic");
   if (value === "generateSubtitles") return t("workspace.generateSubtitles");
+  if (value === "createImageLoop") return t("workspace.createImageLoop");
+  if (value === "mergeMedia") return t("workspace.mergeMedia");
   if (value === "imageToImage") return t("cap.imageToImage");
   if (value === "upscale") return t("cap.upscale");
   return value;

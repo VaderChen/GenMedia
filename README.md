@@ -7,6 +7,7 @@ GenMedia 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App�
 - Swift 負責模型、Profile、工作佇列、檔案與 MLX／Core ML 推論。
 - `WKWebView` 內嵌 HTML、CSS 與 JavaScript UI，不需要網路或 npm runtime。
 - 文生圖、圖生文、圖生圖、文生影、圖生影、文生音樂、字幕生成與 Upscale 都可獨立執行，也可以透過資產來源關係串接。
+- 自動流程可建立具備獨立設定的工作區分頁；「簡單 MV」會準備主視覺、背景音樂、圖片循環與影音合併四個相依步驟。
 - 每次操作保存 Profile 快照，模型或架構更新後仍可追蹤當時的版本。
 - 獨立設定頁支援繁體中文、英文、日文、韓文及六套可持久保存的配色。
 - 設定頁可用 Switch 啟動只綁定本機的 MCP HTTP API；另保留可在 App 未啟動時獨立運作的 JSON-RPC 2.0 stdio server。
@@ -24,7 +25,12 @@ GenMedia 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App�
 ./run.command
 ```
 
-`build.command` 會建立 Release 執行檔，並在 `dist/` 輸出標準 `GenMedia.app`。App 內含 WebUI 資源、MLX Metal runtime、MCP server 及模型診斷工具。
+`build.command` 會建立 Release 執行檔，並在 `dist/` 輸出標準 `GenMedia.app`。App 內含 WebUI 資源、MLX Metal runtime、MCP server、模型診斷工具，以及 LGPL 動態版 `ffmpeg`／`ffprobe` 統一媒體相容層。第一次建立 App bundle 前先準備內建 FFmpeg：
+
+```bash
+brew install pkg-config
+./scripts/build-ffmpeg-macos.sh
+```
 
 ```bash
 # 建置 Release 執行檔與 App
@@ -41,10 +47,10 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 
 ### 影片 Runtime
 
-影片生成使用可替換的 `ltx-2-mlx` 外部 Runtime；Swift App 負責 Profile、參數驗證、工作佇列、取消、進度、資產與影片播放。第一次使用前安裝 CLI 與 FFmpeg：
+影片生成使用可替換的 `ltx-2-mlx` 外部 Runtime；Swift App 負責 Profile、參數驗證、工作佇列、取消、進度、資產與影片播放。第一次使用前只需安裝影片 CLI：
 
 ```bash
-brew install uv ffmpeg
+brew install uv
 ./scripts/install-ltx-runtime.command
 ```
 
@@ -54,11 +60,21 @@ App 會依序尋找 `GENIMAGE_LTX_RUNTIME`、`GENIMAGE_LTX_RUNTIME_ROOT/.venv/bi
 GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
 ```
 
-`ltx-2-mlx` 預設會使用其 Gemma 文字編碼器設定；已有本機 Gemma 模型時可透過 `GENIMAGE_LTX_GEMMA_MODEL` 指定模型目錄或 Hugging Face ID。App 的 DMG 目前不內含 Python Runtime、Gemma 權重或 FFmpeg，正式散佈時應將其視為選用外部元件，並分別確認 Runtime 與模型授權。
+`ltx-2-mlx` 預設會使用其 Gemma 文字編碼器設定；已有本機 Gemma 模型時可透過 `GENIMAGE_LTX_GEMMA_MODEL` 指定模型目錄或 Hugging Face ID。App 的 DMG 不內含 Python Runtime 或 Gemma 權重，但會封裝 LGPL 動態版 FFmpeg；正式散佈時仍需分別確認影片 Runtime 與模型授權。
+
+### 媒體相容匯入
+
+匯入的影片與音訊會先由內建 `ffprobe` 檢查容器、Codec、音軌、時間與旋轉後尺寸，長時間轉檔會進入可取消且回報進度的工作佇列。WebKit 可直接播放時沿用原檔；H.264／HEVC 僅容器或音訊不相容時先無損改封裝為 MP4；其餘影片以 VideoToolbox H.264／AAC、音訊以 M4A AAC 建立播放代理。播放代理由 `AssetSchemeHandler` 在背景以 HTTP Range 分塊串流，支援漸進播放與拖曳。原始檔路徑不會被替換，字幕仍輸出到來源目錄並沿用來源檔名；App 啟動時清除沒有對應資產的 MediaCache 孤兒檔，關閉專案或移除資產時只清理 App 管理的相容快取。
+
+### 自動流程與媒體合成
+
+自動流程使用宣告式步驟建立新的 Workspace 與對應 Tabs；每個 Tab 保存自己的工作類型、Profile 指派、Prompt 及圖片／影片／音樂／媒體處理參數，切換分頁或重新啟動 App 不會互相覆蓋。第一個「簡單 MV」範本依序連結文生圖、文生音樂、圖片循環影片及影音合併。
+
+圖片循環與影音合併不需要 AI 模型，由 `MediaCompositionService` 透過內建 FFmpeg 執行。圖片循環支援多張圖片、單張秒數、總長度、解析度、FPS 與 Cover／Contain；影音合併支援取代或混合原音軌、音量與輸出長度策略。自動流程會依步驟資產 ID 傳遞來源，不依賴檔名推測。
 
 ### 字幕生成
 
-字幕流程可匯入影片或音訊，抽取音訊軌後由 `SubtitleGenerationRouter` 選擇原生 Core ML ASR Adapter，保留片段時間軸並輸出 SRT 或 WebVTT。支援多語言 Whisper Large v3 Turbo、中文 Paraformer Large 與日文 Parakeet 0.6B；來源語言可自動偵測或由 Profile 指定。
+字幕流程可匯入影片或音訊，由內建 `ffprobe` 探測軌道，再以內建 `ffmpeg` 統一轉為 16 kHz 單聲道 PCM，交由 `SubtitleGenerationRouter` 選擇原生 Core ML ASR Adapter，保留片段時間軸並輸出 SRT 或 WebVTT。支援多語言 Whisper Large v3 Turbo、中文 Paraformer Large 與日文 Parakeet 0.6B；來源語言可自動偵測或由 Profile 指定。
 
 辨識完成後可選用本機 Qwen3.5／Qwen3.8 MLX 文生文模型，在不改變時間軸的前提下翻譯為繁中、簡中、英、日、韓、西、法、德、義、葡、俄、阿拉伯、印地、孟加拉、印尼、越南、泰、土耳其、波蘭、荷蘭、瑞典、捷克、烏克蘭、馬來或菲律賓文，共 25 種目標語言。字幕會以 `generatedSubtitle` 資產保存於目前工作區，並以來源影片或音訊為 parent。
 
@@ -68,13 +84,9 @@ Qwen3-VL、Qwen3.5 與 Qwen3.8 屬於多模態模型，因此模型中心會同�
 
 ### Civitai LoRA
 
-模型中心也提供數個以 `ZImageTurbo` 為基底的 Civitai LoRA（Asian Beauties、Turbo Lightning、Flat AnimeStyle、Diorama）。Civitai 下載端點依創作者設定可能要求登入；若下載回應 401，請在啟動 App 前設定個人 Civitai API Token：
+模型中心也提供數個以 `ZImageTurbo` 為基底的 Civitai LoRA（Asian Beauties、Turbo Lightning、Flat AnimeStyle、Diorama）。請在設定頁的「Civitai LoRA」卡片貼上 API Token 並儲存；Token 會只存於 macOS Keychain，不會寫入模型 manifest、工作區或 log。之後按下模型中心的下載按鈕，App 會以 HTTPS `Authorization: Bearer` 標頭直接下載檔案，不會改為開啟 Civitai 網站要求手動下載。
 
-```bash
-CIVITAI_TOKEN="your-civitai-api-token" ./run.command
-```
-
-Token 只會透過 HTTPS `Authorization: Bearer` 標頭傳給 Civitai，不會寫入模型 manifest 或專案檔案。
+若需要在無 UI 的舊版啟動流程使用 Token，仍可設定 `CIVITAI_TOKEN` 環境變數；設定頁儲存的 Token 優先用於 App 內下載，環境變數僅作相容性 fallback。
 
 ### Profile、工作佇列與記憶體
 
@@ -101,9 +113,11 @@ Token 只會透過 HTTPS `Authorization: Bearer` 標頭傳給 Civitai，不會�
 
 - **ACE-Step 1.5 Turbo MLX**：建議 Profile，透過 App 內建的 Apple Silicon 原生 Swift／MLX Runtime 生成 10～300 秒歌曲或純音樂，不需要安裝額外服務。程式與模型採 MIT License，可商業使用；長音訊採重疊分塊 VAE 解碼以控制記憶體用量。
 
-- **MiniMax Music 3 MLX 8-bit**：透過外部 `mlx-minimax-music3` CLI 執行，設定值是 5～300 秒的最長長度；模型可依歌曲結構提前自然結束，完成後 App 會顯示實際生成長度。模型仍適用其 Community License。
+- **MiniMax Music 3 MLX 8-bit**：透過 App 隨附的獨立 Swift Worker 執行，設定值是 5～300 秒的最長長度；模型可依歌曲結構提前自然結束，完成後 App 會顯示實際生成長度。模型仍適用其 Community License。
+- **MiniMax Music 3 MLX 4-bit**：透過 App 隨附的獨立 Swift Worker 執行，使用完整的 affine 4-bit MLX checkpoint；設定值是 5～300 秒的最長長度，模型仍可能依歌曲結構提前自然結束。模型仍適用 MiniMax Music 3 Community License。
+- **MiniMax Music 3 Composer 5.7B Distilled**：模型中心提供作為可選的 Composer 加速元件，預設下載 `lr-6e-5` 權重；需搭配完整 Music 3 checkpoint 與相容 Runtime，不能單獨生成音樂。
 
-ACE-Step 原生 Runtime 隨 App 提供；模型、MiniMax Music 3 Runtime 與 FFmpeg 維持外部選用元件。
+ACE-Step 原生 Runtime、MiniMax Music 3 Swift Worker 與 LGPL FFmpeg 相容層隨 App 提供；MiniMax Music 3 模型維持選用元件。
 
 ## 驗證
 
@@ -145,6 +159,7 @@ MCP 支援 `initialize`、`ping`、`tools/list`、`tools/call`，工具包含本
 Sources/
 ├── GenImageCore/
 │   ├── ApplicationSupport.swift  # Application Support 資料位置的唯一定義
+│   ├── CivitaiTokenStore.swift   # Civitai Token 的 macOS Keychain 儲存
 │   ├── DomainModels.swift        # 資產、配方、工作、模型與 Profile
 │   ├── InferenceServices.swift   # 圖片、文字、影片、音樂與字幕推論介面
 │   ├── ModelCatalog.swift        # 內建模型及 Profile
@@ -161,6 +176,9 @@ Sources/
 │   ├── MusicGenerationRouter.swift
 │   ├── ACEStepMusicGenerationService.swift
 │   ├── MiniMaxMusic3GenerationService.swift
+│   ├── MediaCompatibilityService.swift # 內建 FFmpeg／ffprobe 定位、探測與轉碼
+│   ├── MediaSourceCompatibilityService.swift # 來源影音直讀、改封裝與播放代理
+│   ├── MediaCompositionService.swift # 圖片循環影片與影音合併
 │   ├── MediaAudioPreparer.swift
 │   ├── WhisperSubtitleTranscriber.swift
 │   ├── ParaformerChineseSubtitleTranscriber.swift
@@ -172,7 +190,10 @@ Sources/
 │   └── CoreMLUpscaleService.swift
 ├── GenImageApp/
     ├── AppStore.swift            # 型別宣告、儲存屬性與 init
+    ├── AppStore+Credentials.swift # 設定頁憑證操作
     ├── AppStore+SubtitleGeneration.swift
+    ├── AppStore+MediaImport.swift
+    ├── AppStore+MediaComposition.swift
     ├── AppStore+Workspaces.swift
     ├── AppStore+*.swift          # 其他依職責拆分的 AppStore 行為
     ├── HybridBridgeController.swift
@@ -180,7 +201,7 @@ Sources/
     ├── HybridWebView.swift
     ├── AssetSchemeHandler.swift  # 安全提供本機圖片、影片與音訊給 Web UI
     └── Resources/WebUI/
-        ├── js/automatic-flow.js  # 自動流程頁面骨架
+        ├── js/automatic-flow.js  # 自動流程模板、Profile 預檢與工作區規劃
         └── …                     # 其他 HTML/CSS/JavaScript 前端
 ├── GenImageASRPoC/
     └── main.swift                # 獨立 ASR 驗證工具
@@ -191,12 +212,15 @@ Patches/
 ├── MLX-Swift-LM-Qwen35-Text-Only.patch # Qwen3.5 純文字輸入相容修正
 └── manifest.txt                  # 建置時套用的相依套件修正清單
 scripts/
-└── apply-runtime-patches.command  # 依 manifest 套用與驗證相依套件修正
+├── apply-runtime-patches.command  # 依 manifest 套用與驗證相依套件修正
+├── install-ltx-runtime.command     # 安裝 LTX 影片 Runtime
+├── install-minimax-music3-mlx-audio-runtime.command # 安裝 MiniMax 4-bit 專用 Runtime
+└── build-ffmpeg-macos.sh          # 建立可封裝、可重新連結的 LGPL 動態版 FFmpeg
 ```
 
 ## 目前狀態
 
-App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL／Qwen3.5／Qwen3.8 多模態圖生文與文生文、Qwen 2511 圖生圖、LTX-2.3 MLX 文生影／圖生影、ACE-Step 1.5 Turbo MLX 與 MiniMax Music 3 MLX 8-bit 文生音樂、Whisper／Paraformer／Parakeet 字幕生成，以及 Core ML Real-ESRGAN Upscale。影片以 MP4 加入工作區；音樂可輸出 MP3、M4A、AAC 或 FLAC；字幕可輸出 SRT 或 WebVTT，並保存語言、時間軸、Profile 快照與 lineage。
+App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL／Qwen3.5／Qwen3.8 多模態圖生文與文生文、Qwen 2511 圖生圖、LTX-2.3 MLX 文生影／圖生影、ACE-Step 1.5 Turbo MLX 與 MiniMax Music 3 MLX 8-bit／4-bit 文生音樂、Whisper／Paraformer／Parakeet 字幕生成，以及 Core ML Real-ESRGAN Upscale。影片以 MP4 加入工作區；音樂可輸出 MP3、M4A、AAC 或 FLAC；字幕可輸出 SRT 或 WebVTT，並保存語言、時間軸、Profile 快照與 lineage。
 
 更多資訊：
 
@@ -214,3 +238,4 @@ App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL／Qwen3.5�
 
 - 開源使用依 [GNU General Public License v3.0](LICENSE) 授權。
 - 若要在無法或不願遵守 GPLv3 的情境下使用，例如閉源整合、專有產品發行或需要客製商業條款，請聯絡著作權人另行取得商業授權。
+- App 內建 FFmpeg 與 LAME 維持各自的 LGPL 授權；授權文字、精確來源版本與建置資訊會放入 App 的 `Contents/Resources/Licenses/`。

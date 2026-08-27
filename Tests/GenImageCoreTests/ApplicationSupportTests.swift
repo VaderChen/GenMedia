@@ -169,4 +169,31 @@ struct ApplicationSupportTests {
             atPath: root.appendingPathComponent("Workspace/open-projects.json").path
         ))
     }
+
+    @Test func orphanMediaCacheFilesOnlyReturnsUnreferencedUUIDFiles() throws {
+        let sandbox = try makeSandbox()
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+        let cache = sandbox.appendingPathComponent("MediaCache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+
+        let referencedID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        let orphanID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        try write("keep", to: cache.appendingPathComponent("\(referencedID.uuidString).mp4"))
+        try write("remove", to: cache.appendingPathComponent("\(orphanID.uuidString).m4a"))
+        try write("ignore", to: cache.appendingPathComponent("not-a-cache-file.log"))
+        try write("ignore", to: cache.appendingPathComponent("\(orphanID.uuidString).part.mp4"))
+        try FileManager.default.createDirectory(
+            at: cache.appendingPathComponent("\(orphanID.uuidString).directory"),
+            withIntermediateDirectories: true
+        )
+
+        let files = ApplicationSupport.orphanMediaCacheFiles(
+            in: cache,
+            referencedAssetIDs: [referencedID]
+        )
+
+        #expect(files.map(\.standardizedFileURL) == [cache
+            .appendingPathComponent("\(orphanID.uuidString).m4a")
+            .standardizedFileURL])
+    }
 }

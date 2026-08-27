@@ -565,6 +565,7 @@ public struct MediaAsset: Identifiable, Codable, Hashable, Sendable {
     public var kind: AssetKind
     public var title: String
     public var fileURL: URL?
+    public var playbackURL: URL?
     public var pixelWidth: Int
     public var pixelHeight: Int
     public var mediaDurationSeconds: Double?
@@ -585,6 +586,7 @@ public struct MediaAsset: Identifiable, Codable, Hashable, Sendable {
         kind: AssetKind,
         title: String,
         fileURL: URL? = nil,
+        playbackURL: URL? = nil,
         pixelWidth: Int,
         pixelHeight: Int,
         mediaDurationSeconds: Double? = nil,
@@ -604,6 +606,7 @@ public struct MediaAsset: Identifiable, Codable, Hashable, Sendable {
         self.kind = kind
         self.title = title
         self.fileURL = fileURL
+        self.playbackURL = playbackURL
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
         self.mediaDurationSeconds = mediaDurationSeconds
@@ -626,6 +629,8 @@ public enum WorkflowAction: String, Codable, Hashable, Sendable {
     case generateVideo
     case generateMusic
     case generateSubtitles
+    case createImageLoop
+    case mergeMedia
     case imageToImage
     case upscale
 
@@ -638,6 +643,8 @@ public enum WorkflowAction: String, Codable, Hashable, Sendable {
         case .generateVideo: "生成影片"
         case .generateMusic: "生成音樂"
         case .generateSubtitles: "生成字幕"
+        case .createImageLoop: "圖片循環"
+        case .mergeMedia: "影音合併"
         case .imageToImage: "圖生圖"
         case .upscale: "Upscale"
         }
@@ -652,6 +659,8 @@ public enum WorkflowAction: String, Codable, Hashable, Sendable {
         case .generateVideo: "play.rectangle"
         case .generateMusic: "music.note"
         case .generateSubtitles: "captions.bubble"
+        case .createImageLoop: "rectangle.stack.badge.play"
+        case .mergeMedia: "rectangle.3.group.bubble"
         case .imageToImage: "photo.on.rectangle.angled"
         case .upscale: "arrow.up.left.and.arrow.down.right"
         }
@@ -663,6 +672,7 @@ public struct WorkflowOperation: Identifiable, Codable, Hashable, Sendable {
     public var projectID: UUID
     public var action: WorkflowAction
     public var inputAssetID: UUID?
+    public var inputAssetIDs: [UUID]?
     public var outputAssetIDs: [UUID]
     public var recipeID: UUID?
     public var profileSnapshot: InferenceProfile?
@@ -673,6 +683,7 @@ public struct WorkflowOperation: Identifiable, Codable, Hashable, Sendable {
         projectID: UUID,
         action: WorkflowAction,
         inputAssetID: UUID? = nil,
+        inputAssetIDs: [UUID]? = nil,
         outputAssetIDs: [UUID] = [],
         recipeID: UUID? = nil,
         profileSnapshot: InferenceProfile? = nil,
@@ -682,6 +693,7 @@ public struct WorkflowOperation: Identifiable, Codable, Hashable, Sendable {
         self.projectID = projectID
         self.action = action
         self.inputAssetID = inputAssetID
+        self.inputAssetIDs = inputAssetIDs
         self.outputAssetIDs = outputAssetIDs
         self.recipeID = recipeID
         self.profileSnapshot = profileSnapshot

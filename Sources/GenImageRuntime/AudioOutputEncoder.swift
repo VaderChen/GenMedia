@@ -14,7 +14,6 @@ enum AudioOutputEncoder {
         format: AudioOutputFormat
     ) async throws -> AudioOutputMetadata {
         let metadata = try waveMetadata(at: inputURL)
-        let ffmpegExecutable = try ffmpegExecutable()
         var arguments = [
             "-y",
             "-nostdin",
@@ -41,10 +40,8 @@ enum AudioOutputEncoder {
         defer { log.close() }
 
         let startedAt = Date()
-        let status = try await RuntimeProcess.run(
-            executable: ffmpegExecutable,
+        let status = try await MediaCompatibilityService.runFFmpeg(
             arguments: arguments,
-            environment: RuntimeExecutable.environment(),
             log: log,
             pollInterval: .milliseconds(100)
         ) {
@@ -103,26 +100,6 @@ enum AudioOutputEncoder {
         )
     }
 
-    private static func ffmpegExecutable() throws -> URL {
-        let environment = ProcessInfo.processInfo.environment
-        var candidates: [URL] = []
-        for key in ["GENMEDIA_FFMPEG", "GENIMAGE_FFMPEG"] {
-            if let configured = environment[key], !configured.isEmpty {
-                candidates.append(URL(fileURLWithPath: configured))
-            }
-        }
-        candidates.append(URL(fileURLWithPath: "/opt/homebrew/bin/ffmpeg"))
-        candidates.append(URL(fileURLWithPath: "/usr/local/bin/ffmpeg"))
-        candidates.append(URL(fileURLWithPath: "/usr/bin/ffmpeg"))
-        candidates.append(
-            contentsOf: RuntimeExecutable.pathCandidates(for: "ffmpeg", environment: environment)
-        )
-        guard let executable = RuntimeExecutable.locate(candidates) else {
-            throw AudioOutputEncodingError.ffmpegNotFound(candidates.map(\.path))
-        }
-        return executable
-    }
-
     private static func littleEndianUInt16(_ data: Data, at offset: Int) -> UInt16 {
         UInt16(data[offset]) | UInt16(data[offset + 1]) << 8
     }
@@ -136,7 +113,6 @@ enum AudioOutputEncoder {
 }
 
 enum AudioOutputEncodingError: LocalizedError, Sendable {
-    case ffmpegNotFound([String])
     case invalidWaveOutput(URL)
     case transcodeTimedOut
     case transcodeFailed(status: Int32, message: String)
@@ -144,8 +120,6 @@ enum AudioOutputEncodingError: LocalizedError, Sendable {
 
     var errorDescription: String? {
         switch self {
-        case let .ffmpegNotFound(paths):
-            "找不到 FFmpeg，無法輸出 MP3、M4A、AAC 或 FLAC；已檢查：\(paths.joined(separator: "、"))"
         case let .invalidWaveOutput(url):
             "暫存 WAV 音訊格式無效：\(url.path)"
         case .transcodeTimedOut:

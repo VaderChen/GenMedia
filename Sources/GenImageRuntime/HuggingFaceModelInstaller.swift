@@ -1,4 +1,5 @@
 import Foundation
+import GenImageCore
 
 public struct ModelInstallProgress: Sendable {
     public var fractionCompleted: Double
@@ -42,6 +43,8 @@ public actor HuggingFaceModelInstaller {
     public static let miniMaxH3MLX4BitModelID = "pipenetwork/MiniMax-H3-MLX-4bit"
     public static let aceStep15TurboModelID = "ACE-Step/Ace-Step1.5"
     public static let miniMaxMusic3MLX8BitModelID = "vanch007/MiniMax-Music3-MLX-8bit"
+    public static let miniMaxMusic3MLX4BitModelID = "mlx-community/MiniMax-Music3-4bit"
+    public static let miniMaxMusic3ComposerModelID = "Mothersuperior/minimax-music3-composer-5.7b-distilled"
     public static let whisperLargeV3TurboCoreMLModelID = "argmaxinc/whisperkit-coreml@large-v3-turbo"
     public static let paraformerChineseCoreMLModelID = "FluidInference/paraformer-large-zh-coreml"
     public static let parakeetJapaneseCoreMLModelID = "FluidInference/parakeet-0.6b-ja-coreml"
@@ -590,9 +593,7 @@ public actor HuggingFaceModelInstaller {
             var request = URLRequest(url: downloadURL)
             request.timeoutInterval = 60 * 60 * 24
             request.setValue("GenImage/1.0", forHTTPHeaderField: "User-Agent")
-            if let token = ProcessInfo.processInfo.environment["CIVITAI_TOKEN"]?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-               !token.isEmpty {
+            if let token = CivitaiTokenStore.token() {
                 request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             }
             return request
@@ -1025,6 +1026,63 @@ public actor HuggingFaceModelInstaller {
                             "README.md",
                             "config.json",
                             "source_manifest.json"
+                        ]
+                    )
+                ]
+            )
+        case miniMaxMusic3MLX4BitModelID:
+            return InstallPlan(
+                directoryName: "minimax-music3-mlx-4bit",
+                requiredRuntimeFiles: [
+                    "config.json",
+                    "model.safetensors.index.json",
+                    "model-00001-of-00002.safetensors",
+                    "model-00002-of-00002.safetensors",
+                    "scheduler/scheduler_config.json",
+                    "tokenizer/chat_template.jinja",
+                    "tokenizer/tokenizer.json",
+                    "tokenizer/tokenizer_config.json"
+                ],
+                sources: [
+                    SourcePlan(
+                        repository: "mlx-community/MiniMax-Music3-4bit",
+                        revision: "c7ea32923b245fe5afc22d740a1936ad2ac590f3",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "LICENSE",
+                            "README.md",
+                            "config.json",
+                            "model-00001-of-00002.safetensors",
+                            "model-00002-of-00002.safetensors",
+                            "model.safetensors.index.json",
+                            "scheduler/scheduler_config.json",
+                            "tokenizer/chat_template.jinja",
+                            "tokenizer/tokenizer.json",
+                            "tokenizer/tokenizer_config.json"
+                        ]
+                    )
+                ]
+            )
+        case miniMaxMusic3ComposerModelID:
+            return InstallPlan(
+                directoryName: "minimax-music3-composer-5.7b-distilled",
+                requiredRuntimeFiles: [
+                    "lr-6e-5/config.json",
+                    "lr-6e-5/generation_config.json",
+                    "lr-6e-5/model.safetensors"
+                ],
+                sources: [
+                    SourcePlan(
+                        repository: "Mothersuperior/minimax-music3-composer-5.7b-distilled",
+                        revision: "ef3022805574ac77cd64b2f26342b6233e7e86bc",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "README.md",
+                            "lr-6e-5/config.json",
+                            "lr-6e-5/generation_config.json",
+                            "lr-6e-5/model.safetensors"
                         ]
                     )
                 ]

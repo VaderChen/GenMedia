@@ -49,6 +49,7 @@ Web UI 只能透過 Bridge 使用本機能力，不可直接讀取任意檔案�
 
 - Swift 推送狀態時，Web UI 會在 Prompt、負向 Prompt 或歌詞欄位聚焦期間保留本機編輯值，並延後非必要的完整渲染，避免游標、選取範圍與輸入法組字被重設。
 - 生成類型與 Prompt／歌詞／輸出設定 TAB 使用獨立的創作面板 renderer，不替換預覽、播放器、Inspector 或側欄 DOM。
+- 工作區分頁 schema v3 讓每個 Tab 保存自己的工作類型、Profile 參照、Prompt、輸出參數及自動流程步驟；切換 Tab 時以單一 Bridge 命令套回 Native 創作狀態。
 - 全域狀態確實需要完整渲染時，播放中的 `<audio>`、`<video>` 與音訊視覺化節點會先脫離再接回相同資產位置，保持播放進度與 Web Audio 連線。
 
 ## 內部結構整理
@@ -59,7 +60,12 @@ Web UI 只能透過 Bridge 使用本機能力，不可直接讀取任意檔案�
 - `OutputGeometry` 集中輸出尺寸的上下限、16 倍數對齊、比例換算與圖生圖生成畫布策略；Web UI 的 `js/geometry.js` 維持鏡像實作，避免 Native、MCP 與 UI 各自計算出不同結果。
 - `AppStore` 只保留型別宣告、儲存屬性與初始化；Persistence、Paths、Selection、Profiles、OutputSettings、Assets、ImageGeneration、MediaGeneration、Jobs 與 ModelInstallation 依職責拆成 `AppStore+*.swift`。
 - Web UI 將側邊欄與路由、工作區分頁、尺寸運算及全量渲染保護拆至 `chrome.js`、`workspace-tabs.js`、`geometry.js` 與 `render-preservation.js`；`app.js` 保留橋接與應用程式協調。
-- `SubprocessRuntime` 統一外部 Worker、影片 CLI、音樂 CLI 與 FFmpeg 的可執行檔搜尋、環境、日誌、進度、停滯偵測、取消及終止語意。
+- `SubprocessRuntime` 統一外部 Worker、影片 CLI、音樂 CLI 與 FFmpeg 的環境、日誌、進度、停滯偵測、取消及終止語意。
+- `MediaCompatibilityService` 是 `ffmpeg`／`ffprobe` 的唯一定位與探測入口；正式 App 優先使用 `Contents/Resources/bin/`，開發執行才依環境變數、Homebrew 與 `PATH` 回退。
+- `MediaSourceCompatibilityService` 讓所有匯入影片與音訊先經 `ffprobe` 分類；可直接播放時保留原檔，H.264／HEVC 優先只改封裝，其餘才以 VideoToolbox H.264／AAC 或 M4A AAC 建立播放代理。`AppStore+MediaImport` 將匯入與轉檔建立為可取消的 Job 並回報 FFmpeg 進度，轉碼位元率依影像面積調整。
+- `AssetSchemeHandler` 對時間性媒體回應 HTTP Range，使用背景 `FileHandle` 以 512 KiB 分塊送出，並以停止任務集合避免 WebKit 已停止的請求再收到資料；圖片仍維持一次送出。啟動時 `ApplicationSupport.orphanMediaCacheFiles` 會找出沒有對應資產的 UUID 快取檔並清除。
+- `MediaCompositionService` 建立不依賴模型的圖片循環影片與影音合併工作，沿用共用 FFmpeg 子行程、進度、取消及輸出命名；工作結果仍以 `generatedVideo` 資產和 `WorkflowOperation` 進入既有 lineage。
+- `automatic-flow.js` 以宣告式範本進行 Profile 預檢並建立 Workspace/Tabs。步驟透過資產 ID 與來源 Tab 連結；第一個「簡單 MV」流程依序包含主視覺、背景音樂、圖片循環及影音合併。
 - 相依套件修正由 `Patches/manifest.txt` 描述，統一交由 `scripts/apply-runtime-patches.command` 套用與驗證；版本不符或修正失敗時建置會停止，不會靜默使用未修正的來源碼。
 - `GenImageMCP` 維持自行持有 `InferenceServices` 的獨立 stdio server；App 的 `LocalMCPServiceController` 只管理 localhost HTTP transport 的生命週期，兩者直接共用 `MCPServer` 工具核心，不形成 stdio→HTTP 代理。
 - ACE-Step 正式 Runtime 的階段型別已移除 PoC 命名；診斷專用的 DiT probe 與正式生成階段分開，避免實驗程式與產品路徑混淆。
@@ -125,6 +131,7 @@ Upscale 由 `CoreMLUpscaleService` 執行 Real-ESRGAN 512 tile 與 4× 拼接。
 - Swift 驗證 Profile、模型路徑、尺寸、幀數、FPS 與輸出數量。
 - LTX-2.3 額外要求幀數符合 `8n+1`。
 - 外部 Process 支援 Task cancellation、日誌錯誤回報與百分比進度擷取。
+- LTX LoRA 控制影片由共用 FFmpeg 層以 VideoToolbox H.264 建立，不依賴 GPL `libx264`。
 - MP4 輸出以 `generatedVideo` 資產加入工作區，Web UI 使用原生 `<video>` 播放。
 - Runtime 可透過 `GENIMAGE_LTX_RUNTIME` 或標準安裝位置替換，不將 Python 實作耦合進 UI 或 AppStore。
 
@@ -134,14 +141,18 @@ Upscale 由 `CoreMLUpscaleService` 執行 Real-ESRGAN 512 tile 與 4× 拼接。
 - `ACEStepMusicGenerationService` 使用 `.mlxSwift` Profile，直接呼叫 `ACEStepSwiftRuntime` 完成 Qwen3 Embedding、條件編碼、Turbo DiT、Euler sampler 與 Oobleck VAE，不啟動外部服務或 Process。
 - ACE-Step 支援 10～300 秒、1～20 steps、可選歌詞與純音樂；latent 長度由 VAE 取樣率與 hop length 計算，長音訊使用重疊分塊解碼並串流寫入 PCM，以限制峰值記憶體。程式與模型採 MIT License。
 - 音樂 Profile 以 `ProfileMusicConfiguration` 提供長度上下限及「目標／最長」語意，Web UI 不需要依模型 ID 判斷欄位行為。
-- `MiniMaxMusic3GenerationService` 使用 `.externalCLI` Profile 呼叫 `mlx-minimax-music3 generate`；5～300 秒參數代表最長長度，模型可在輸出音訊結束標記時提前自然結束。模型維持其獨立 Community License。
-- 兩個 Adapter 都固定取得暫存 WAV，再由 `AudioOutputEncoder` 轉碼為 MP3 320 kbps、M4A AAC 256 kbps、ADTS AAC 256 kbps 或 FLAC 無損音訊。
+- `MiniMaxMusic3GenerationService` 使用 `.externalCLI` Profile 啟動 App 隨附的 `GenImageMiniMaxMusic3Worker`；App 寫入 JSON request，Worker 以固定 bfloat16 production 路徑執行 Swift／MLX pipeline，5～300 秒參數代表最長長度，模型可在輸出音訊結束標記時提前自然結束。
+- 8-bit 與 `mlx-community/MiniMax-Music3-4bit` checkpoint 共用同一 Worker。Worker 逐 frame 回報自迴歸進度、依 chunk×step 回報去噪進度、依 chunk 回報 vocoder 進度；App 沿用 `RuntimeProcess` 提供取消與強制終止，完成後由內建 FFmpeg 將 WAV 轉為使用者選擇的格式。MiniMax Music 3 不再需要 Python Runtime。
+- `Mothersuperior/minimax-music3-composer-5.7b-distilled` 以 Model Center 的音樂元件列管理，預設只安裝 `lr-6e-5` 權重；它不是獨立 Profile，也不會被誤送入音樂生成 Service，必須等相容 Composer override Runtime 後才能套用。
+- 兩個 Adapter 都固定取得暫存 WAV，再由 `AudioOutputEncoder` 經內建 FFmpeg 轉碼為 MP3 320 kbps、M4A AAC 256 kbps、ADTS AAC 256 kbps 或 FLAC 無損音訊。
 - 成功、失敗或取消時清理暫存檔；只有完成的壓縮音訊會以 `generatedAudio` 資產保留，並記錄實際時長、取樣率與聲道數。
 - ACE-Step 權重由模型中心管理，原生 Runtime 編譯於 App 內，不使用獨立安裝路徑或服務環境變數。
 
+媒體資產同時保留 `fileURL` 與選填的 `playbackURL`：前者永遠指向使用者原檔，供字幕輸出、來源關係與明確刪除使用；後者只指向 `Application Support/GenImage/MediaCache` 內的相容代理，供 WebKit 預覽。移除資產或關閉專案時會清理代理，不會改寫原始媒體。
+
 字幕生成位於多媒體匯入與文字模型之間：
 
-1. `MediaAudioPreparer` 從影片或音訊準備可供辨識的音軌與暫存路徑。
+1. `MediaAudioPreparer` 透過內建 `ffprobe` 確認音訊軌，再由內建 `ffmpeg` 統一解碼為 16 kHz 單聲道 PCM WAV 與暫存路徑。
 2. `SubtitleGenerationRouter` 以 `MediaTranscribing.supports(profile:)` 依序選擇第一個相符 Adapter。
 3. Whisper Large v3 Turbo 負責多語言辨識，Paraformer Large 負責中文，Parakeet 0.6B 負責日文；三者都在本機 Core ML 路徑執行。
 4. 可選的 `QwenTextGenerationService` 以 Qwen3.5／Qwen3.8 MLX 對每批字幕翻譯，但不改變開始與結束時間。
@@ -149,4 +160,6 @@ Upscale 由 `CoreMLUpscaleService` 執行 Real-ESRGAN 512 tile 與 4× 拼接。
 
 `GenImageASRPoC` 是獨立驗證執行檔，只測試 WhisperKit 的媒體解碼、語言辨識與時間軸輸出；不寫入 App 工作區，也不是主 App 的替代執行路徑。
 
-MLX metallib 已由 `RuntimeSupport/mlx.metallib` 與 `build.command` 放入 Release 執行目錄。發佈前仍需完成模型授權檢查、16/24/32GB 壓力測試、App bundle、簽章與公證。
+`scripts/build-ffmpeg-macos.sh` 產生 Apple Silicon、LGPL-only、動態連結且可重新替換的 FFmpeg 發佈目錄。`build.command` 驗證未啟用 GPL／nonfree 編碼器，複製 `ffmpeg`、`ffprobe`、dylib 與授權文件，將 install name 改為 `@rpath`，依序簽署 dylib、工具與 App，再交由既有 DMG 公證流程處理。Developer ID 測試確認 FFmpeg dylib 與工具使用相同 Team ID 時不需額外 library-validation entitlement；本機 ad-hoc 建置則不對 FFmpeg 啟用 hardened runtime。預建二進位位於被 Git 忽略的 `third_party/ffmpeg/`，不進入 GitHub Source archive。
+
+MLX metallib 已由 `RuntimeSupport/mlx.metallib` 與 `build.command` 放入 Release 執行目錄。發佈前仍需完成模型授權檢查與 16/24/32GB 壓力測試。

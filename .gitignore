@@ -10,8 +10,11 @@ dist/
 Models/
 Generated/
 Outputs/
+third_party/ffmpeg/
 *.safetensors
 *.ckpt
+__pycache__/
+*.py[cod]
 
 # 本機簽章憑證、API 私鑰與 Provisioning Profile。
 cert/

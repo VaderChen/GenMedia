@@ -1,8 +1,8 @@
 import AppKit
-import AVFoundation
 import Combine
 import Foundation
 import GenImageCore
+import GenImageRuntime
 import ImageIO
 import UniformTypeIdentifiers
 import WebKit
@@ -154,6 +154,9 @@ final class HybridBridgeController: NSObject, ObservableObject {
         case "downloadAsset":
             try downloadAsset(params)
 
+        case "renameAsset":
+            try renameAsset(params)
+
         case "copyAsset":
             try copyAsset(params)
 
@@ -193,6 +196,9 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
         case "updateMusicOutputSettings":
             try updateMusicOutputSettings(params)
+
+        case "applyWorkspaceTabDraft":
+            try applyWorkspaceTabDraft(params)
 
         case "randomizeSeed":
             store.randomizeSeed()
@@ -246,6 +252,49 @@ final class HybridBridgeController: NSObject, ObservableObject {
                 targetLanguage: targetLanguage
             )
 
+        case "createImageLoop":
+            guard let rawAssetIDs = params["sourceAssetIDs"] as? [String],
+                  let fitModeRaw = params["fitMode"] as? String,
+                  let fitMode = ImageLoopFitMode(rawValue: fitModeRaw),
+                  let width = integer(params["width"]),
+                  let height = integer(params["height"]),
+                  let frameRate = integer(params["frameRate"]),
+                  let imageDurationSeconds = double(params["imageDurationSeconds"]),
+                  let totalDurationSeconds = double(params["totalDurationSeconds"]) else {
+                throw BridgeError.invalidParameters
+            }
+            store.requestImageLoop(
+                sourceAssetIDs: rawAssetIDs.compactMap(UUID.init(uuidString:)),
+                options: ImageLoopOptions(
+                    width: width,
+                    height: height,
+                    frameRate: frameRate,
+                    imageDurationSeconds: imageDurationSeconds,
+                    totalDurationSeconds: totalDurationSeconds,
+                    fitMode: fitMode
+                )
+            )
+
+        case "mergeMedia":
+            guard let videoAssetID = uuid(params["videoAssetID"]),
+                  let audioAssetID = uuid(params["audioAssetID"]),
+                  let audioModeRaw = params["audioMode"] as? String,
+                  let audioMode = MediaMergeAudioMode(rawValue: audioModeRaw),
+                  let durationModeRaw = params["durationMode"] as? String,
+                  let durationMode = MediaMergeDurationMode(rawValue: durationModeRaw),
+                  let audioVolume = double(params["audioVolume"]) else {
+                throw BridgeError.invalidParameters
+            }
+            store.requestMediaMerge(
+                videoAssetID: videoAssetID,
+                audioAssetID: audioAssetID,
+                options: MediaMergeOptions(
+                    audioMode: audioMode,
+                    durationMode: durationMode,
+                    audioVolume: audioVolume
+                )
+            )
+
         case "describe":
             performSourceImageAction(.describe)
 
@@ -259,7 +308,10 @@ final class HybridBridgeController: NSObject, ObservableObject {
             importImage(then: nil)
 
         case "importSubtitleMedia":
-            importSubtitleMedia(then: nil)
+            importMedia(requiresAudio: true, then: nil)
+
+        case "importMedia":
+            importMedia(requiresAudio: false, then: nil)
 
         case "pasteImage":
             try importPastedImage(params)
@@ -291,6 +343,17 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
         case "chooseOutputDirectory":
             chooseOutputDirectory()
+
+        case "setCivitaiToken":
+            guard let token = params["token"] as? String,
+                  store.setCivitaiToken(token) else {
+                throw BridgeError.assetActionFailed("無法儲存 Civitai API Token。")
+            }
+
+        case "clearCivitaiToken":
+            guard store.clearCivitaiToken() else {
+                throw BridgeError.assetActionFailed("無法清除 Civitai API Token。")
+            }
 
         case "setMCPServiceEnabled":
             guard let enabled = params["enabled"] as? Bool else {
@@ -483,6 +546,41 @@ final class HybridBridgeController: NSObject, ObservableObject {
         )
     }
 
+    private func applyWorkspaceTabDraft(_ params: [String: Any]) throws {
+        if let assignments = params["profileAssignments"] as? [[String: Any]] {
+            for assignment in assignments {
+                guard let capabilityRaw = assignment["capability"] as? String,
+                      let capability = ModelCapability(rawValue: capabilityRaw) else { continue }
+                let profileID = uuid(assignment["profileID"])
+                let modelID = assignment["modelID"] as? String
+                let modelRevision = assignment["modelRevision"] as? String
+                let architecture = (assignment["architecture"] as? String)
+                    .flatMap(InferenceArchitecture.init(rawValue:))
+                let profile = store.profiles.first { profile in
+                    if let profileID, profile.id == profileID, profile.capability == capability {
+                        return true
+                    }
+                    return profile.capability == capability
+                        && profile.modelID == modelID
+                        && profile.modelRevision == modelRevision
+                        && (architecture == nil || profile.architecture == architecture)
+                }
+                if let profile {
+                    store.selectProfile(profile.id, for: capability)
+                }
+            }
+        }
+        if let recipe = params["recipe"] as? [String: Any] {
+            try updateRecipe(recipe)
+        }
+        if let video = params["videoOutputSettings"] as? [String: Any] {
+            updateVideoOutputSettings(video)
+        }
+        if let music = params["musicOutputSettings"] as? [String: Any] {
+            try updateMusicOutputSettings(music)
+        }
+    }
+
     private func performSourceImageAction(_ action: SourceImageAction) {
         guard store.selectedSourceImage != nil else {
             importImage(then: action)
@@ -519,7 +617,7 @@ final class HybridBridgeController: NSObject, ObservableObject {
             )
             return
         }
-        importSubtitleMedia { [weak self] assetID in
+        importMedia(requiresAudio: true) { [weak self] assetID in
             self?.store.requestSubtitleGeneration(
                 sourceAssetID: assetID,
                 format: format,
@@ -570,57 +668,42 @@ final class HybridBridgeController: NSObject, ObservableObject {
         }
     }
 
-    private func importSubtitleMedia(then completion: ((UUID) -> Void)?) {
+    private func importMedia(
+        requiresAudio: Bool,
+        then completion: (@MainActor @Sendable (UUID) -> Void)?
+    ) {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.movie, .audio]
+        panel.allowedContentTypes = Self.mediaImportContentTypes
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.message = "選擇包含聲音的影片或音訊檔案"
+        panel.message = requiresAudio
+            ? "選擇包含聲音的影片或音訊檔案"
+            : "選擇要加入工作區的影片或音訊檔案"
         panel.prompt = "匯入"
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let media = AVURLAsset(url: url)
-                let audioTracks = try await media.loadTracks(withMediaType: .audio)
-                guard !audioTracks.isEmpty else {
-                    throw BridgeError.assetActionFailed("來源媒體沒有可辨識的聲音軌。")
-                }
-                let videoTracks = try await media.loadTracks(withMediaType: .video)
-                let durationTime = try await media.load(.duration)
-                let rawDuration = CMTimeGetSeconds(durationTime)
-                let duration = rawDuration.isFinite ? max(0, rawDuration) : 0
+        store.requestMediaImport(
+            sourceURL: url,
+            requiresAudio: requiresAudio,
+            completion: completion
+        )
+    }
 
-                let pixelWidth: Int
-                let pixelHeight: Int
-                if let videoTrack = videoTracks.first {
-                    let naturalSize = try await videoTrack.load(.naturalSize)
-                    let preferredTransform = try await videoTrack.load(.preferredTransform)
-                    let transformed = CGRect(
-                        origin: .zero,
-                        size: naturalSize
-                    ).applying(preferredTransform).standardized
-                    pixelWidth = max(0, Int(transformed.width.rounded()))
-                    pixelHeight = max(0, Int(transformed.height.rounded()))
-                } else {
-                    pixelWidth = 0
-                    pixelHeight = 0
-                }
-
-                let assetID = store.importMedia(
-                    url: url,
-                    kind: videoTracks.isEmpty ? .importedAudio : .importedVideo,
-                    pixelWidth: pixelWidth,
-                    pixelHeight: pixelHeight,
-                    durationSeconds: duration
-                )
-                completion?(assetID)
-            } catch {
-                store.statusMessage = "無法匯入字幕來源媒體：\(error.localizedDescription)"
+    private static let mediaImportContentTypes: [UTType] = {
+        let extensions = [
+            "mp4", "m4v", "mov", "mkv", "webm", "avi", "wmv", "flv",
+            "mpeg", "mpg", "m2ts", "mts", "ts", "3gp", "ogv", "rm", "rmvb", "vob", "mxf",
+            "mp3", "m4a", "aac", "wav", "wave", "aif", "aiff", "flac", "ogg", "oga", "opus",
+            "wma", "ape", "wv", "alac", "ac3", "eac3", "amr", "mka", "dsf", "dff"
+        ]
+        return ([UTType.movie, .audio] + extensions.compactMap {
+            UTType(filenameExtension: $0)
+        }).reduce(into: [UTType]()) { result, contentType in
+            if !result.contains(contentType) {
+                result.append(contentType)
             }
         }
-    }
+    }()
 
     private func chooseModelRoot() {
         let panel = NSOpenPanel()
@@ -688,6 +771,29 @@ final class HybridBridgeController: NSObject, ObservableObject {
         }
         try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
         store.statusMessage = "媒體檔案已儲存至：\(destinationURL.path)"
+    }
+
+    private func renameAsset(_ params: [String: Any]) throws {
+        guard let id = uuid(params["assetID"]),
+              let asset = store.assets.first(where: { $0.id == id }),
+              let sourceURL = asset.fileURL else {
+            throw BridgeError.invalidParameters
+        }
+
+        let field = NSTextField(string: sourceURL.lastPathComponent)
+        field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+        field.placeholderString = "檔案名稱"
+
+        let alert = NSAlert()
+        alert.messageText = "重新命名媒體檔案"
+        alert.informativeText = "請輸入新的檔案名稱。檔案會留在目前的資料夾中。"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "重新命名")
+        alert.addButton(withTitle: "取消")
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        try store.renameAsset(id, toFileName: field.stringValue)
     }
 
     private func copyAsset(_ params: [String: Any]) throws {
@@ -924,8 +1030,22 @@ final class HybridBridgeController: NSObject, ObservableObject {
         return nil
     }
 
-    private func sendResponse(id: String) {
-        sendJavaScriptObject(["kind": "response", "id": id, "ok": true])
+    private func handleRequest(method: String, params: [String: Any]) throws -> [String: Any]? {
+        if method == "createAutomaticFlowWorkspace" {
+            guard let name = params["name"] as? String,
+                  let workspaceID = store.createWorkspace(name: name) else {
+                throw BridgeError.assetActionFailed("目前無法建立自動流程工作區。")
+            }
+            return ["workspaceID": workspaceID.uuidString]
+        }
+        try handle(method: method, params: params)
+        return nil
+    }
+
+    private func sendResponse(id: String, payload: [String: Any]? = nil) {
+        var response: [String: Any] = ["kind": "response", "id": id, "ok": true]
+        if let payload { response["payload"] = payload }
+        sendJavaScriptObject(response)
     }
 
     private func sendError(id: String?, message: String) {
@@ -953,8 +1073,8 @@ extension HybridBridgeController: WKScriptMessageHandler {
         let params = body["params"] as? [String: Any] ?? [:]
 
         do {
-            try handle(method: method, params: params)
-            if let id { sendResponse(id: id) }
+            let payload = try handleRequest(method: method, params: params)
+            if let id { sendResponse(id: id, payload: payload) }
         } catch {
             sendError(id: id, message: error.localizedDescription)
         }
@@ -965,6 +1085,25 @@ extension HybridBridgeController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         pageReady = true
         pushState()
+    }
+}
+
+extension HybridBridgeController: WKUIDelegate {
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        guard let url = navigationAction.request.url,
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
+        if !NSWorkspace.shared.open(url) {
+            store.statusMessage = "無法在預設瀏覽器開啟連結。"
+        }
+        return nil
     }
 }
 

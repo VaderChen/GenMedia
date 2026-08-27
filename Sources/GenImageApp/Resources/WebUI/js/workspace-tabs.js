@@ -4,7 +4,15 @@
 // 於 app.js 的重繪流程被閱讀與修改。
 
 const WORKSPACE_TABS_KEY = "genimage.workspaceTabs";
-const WORKSPACE_TABS_SCHEMA_VERSION = 2;
+const WORKSPACE_TABS_SCHEMA_VERSION = 3;
+const WORKSPACE_TASK_KINDS = new Set([
+  "image",
+  "video",
+  "music",
+  "subtitle",
+  "imageLoop",
+  "mediaMerge",
+]);
 
 // 尚未落地的生成輸出：記住送出當下的分頁，等對應的 job 完成時把結果放回同一個分頁。
 const pendingOutputs = [];
@@ -59,11 +67,17 @@ function takePendingOutputTab(action, nextState, workspaceID) {
   return pendingOutputs.splice(index, 1)[0].tabID;
 }
 
-export function makeWorkspaceTab() {
+export function makeWorkspaceTab(options = {}) {
   const id = globalThis.crypto?.randomUUID?.() || `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return {
     id,
-    name: formatWorkspaceTabName(new Date()),
+    name: typeof options.name === "string" && options.name.trim()
+      ? options.name.trim()
+      : formatWorkspaceTabName(new Date()),
+    taskKind: normalizeWorkspaceTaskKind(options.taskKind),
+    promptTab: typeof options.promptTab === "string" ? options.promptTab : null,
+    draft: cloneSerializable(options.draft),
+    flow: normalizeFlowStep(options.flow),
     assetIDs: [],
     selectedAssetID: null,
     selectedAssetIDs: [],
@@ -79,7 +93,7 @@ export function formatWorkspaceTabName(date) {
 export function loadWorkspaceTabs() {
   try {
     const stored = JSON.parse(localStorage.getItem(WORKSPACE_TABS_KEY) || "null");
-    if (stored?.schemaVersion === WORKSPACE_TABS_SCHEMA_VERSION && stored.workspaces) {
+    if ([2, WORKSPACE_TABS_SCHEMA_VERSION].includes(stored?.schemaVersion) && stored.workspaces) {
       const workspaceTabStates = {};
       Object.entries(stored.workspaces).forEach(([workspaceID, value]) => {
         if (typeof workspaceID !== "string" || !workspaceID) return;
@@ -168,6 +182,10 @@ function normalizeWorkspaceTabState(value) {
           name: typeof tab.name === "string" && tab.name.trim()
             ? tab.name.trim()
             : formatWorkspaceTabName(new Date(Date.now() + index * 1_000)),
+          taskKind: normalizeWorkspaceTaskKind(tab.taskKind || tab.generationType),
+          promptTab: typeof tab.promptTab === "string" ? tab.promptTab : null,
+          draft: cloneSerializable(tab.draft),
+          flow: normalizeFlowStep(tab.flow),
           assetIDs: Array.isArray(tab.assetIDs)
             ? tab.assetIDs.filter((id) => typeof id === "string")
             : [],
@@ -244,8 +262,8 @@ export function reconcileWorkspaceTabs(ui, previousState, nextState) {
       nextState,
       ui.activeWorkspaceID,
     );
-    const targetTab = parentTab
-      || ui.workspaceTabs.find((tab) => tab.id === pendingTabID)
+    const targetTab = ui.workspaceTabs.find((tab) => tab.id === pendingTabID)
+      || parentTab
       || activeWorkspaceTab(ui);
     outputIDs.forEach((id) => {
       targetTab.assetIDs.push(id);
@@ -293,6 +311,8 @@ export function workspaceStateForActiveTab(ui, sourceState) {
   const selectedAssetIDs = (tab?.selectedAssetIDs || []).filter((id) => assetIDs.has(id));
   return {
     ...sourceState,
+    workspaceAssets: sourceState.assets,
+    workspaceOperations: sourceState.operations,
     assets,
     selectedAssetID,
     selectedAssetIDs,
@@ -379,4 +399,32 @@ export function isImageAssetID(state, assetID) {
 
 export function isImageAsset(asset) {
   return ["imported", "generated", "edited", "upscaled"].includes(asset.kind);
+}
+
+function normalizeWorkspaceTaskKind(value) {
+  return WORKSPACE_TASK_KINDS.has(value) ? value : "image";
+}
+
+function normalizeFlowStep(value) {
+  if (!value || typeof value !== "object") return null;
+  const templateID = typeof value.templateID === "string" ? value.templateID : null;
+  const stepID = typeof value.stepID === "string" ? value.stepID : null;
+  if (!templateID || !stepID) return null;
+  return {
+    templateID,
+    templateVersion: Number.isInteger(value.templateVersion) ? value.templateVersion : 1,
+    stepID,
+    dependencyStepIDs: Array.isArray(value.dependencyStepIDs)
+      ? value.dependencyStepIDs.filter((id) => typeof id === "string")
+      : [],
+  };
+}
+
+function cloneSerializable(value) {
+  if (!value || typeof value !== "object") return null;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
 }

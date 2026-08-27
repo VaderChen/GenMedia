@@ -1,4 +1,5 @@
 import { invoke, onClipboardImage, onState } from "./bridge.js";
+import { createAutomaticFlowPlan } from "./automatic-flow.js";
 import {
   refreshModelProgressDOM,
   refreshToastDOM,
@@ -53,6 +54,9 @@ import {
   renderCreationPanel,
   renderQuickTools,
   renderWorkspace,
+  resolvedImageLoopDurationSeconds,
+  resolvedImageLoopSourceAssets,
+  resolvedMediaMergeSources,
   selectedSourceImage,
   selectedSubtitleSource,
   subtitleTargetLanguages,
@@ -61,8 +65,8 @@ import {
 const root = document.querySelector("#app");
 const STATUS_MESSAGE_DURATION_MS = 5_000;
 const JOB_TIMING_REFRESH_MS = 1_000;
-const PROMPT_TABS = new Set(["prompt", "negative", "lyrics", "imageOutput", "videoOutput", "musicOutput", "subtitleOutput"]);
-const GENERATION_TYPES = new Set(["image", "video", "music", "subtitle"]);
+const PROMPT_TABS = new Set(["prompt", "negative", "lyrics", "imageOutput", "videoOutput", "musicOutput", "subtitleOutput", "imageLoopOutput", "mediaMergeOutput"]);
+const GENERATION_TYPES = new Set(["image", "video", "music", "subtitle", "imageLoop", "mediaMerge"]);
 const SUBTITLE_TARGET_LANGUAGES = new Set(
   subtitleTargetLanguages.map(([value]) => value),
 );
@@ -71,6 +75,8 @@ const PROMPT_TABS_BY_GENERATION_TYPE = {
   video: new Set(["prompt", "negative", "videoOutput"]),
   music: new Set(["prompt", "lyrics", "musicOutput"]),
   subtitle: new Set(["subtitleOutput"]),
+  imageLoop: new Set(["imageLoopOutput"]),
+  mediaMerge: new Set(["mediaMergeOutput"]),
 };
 const SUPPORTED_IMAGE_FILE_PATTERN = /\.(png|jpe?g|webp|gif|tiff?|heic|heif)$/i;
 
@@ -96,6 +102,25 @@ const savedSubtitleFormat = normalizeSubtitleFormat(localStorage.getItem("genima
 const savedSubtitleTargetLanguage = normalizeSubtitleTargetLanguage(
   localStorage.getItem("genimage.subtitleTargetLanguage"),
 );
+const defaultImageLoopSettings = {
+  width: 1280,
+  height: 720,
+  frameRate: 30,
+  imageDurationSeconds: 5,
+  totalDurationSeconds: 60,
+  fitMode: "cover",
+  sourceStepID: null,
+  durationSourceStepID: null,
+};
+const defaultMediaMergeSettings = {
+  videoAssetID: "",
+  audioAssetID: "",
+  videoSourceStepID: null,
+  audioSourceStepID: null,
+  audioMode: "replace",
+  durationMode: "shortest",
+  audioVolume: 1,
+};
 const ui = {
   route: "workspace",
   previewMode: "single",
@@ -104,6 +129,8 @@ const ui = {
   generationType: savedGenerationType,
   subtitleFormat: savedSubtitleFormat,
   subtitleTargetLanguage: savedSubtitleTargetLanguage,
+  imageLoopSettings: { ...defaultImageLoopSettings },
+  mediaMergeSettings: { ...defaultMediaMergeSettings },
   promptTab: normalizePromptTab(savedPromptTab, savedGenerationType),
   inspectorTab: localStorage.getItem("genimage.inspectorTab") === "jobs" ? "jobs" : "info",
   workspaceTabStates: savedWorkspaceTabs.workspaceTabStates,
@@ -150,6 +177,7 @@ onState((nextState) => {
     composingEditableField = null;
     renderDeferredDuringEditing = false;
     activateWorkspaceTabs(ui, nextState.selectedWorkspaceID);
+    applyActiveWorkspaceTabDraftLocally(nextState);
   }
   const statusMessageChanged = nextState.statusMessage !== state?.statusMessage;
   const nextContentSignature = contentSignature(nextState);
@@ -215,10 +243,15 @@ onState((nextState) => {
   stateContentSignature = nextContentSignature;
   if (statusMessageChanged) scheduleStatusMessageDismiss(nextState.statusMessage);
   render();
-  if (workspaceChanged) restoreActiveWorkspaceSelection(nextState);
+  if (workspaceChanged) {
+    restoreActiveWorkspaceSelection(nextState);
+    syncActiveWorkspaceTabDraftToNative().catch(showBridgeError);
+  }
 });
 
 invoke("bootstrap").catch(showBridgeError);
+
+window.addEventListener("beforeunload", () => captureActiveWorkspaceTabDraft());
 
 setInterval(() => {
   if (state) refreshJobTimings(state, root);
@@ -289,6 +322,49 @@ root.addEventListener("click", async (event) => {
               : null,
           },
           "generateSubtitles",
+        );
+        break;
+      }
+      case "createImageLoop": {
+        const workspaceState = workspaceStateForActiveTab(ui, state);
+        const sourceAssets = resolvedImageLoopSourceAssets(workspaceState, ui);
+        const settings = ui.imageLoopSettings;
+        ui.route = "workspace";
+        ui.previewMode = "single";
+        setInspectorTab("jobs");
+        await invokeTrackedOutput(
+          "createImageLoop",
+          {
+            sourceAssetIDs: sourceAssets.map((asset) => asset.id),
+            width: Number(settings.width),
+            height: Number(settings.height),
+            frameRate: Number(settings.frameRate),
+            imageDurationSeconds: Number(settings.imageDurationSeconds),
+            totalDurationSeconds: resolvedImageLoopDurationSeconds(workspaceState, ui),
+            fitMode: settings.fitMode,
+          },
+          "createImageLoop",
+        );
+        break;
+      }
+      case "mergeMedia": {
+        const workspaceState = workspaceStateForActiveTab(ui, state);
+        const sources = resolvedMediaMergeSources(workspaceState, ui);
+        if (!sources.videoAsset || !sources.audioAsset) break;
+        const settings = ui.mediaMergeSettings;
+        ui.route = "workspace";
+        ui.previewMode = "single";
+        setInspectorTab("jobs");
+        await invokeTrackedOutput(
+          "mergeMedia",
+          {
+            videoAssetID: sources.videoAsset.id,
+            audioAssetID: sources.audioAsset.id,
+            audioMode: settings.audioMode,
+            durationMode: settings.durationMode,
+            audioVolume: Number(settings.audioVolume),
+          },
+          "mergeMedia",
         );
         break;
       }
@@ -385,6 +461,25 @@ root.addEventListener("click", async (event) => {
           input?.select?.();
         });
         break;
+      case "createAutomaticFlow": {
+        const plan = createAutomaticFlowPlan(state, target.dataset.templateId);
+        if (!plan) break;
+        captureActiveWorkspaceTabDraft();
+        const response = await invoke("createAutomaticFlowWorkspace", {
+          name: plan.workspaceName,
+          templateID: plan.templateID,
+        });
+        const workspaceID = response?.workspaceID;
+        if (!workspaceID) throw new Error(t("automaticFlow.createFailed"));
+        const tabs = plan.tabs.map((tab) => makeWorkspaceTab(tab));
+        ui.workspaceTabStates[workspaceID] = {
+          tabs,
+          activeTabID: tabs[0].id,
+        };
+        saveWorkspaceTabs(ui);
+        ui.route = "workspace";
+        break;
+      }
       case "workspaceCreateCancel":
         ui.workspaceCreateDialogOpen = false;
         ui.workspaceCreateName = "";
@@ -455,6 +550,7 @@ root.addEventListener("click", async (event) => {
       case "promptTab":
         ui.promptTab = normalizePromptTab(target.dataset.tab, ui.generationType);
         localStorage.setItem("genimage.promptTab", ui.promptTab);
+        captureActiveWorkspaceTabDraft();
         refreshCreationPanelDOM();
         break;
       case "zoomIn":
@@ -487,10 +583,11 @@ root.addEventListener("click", async (event) => {
         });
         break;
       case "importSubtitleMedia":
+      case "importMedia":
         ui.route = "workspace";
         ui.previewMode = "single";
         setInspectorTab("info");
-        await invoke("importSubtitleMedia");
+        await invoke(action);
         break;
       case "cancelJob":
         await invoke("cancelJob", { jobID: target.dataset.jobId });
@@ -527,6 +624,18 @@ root.addEventListener("click", async (event) => {
       case "chooseOutputDirectory":
       case "revealOutputDirectory":
         await invoke(action);
+        break;
+      case "saveCivitaiToken": {
+        const input = root.querySelector("[data-civitai-token]");
+        const token = input?.value.trim() || "";
+        if (!token) break;
+        target.disabled = true;
+        await invoke("setCivitaiToken", { token });
+        if (input) input.value = "";
+        break;
+      }
+      case "clearCivitaiToken":
+        await invoke("clearCivitaiToken");
         break;
       case "installModel":
       case "pauseModel":
@@ -630,6 +739,7 @@ root.addEventListener("change", async (event) => {
     const workspaceID = event.target.value;
     if (!workspaceID || workspaceID === state.selectedWorkspaceID) return;
     try {
+      captureActiveWorkspaceTabDraft();
       await invoke("selectWorkspace", { workspaceID });
     } catch (error) {
       showBridgeError(error);
@@ -639,6 +749,12 @@ root.addEventListener("change", async (event) => {
 
   if (event.target.dataset.uiField === "generationType") {
     setGenerationType(event.target.value);
+    const tab = activeWorkspaceTab(ui);
+    if (tab) {
+      tab.taskKind = ui.generationType;
+      tab.promptTab = ui.promptTab;
+    }
+    captureActiveWorkspaceTabDraft();
     refreshCreationPanelDOM();
     return;
   }
@@ -646,6 +762,7 @@ root.addEventListener("change", async (event) => {
   if (event.target.dataset.uiField === "subtitleFormat") {
     ui.subtitleFormat = normalizeSubtitleFormat(event.target.value);
     localStorage.setItem("genimage.subtitleFormat", ui.subtitleFormat);
+    captureActiveWorkspaceTabDraft();
     refreshCreationPanelDOM();
     return;
   }
@@ -653,6 +770,7 @@ root.addEventListener("change", async (event) => {
   if (event.target.dataset.uiField === "subtitleTargetLanguage") {
     ui.subtitleTargetLanguage = normalizeSubtitleTargetLanguage(event.target.value);
     localStorage.setItem("genimage.subtitleTargetLanguage", ui.subtitleTargetLanguage);
+    captureActiveWorkspaceTabDraft();
     refreshCreationPanelDOM();
     return;
   }
@@ -763,6 +881,34 @@ root.addEventListener("change", async (event) => {
     } catch (error) {
       showBridgeError(error);
     }
+    return;
+  }
+
+  if (event.target.dataset.imageLoopField) {
+    const field = event.target.dataset.imageLoopField;
+    ui.imageLoopSettings[field] = ["fitMode"].includes(field)
+      ? event.target.value
+      : Number(event.target.value);
+    captureActiveWorkspaceTabDraft();
+    refreshCreationPanelDOM();
+    return;
+  }
+
+  if (event.target.dataset.mediaMergeField) {
+    const field = event.target.dataset.mediaMergeField;
+    if (field === "audioVolume") {
+      ui.mediaMergeSettings.audioVolume = Number(event.target.value) / 100;
+    } else {
+      ui.mediaMergeSettings[field] = event.target.value;
+    }
+    if (field === "videoAssetID" && event.target.value) {
+      ui.mediaMergeSettings.videoSourceStepID = null;
+    }
+    if (field === "audioAssetID" && event.target.value) {
+      ui.mediaMergeSettings.audioSourceStepID = null;
+    }
+    captureActiveWorkspaceTabDraft();
+    refreshCreationPanelDOM();
     return;
   }
 
@@ -1005,6 +1151,7 @@ root.addEventListener("pointercancel", stopPreviewPan);
 
 function render() {
   if (!state) return;
+  captureActiveWorkspaceTabDraft();
   clearTimeout(deferredRenderTimer);
   deferredRenderTimer = null;
   renderDeferredDuringEditing = false;
@@ -1067,6 +1214,7 @@ function openAssetContextMenu(clientX, clientY, assetID) {
   menu.setAttribute("role", "menu");
   menu.innerHTML = [
     ["openAsset", t("context.openAsset")],
+    ...(asset.fileName ? [["renameAsset", t("context.renameAsset")]] : []),
     ["revealAsset", t("context.openDirectory")],
     ["downloadAsset", t("context.downloadAsset")],
     ...(isImageAsset(asset) ? [["copyAsset", t("context.copyImage")]] : []),
@@ -1106,7 +1254,12 @@ function setInspectorTab(tab) {
 }
 
 function addWorkspaceTab() {
-  const tab = makeWorkspaceTab();
+  captureActiveWorkspaceTabDraft();
+  const tab = makeWorkspaceTab({
+    taskKind: "image",
+    promptTab: "prompt",
+    draft: currentWorkspaceTabDraft(),
+  });
   ui.workspaceTabs.push(tab);
   ui.activeWorkspaceTabID = tab.id;
   ui.route = "workspace";
@@ -1115,6 +1268,107 @@ function addWorkspaceTab() {
   localStorage.setItem("genimage.inspectorTab", "info");
   saveWorkspaceTabs(ui);
   render();
+}
+
+function currentWorkspaceTabDraft() {
+  if (!state) return null;
+  const profileAssignments = Object.entries(state.activeProfileIDs || {})
+    .map(([capability, profileID]) => {
+      const profile = state.profiles.find(
+        (candidate) => candidate.id === profileID && candidate.capability === capability,
+      );
+      if (!profile) return null;
+      return {
+        profileID: profile.id,
+        capability: profile.capability,
+        modelID: profile.modelID,
+        modelRevision: profile.modelRevision,
+        architecture: profile.architecture,
+      };
+    })
+    .filter(Boolean);
+  return {
+    profileAssignments,
+    recipe: cloneSerializable(state.recipe),
+    videoOutputSettings: cloneSerializable(state.videoOutputSettings),
+    musicOutputSettings: cloneSerializable(state.musicOutputSettings),
+    subtitleSettings: {
+      format: ui.subtitleFormat,
+      targetLanguage: ui.subtitleTargetLanguage,
+    },
+    imageLoopSettings: cloneSerializable(ui.imageLoopSettings),
+    mediaMergeSettings: cloneSerializable(ui.mediaMergeSettings),
+  };
+}
+
+function captureActiveWorkspaceTabDraft() {
+  const tab = activeWorkspaceTab(ui);
+  if (!tab || !state) return;
+  tab.taskKind = ui.generationType;
+  tab.promptTab = ui.promptTab;
+  tab.draft = currentWorkspaceTabDraft();
+  saveWorkspaceTabs(ui);
+}
+
+function applyActiveWorkspaceTabDraftLocally(targetState) {
+  const tab = activeWorkspaceTab(ui);
+  if (!tab || !targetState) return;
+  setGenerationType(tab.taskKind || "image", tab.promptTab || "prompt");
+  const draft = tab.draft;
+  if (!draft) return;
+  if (draft.recipe) targetState.recipe = { ...targetState.recipe, ...cloneSerializable(draft.recipe) };
+  if (draft.videoOutputSettings) {
+    targetState.videoOutputSettings = {
+      ...targetState.videoOutputSettings,
+      ...cloneSerializable(draft.videoOutputSettings),
+    };
+  }
+  if (draft.musicOutputSettings) {
+    targetState.musicOutputSettings = {
+      ...targetState.musicOutputSettings,
+      ...cloneSerializable(draft.musicOutputSettings),
+    };
+  }
+  if (draft.subtitleSettings) {
+    ui.subtitleFormat = normalizeSubtitleFormat(draft.subtitleSettings.format);
+    ui.subtitleTargetLanguage = normalizeSubtitleTargetLanguage(draft.subtitleSettings.targetLanguage);
+  }
+  ui.imageLoopSettings = {
+    ...defaultImageLoopSettings,
+    ...(cloneSerializable(draft.imageLoopSettings) || {}),
+  };
+  ui.mediaMergeSettings = {
+    ...defaultMediaMergeSettings,
+    ...(cloneSerializable(draft.mediaMergeSettings) || {}),
+  };
+  const resolvedProfileIDs = { ...targetState.activeProfileIDs };
+  (draft.profileAssignments || []).forEach((assignment) => {
+    const profile = targetState.profiles.find((candidate) =>
+      candidate.capability === assignment.capability
+        && (candidate.id === assignment.profileID
+          || (candidate.modelID === assignment.modelID
+            && candidate.modelRevision === assignment.modelRevision
+            && candidate.architecture === assignment.architecture)),
+    );
+    if (profile) resolvedProfileIDs[assignment.capability] = profile.id;
+  });
+  targetState.activeProfileIDs = resolvedProfileIDs;
+}
+
+function syncActiveWorkspaceTabDraftToNative() {
+  const draft = activeWorkspaceTab(ui)?.draft;
+  if (!draft) return Promise.resolve();
+  return invoke("applyWorkspaceTabDraft", {
+    profileAssignments: draft.profileAssignments || [],
+    recipe: draft.recipe || {},
+    videoOutputSettings: draft.videoOutputSettings || {},
+    musicOutputSettings: draft.musicOutputSettings || {},
+  });
+}
+
+function cloneSerializable(value) {
+  if (!value || typeof value !== "object") return null;
+  return JSON.parse(JSON.stringify(value));
 }
 
 function restoreActiveWorkspaceSelection(nextState) {
@@ -1127,13 +1381,16 @@ function restoreActiveWorkspaceSelection(nextState) {
 async function activateWorkspaceTab(tabID) {
   const tab = ui.workspaceTabs.find((item) => item.id === tabID);
   if (!tab) return;
+  captureActiveWorkspaceTabDraft();
   ui.activeWorkspaceTabID = tab.id;
   ui.route = "workspace";
   ui.previewMode = "single";
   ui.inspectorTab = "info";
   localStorage.setItem("genimage.inspectorTab", "info");
+  applyActiveWorkspaceTabDraftLocally(state);
   saveWorkspaceTabs(ui);
   render();
+  await syncActiveWorkspaceTabDraftToNative();
   if (tab.selectedAssetID) {
     await invoke("selectAsset", { assetID: tab.selectedAssetID });
   }
@@ -1153,7 +1410,10 @@ async function closeWorkspaceTab(tabID) {
   if (closedActiveTab) ui.activeWorkspaceTabID = replacementTab.id;
   if (ui.renameWorkspaceTabID === tabID) closeWorkspaceTabRename(false);
   saveWorkspaceTabs(ui);
+  if (closedActiveTab) applyActiveWorkspaceTabDraftLocally(state);
   render();
+
+  if (closedActiveTab) await syncActiveWorkspaceTabDraftToNative();
 
   if (closedActiveTab && replacementTab.selectedAssetID) {
     await invoke("selectAsset", { assetID: replacementTab.selectedAssetID });
@@ -1425,6 +1685,7 @@ function scheduleStatusMessageDismiss(message) {
 
 function syncRecipe() {
   clearTimeout(recipeTimer);
+  captureActiveWorkspaceTabDraft();
   return invoke("updateRecipe", {
     prompt: state.recipe.prompt,
     negativePrompt: state.recipe.negativePrompt,
@@ -1440,6 +1701,7 @@ function syncRecipe() {
 
 function syncVideoOutputSettings() {
   clearTimeout(recipeTimer);
+  captureActiveWorkspaceTabDraft();
   return invoke("updateVideoOutputSettings", {
     width: state.videoOutputSettings.width,
     height: state.videoOutputSettings.height,
@@ -1453,6 +1715,7 @@ function syncVideoOutputSettings() {
 
 function syncMusicOutputSettings() {
   clearTimeout(recipeTimer);
+  captureActiveWorkspaceTabDraft();
   return invoke("updateMusicOutputSettings", {
     prompt: state.musicOutputSettings.prompt,
     lyrics: state.musicOutputSettings.lyrics,
@@ -1526,6 +1789,8 @@ function normalizePromptTab(value, generationType) {
   if (promptTab.endsWith("Output")) return `${normalizedGenerationType}Output`;
   if (normalizedGenerationType === "music") return "lyrics";
   if (normalizedGenerationType === "subtitle") return "subtitleOutput";
+  if (normalizedGenerationType === "imageLoop") return "imageLoopOutput";
+  if (normalizedGenerationType === "mediaMerge") return "mediaMergeOutput";
   return "prompt";
 }
 

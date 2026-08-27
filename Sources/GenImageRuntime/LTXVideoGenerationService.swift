@@ -215,8 +215,7 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
 
         progress(0.01)
         var activity = RuntimeLogActivity(log: log)
-        let status = try await RuntimeProcess.run(
-            executable: try Self.ffmpegExecutable(),
+        let status = try await MediaCompatibilityService.runFFmpeg(
             arguments: [
                 "-y",
                 "-nostdin",
@@ -228,12 +227,13 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
                 "-vf", "scale=\(width):\(height):force_original_aspect_ratio=increase,crop=\(width):\(height),edgedetect=mode=canny:low=0.1:high=0.4,format=yuv420p",
                 "-frames:v", String(frameCount),
                 "-r", String(frameRate),
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "18",
+                "-c:v", "h264_videotoolbox",
+                "-profile:v", "high",
+                "-b:v", "8M",
+                "-maxrate", "12M",
+                "-bufsize", "16M",
                 outputURL.path
             ],
-            environment: RuntimeExecutable.environment(),
             log: log,
             pollInterval: .milliseconds(100)
         ) {
@@ -372,24 +372,6 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
         return assets.filter { seen.insert($0.id).inserted }
     }
 
-    private static func ffmpegExecutable() throws -> URL {
-        let environment = ProcessInfo.processInfo.environment
-        var candidates: [URL] = []
-        if let configured = environment["GENIMAGE_FFMPEG"], !configured.isEmpty {
-            candidates.append(URL(fileURLWithPath: configured))
-        }
-        candidates.append(URL(fileURLWithPath: "/opt/homebrew/bin/ffmpeg"))
-        candidates.append(URL(fileURLWithPath: "/usr/local/bin/ffmpeg"))
-        candidates.append(URL(fileURLWithPath: "/usr/bin/ffmpeg"))
-        candidates.append(
-            contentsOf: RuntimeExecutable.pathCandidates(for: "ffmpeg", environment: environment)
-        )
-        guard let executable = RuntimeExecutable.locate(candidates) else {
-            throw LTXVideoRuntimeError.ffmpegNotFound(candidates.map(\.path))
-        }
-        return executable
-    }
-
     private static func runtimeExecutable() throws -> URL {
         let fileManager = FileManager.default
         var candidates: [URL] = []
@@ -522,7 +504,6 @@ public enum LTXVideoRuntimeError: LocalizedError, Sendable {
     case modelNotInstalled(URL)
     case loraNotInstalled(URL)
     case invalidLoRAScale(String)
-    case ffmpegNotFound([String])
     case controlVideoFailed(status: Int32, message: String)
     case controlVideoStalled(details: String)
     case controlVideoMissing(URL)
@@ -553,8 +534,6 @@ public enum LTXVideoRuntimeError: LocalizedError, Sendable {
             "Profile 的 LoRA 尚未完整安裝：\(url.path)"
         case let .invalidLoRAScale(modelID):
             "LoRA 權重與控制強度必須介於 0 到 1：\(modelID)"
-        case let .ffmpegNotFound(paths):
-            "找不到 ffmpeg，無法建立 LoRA 控制影片；已檢查：\(paths.joined(separator: "、"))"
         case let .controlVideoFailed(status, message):
             "建立 LoRA 控制影片失敗（\(status)）：\(message)"
         case let .controlVideoStalled(details):

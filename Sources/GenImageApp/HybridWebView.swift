@@ -56,6 +56,7 @@ struct HybridWebView: NSViewRepresentable {
             controller?.pasteImageFromSystemClipboard() ?? false
         }
         webView.navigationDelegate = controller
+        webView.uiDelegate = controller
         webView.setValue(false, forKey: "drawsBackground")
         controller.attach(webView: webView)
 
@@ -78,5 +79,6 @@ struct HybridWebView: NSViewRepresentable {
         (webView as? ClipboardAwareWebView)?.pasteboardImageHandler = nil
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "genimage")
         webView.navigationDelegate = nil
+        webView.uiDelegate = nil
     }
 }

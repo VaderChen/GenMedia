@@ -7,6 +7,12 @@ cd "$SCRIPT_DIR"
 
 export COPYFILE_DISABLE=1
 
+FFMPEG_ROOT="${GENMEDIA_FFMPEG_ROOT:-$SCRIPT_DIR/third_party/ffmpeg}"
+if [[ -x "$FFMPEG_ROOT/bin/ffmpeg" && -x "$FFMPEG_ROOT/bin/ffprobe" ]]; then
+  export GENMEDIA_FFMPEG="${GENMEDIA_FFMPEG:-$FFMPEG_ROOT/bin/ffmpeg}"
+  export GENMEDIA_FFPROBE="${GENMEDIA_FFPROBE:-$FFMPEG_ROOT/bin/ffprobe}"
+fi
+
 if ! command -v swift >/dev/null 2>&1; then
   print -u2 "錯誤：找不到 Swift。請先安裝 Xcode，並完成 Command Line Tools 設定。"
   exit 1

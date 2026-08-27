@@ -30,6 +30,8 @@ public enum LocalModelDiscovery {
         discoverMiniMaxH3MLX(root: root, fileManager: fileManager, result: &result)
         discoverACEStep15(root: root, fileManager: fileManager, result: &result)
         discoverMiniMaxMusic3MLX(root: root, fileManager: fileManager, result: &result)
+        discoverMiniMaxMusic3MLX4Bit(root: root, fileManager: fileManager, result: &result)
+        discoverMiniMaxMusic3Composer(root: root, fileManager: fileManager, result: &result)
         discoverWhisperMultilingual(root: root, fileManager: fileManager, result: &result)
         discoverParaformerChinese(root: root, fileManager: fileManager, result: &result)
         discoverParakeetJapanese(root: root, fileManager: fileManager, result: &result)
@@ -484,8 +486,112 @@ public enum LocalModelDiscovery {
                 modelRevision: "57d87a63181336634a9557fd31aacc2ad6762935",
                 architecture: .externalCLI,
                 defaults: ProfileDefaults(steps: 20, outputCount: 1, durationSeconds: 10),
-                notes: "從 \(directory.path) 自動偵測；透過 mlx-minimax-music3 與 Apple Silicon Metal 執行，輸出由 FFmpeg 轉為 MP3、M4A、AAC 或 FLAC。",
+                notes: "從 \(directory.path) 自動偵測；透過 App 隨附的 Swift Worker 與 Apple Silicon Metal 執行，輸出由 App 內建 FFmpeg 轉為 MP3、M4A、AAC 或 FLAC。",
                 isBuiltIn: true
+            )
+        )
+    }
+
+    private static func discoverMiniMaxMusic3MLX4Bit(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let modelID = "mlx-community/MiniMax-Music3-4bit"
+        let revision = "c7ea32923b245fe5afc22d740a1936ad2ac590f3"
+        let directory = root.appendingPathComponent("minimax-music3-mlx-4bit", isDirectory: true)
+        let requiredPaths = [
+            "config.json",
+            "model.safetensors.index.json",
+            "model-00001-of-00002.safetensors",
+            "model-00002-of-00002.safetensors",
+            "scheduler/scheduler_config.json",
+            "tokenizer/chat_template.jinja",
+            "tokenizer/tokenizer.json",
+            "tokenizer/tokenizer_config.json"
+        ]
+        guard requiredPaths.allSatisfy({
+            fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }) else { return }
+        guard managedManifestMatches(
+            modelID: modelID,
+            directory: directory,
+            fileManager: fileManager
+        ) else { return }
+
+        result.models.append(
+            ModelDescriptor(
+                id: modelID,
+                displayName: "MiniMax Music 3 MLX 4-bit（本機）",
+                publisher: "Local / MLX Community / MiniMaxAI",
+                summary: "已安裝 MiniMax Music 3 原生 MLX affine 4-bit 完整 checkpoint，可由 App 隨附的 Swift Worker 生成 44.1 kHz 立體聲音訊。",
+                capabilities: [.textToMusic],
+                quantization: .fourBit,
+                approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                recommendedMemoryGB: 24,
+                licenseName: "MiniMax Music 3 Community License",
+                sourceURL: URL(string: "https://huggingface.co/\(modelID)"),
+                localURL: directory,
+                isRecommended: true
+            )
+        )
+        result.profiles.append(
+            InferenceProfile(
+                name: "文生音樂 · MiniMax Music 3 MLX 4-bit",
+                capability: .textToMusic,
+                modelID: modelID,
+                modelRevision: revision,
+                architecture: .externalCLI,
+                defaults: ProfileDefaults(steps: 20, outputCount: 1, durationSeconds: 10),
+                music: ProfileMusicConfiguration(
+                    minimumDurationSeconds: 5,
+                    maximumDurationSeconds: 300,
+                    durationSemantics: .maximum
+                ),
+                notes: "從 \(directory.path) 自動偵測；透過 App 隨附的 Swift Worker 執行，輸出由 App 內建 FFmpeg 轉為 MP3、M4A、AAC 或 FLAC。",
+                isBuiltIn: true
+            )
+        )
+    }
+
+    private static func discoverMiniMaxMusic3Composer(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let modelID = "Mothersuperior/minimax-music3-composer-5.7b-distilled"
+        let directory = root.appendingPathComponent(
+            "minimax-music3-composer-5.7b-distilled",
+            isDirectory: true
+        )
+        let requiredPaths = [
+            "lr-6e-5/config.json",
+            "lr-6e-5/generation_config.json",
+            "lr-6e-5/model.safetensors"
+        ]
+        guard requiredPaths.allSatisfy({
+            fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }) else { return }
+        guard managedManifestMatches(
+            modelID: modelID,
+            directory: directory,
+            fileManager: fileManager
+        ) else { return }
+
+        result.models.append(
+            ModelDescriptor(
+                id: modelID,
+                displayName: "MiniMax Music 3 Composer 5.7B Distilled（本機）",
+                publisher: "Local / Mothersuperior / MiniMaxAI",
+                summary: "已安裝 lr-6e-5 Composer distilled 權重；這是需搭配完整 Music 3 checkpoint 與相容 Runtime 的加速元件，不能單獨生成音樂。",
+                capabilities: [.textToMusic],
+                quantization: .bf16,
+                approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                recommendedMemoryGB: 32,
+                licenseName: "MiniMax Music 3 Terms",
+                sourceURL: URL(string: "https://huggingface.co/\(modelID)"),
+                localURL: directory,
+                isRecommended: false
             )
         )
     }

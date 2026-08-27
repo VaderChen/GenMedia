@@ -258,6 +258,7 @@ final class AppStore: ObservableObject {
     var videoGenerationService: LTXVideoGenerationService
     var musicGenerationService: MusicGenerationRouter
     var subtitleGenerationService: SubtitleGenerationRouter
+    var mediaCompositionService: MediaCompositionService
     let modelInstaller = HuggingFaceModelInstaller()
     private let projectWorkspaceURL: URL
     private var projectWorkspacePersistenceEnabled = false
@@ -326,6 +327,7 @@ final class AppStore: ObservableObject {
         videoGenerationService = LTXVideoGenerationService(outputDirectory: generatedDirectory)
         musicGenerationService = Self.makeMusicGenerationService(outputDirectory: generatedDirectory)
         subtitleGenerationService = SubtitleGenerationRouter(outputDirectory: generatedDirectory)
+        mediaCompositionService = MediaCompositionService(outputDirectory: generatedDirectory)
         let fallbackProject = Project(name: "示範專案")
         let initialProjects = restoredWorkspace?.projects.isEmpty == false
             ? restoredWorkspace!.projects
@@ -421,6 +423,13 @@ final class AppStore: ObservableObject {
 
         let restoredAssets = (restoredWorkspace?.assets ?? []).filter {
             initialProjectIDs.contains($0.projectID)
+        }
+        let referencedAssetIDs = Set(restoredAssets.map(\.id))
+        for orphanURL in ApplicationSupport.orphanMediaCacheFiles(
+            in: ApplicationSupport.directory(.mediaCache),
+            referencedAssetIDs: referencedAssetIDs
+        ) {
+            try? FileManager.default.removeItem(at: orphanURL)
         }
         let restoredAssetIDs = Set(restoredAssets.map(\.id))
         assets = restoredAssets

@@ -361,6 +361,31 @@ public enum ModelCatalog {
             isRecommended: true
         ),
         ModelDescriptor(
+            id: "mlx-community/MiniMax-Music3-4bit",
+            displayName: "MiniMax Music 3 MLX 4-bit",
+            publisher: "MLX Community / MiniMaxAI",
+            summary: "Apple Silicon 原生 MLX affine 4-bit 完整文生音樂模型；包含語言模型、條件編碼器、Flow Transformer、RVQ 解碼器與 Vocoder 所需權重。",
+            capabilities: [.textToMusic],
+            quantization: .fourBit,
+            approximateDownloadGB: 8.6,
+            recommendedMemoryGB: 24,
+            licenseName: "MiniMax Music 3 Community License",
+            sourceURL: URL(string: "https://huggingface.co/mlx-community/MiniMax-Music3-4bit"),
+            isRecommended: true
+        ),
+        ModelDescriptor(
+            id: "Mothersuperior/minimax-music3-composer-5.7b-distilled",
+            displayName: "MiniMax Music 3 Composer 5.7B Distilled",
+            publisher: "Mothersuperior / MiniMaxAI",
+            summary: "MiniMax Music 3 的 5.7B depth-pruned distilled Composer 加速元件；預設下載 lr-6e-5 權重，需搭配完整 Music 3 checkpoint 與相容 Runtime，不能單獨生成音樂。",
+            capabilities: [.textToMusic],
+            quantization: .bf16,
+            approximateDownloadGB: 10.6,
+            recommendedMemoryGB: 32,
+            licenseName: "MiniMax Music 3 Terms",
+            sourceURL: URL(string: "https://huggingface.co/Mothersuperior/minimax-music3-composer-5.7b-distilled")
+        ),
+        ModelDescriptor(
             id: "argmaxinc/whisperkit-coreml@large-v3-turbo",
             displayName: "Whisper Large v3 Turbo Core ML",
             publisher: "Argmax / OpenAI",
@@ -721,7 +746,7 @@ public enum ModelCatalog {
                 maximumDurationSeconds: 300,
                 durationSemantics: .target
             ),
-            notes: "ACE-Step 1.5 Turbo Apple Silicon 原生 Swift／MLX Profile；支援音樂 Prompt、選填歌詞與純音樂生成，長度 10–300 秒。輸出由 FFmpeg 轉為 MP3、M4A、AAC 或 FLAC。",
+            notes: "ACE-Step 1.5 Turbo Apple Silicon 原生 Swift／MLX Profile；支援音樂 Prompt、選填歌詞與純音樂生成，長度 10–300 秒。輸出由 App 內建 FFmpeg 轉為 MP3、M4A、AAC 或 FLAC。",
             isBuiltIn: true
         ),
         InferenceProfile(
@@ -736,7 +761,22 @@ public enum ModelCatalog {
                 maximumDurationSeconds: 300,
                 durationSemantics: .maximum
             ),
-            notes: "MiniMax Music 3 原生 MLX 8-bit Profile；依音樂風格 Prompt 與歌詞生成最長 5–300 秒的 44.1 kHz 立體聲音訊，模型可能依歌曲結構提前自然結束。建議 64GB 記憶體；推論需外部 mlx-minimax-music3 Runtime 與 FFmpeg。",
+            notes: "MiniMax Music 3 原生 MLX 8-bit Profile；依音樂風格 Prompt 與歌詞生成最長 5–300 秒的 44.1 kHz 立體聲音訊，模型可能依歌曲結構提前自然結束。建議 64GB 記憶體；由 App 隨附的 Swift Worker 執行，輸出轉碼使用 App 內建 FFmpeg。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "文生音樂 · MiniMax Music 3 MLX 4-bit",
+            capability: .textToMusic,
+            modelID: "mlx-community/MiniMax-Music3-4bit",
+            modelRevision: "c7ea32923b245fe5afc22d740a1936ad2ac590f3",
+            architecture: .externalCLI,
+            defaults: ProfileDefaults(steps: 20, outputCount: 1, durationSeconds: 10),
+            music: ProfileMusicConfiguration(
+                minimumDurationSeconds: 5,
+                maximumDurationSeconds: 300,
+                durationSemantics: .maximum
+            ),
+            notes: "MiniMax Music 3 原生 MLX affine 4-bit Profile；由 App 隨附的 Swift Worker 執行，依音樂風格 Prompt 與歌詞生成最長 5–300 秒音訊。模型可能依歌曲結構提前自然結束；Composer 加速元件目前獨立管理，尚未自動套用。",
             isBuiltIn: true
         ),
         InferenceProfile(
