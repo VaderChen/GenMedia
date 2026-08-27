@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## 1.26.0827 — 2026-08-27
+
 - 設定頁新增 Civitai API Token 管理：Token 只保存於 macOS Keychain，模型中心會以 HTTPS Bearer Authorization 直接下載 Civitai LoRA；移除 401 時開啟網站手動下載的流程，並保留 `CIVITAI_TOKEN` 作為舊版相容 fallback。
 - MiniMax Music 3 Block 5 已落地：App 改由隨附的 `GenImageMiniMaxMusic3Worker` Swift 子行程執行 8-bit／4-bit checkpoint，透過 JSON request 與逐 frame、chunk×step、vocoder chunk 的真實進度事件工作；已移除 App 對 Python／`mlx_audio` 的依賴。舊的 Python Runtime 不會自動刪除，如不再需要可手動移除 `~/Library/Application Support/GenImage/Runtime/minimax-music3/` 與 `~/Library/Application Support/GenImage/Runtime/minimax-music3-mlx-audio/`，刪除前請確認沒有其他工作使用；可回收空間依本機內容而定，請以 `du -sh` 查詢。
 - 新增 `mlx-community/MiniMax-Music3-4bit` 完整 MLX affine 4-bit 音樂模型與文生音樂 Profile；新增 `Mothersuperior/minimax-music3-composer-5.7b-distilled` Composer 元件下載方案，預設取用 `lr-6e-5`，並明確避免將 Composer 當成可獨立生成模型。
