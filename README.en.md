@@ -25,12 +25,7 @@ Requirements: macOS 14+, Apple Silicon, and Xcode 16+.
 ./run.command
 ```
 
-`build.command` creates the release executables and a standard `GenMedia.app` in `dist/`. The app contains WebUI resources, the MLX Metal runtime, the MCP server, model diagnostic tools, and shared LGPL `ffmpeg`/`ffprobe` binaries as its media compatibility layer. Prepare the bundled FFmpeg once before the first app-bundle build:
-
-```bash
-brew install pkg-config
-./scripts/build-ffmpeg-macos.sh
-```
+`build.command` creates the release executables and a standard `GenMedia.app` in `dist/`. The app contains WebUI resources, the MLX Metal runtime, the MCP server, model diagnostic tools, and shared LGPL `ffmpeg`/`ffprobe` binaries as its media compatibility layer. On the first app-bundle build, `build.command` automatically downloads the sources and prepares the bundled FFmpeg distribution; neither a manual FFmpeg preparation step nor `pkg-config` is required.
 
 ```bash
 # Build the release executables and app
@@ -44,6 +39,13 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ```
 
 `run.command` automatically uses `--no-app`, so normal development runs do not repeatedly create the app bundle. Release DMGs are handled by a separate local workflow with Developer ID Application signing, Apple notarization, stapling, and Gatekeeper verification.
+
+### FFmpeg Build Troubleshooting
+
+- The first `./build.command` run needs network access to download the FFmpeg and LAME sources. Later builds reuse the cached sources and `third_party/ffmpeg`; a missing or incomplete distribution is rebuilt automatically.
+- Homebrew `pkg-config` is not required. The project supplies a fallback used only for LAME configuration and runs it from a space-free temporary path, so project paths containing spaces are supported.
+- `._*` AppleDouble sidecars created by external filesystems such as ExFAT are removed before dylib processing so they cannot be mistaken for Mach-O files.
+- If the build is interrupted or fails, the previous usable FFmpeg distribution is restored. Fix the network or Xcode issue and rerun `./build.command`. Set `GENMEDIA_FFMPEG_ROOT` to use a different output location.
 
 ### Video Runtime
 
