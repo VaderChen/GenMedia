@@ -366,7 +366,7 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
         case "installModel":
             guard let model = model(from: params) else { throw BridgeError.invalidParameters }
-            store.installModel(model)
+            store.installModel(model, civitaiToken: params["civitaiToken"] as? String)
 
         case "installProfileModels":
             guard let id = uuid(params["profileID"]) else {
@@ -384,7 +384,7 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
         case "repairModel":
             guard let model = model(from: params) else { throw BridgeError.invalidParameters }
-            store.repairModel(model)
+            store.repairModel(model, civitaiToken: params["civitaiToken"] as? String)
 
         case "duplicateProfile":
             guard let id = uuid(params["profileID"]),
@@ -775,25 +775,10 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
     private func renameAsset(_ params: [String: Any]) throws {
         guard let id = uuid(params["assetID"]),
-              let asset = store.assets.first(where: { $0.id == id }),
-              let sourceURL = asset.fileURL else {
+              let fileName = params["fileName"] as? String else {
             throw BridgeError.invalidParameters
         }
-
-        let field = NSTextField(string: sourceURL.lastPathComponent)
-        field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
-        field.placeholderString = "檔案名稱"
-
-        let alert = NSAlert()
-        alert.messageText = "重新命名媒體檔案"
-        alert.informativeText = "請輸入新的檔案名稱。檔案會留在目前的資料夾中。"
-        alert.accessoryView = field
-        alert.addButton(withTitle: "重新命名")
-        alert.addButton(withTitle: "取消")
-        alert.window.initialFirstResponder = field
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        try store.renameAsset(id, toFileName: field.stringValue)
+        try store.renameAsset(id, toFileName: fileName)
     }
 
     private func copyAsset(_ params: [String: Any]) throws {

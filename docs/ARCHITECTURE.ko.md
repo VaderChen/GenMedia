@@ -125,15 +125,15 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 
 업스케일은 `CoreMLUpscaleService`가 Real-ESRGAN 512 타일과 4배 결합으로 처리합니다.
 
-비디오는 `LTXVideoGenerationService`가 `ltx-2-mlx generate`를 호출하여 생성합니다.
+비디오는 `LTXVideoGenerationService`가 앱에 포함된 `GenImageLTXVideoWorker` Swift 하위 프로세스를 실행하여 생성합니다.
 
 - 텍스트→비디오와 이미지→비디오는 `VideoGenerating` 및 `VideoGenerationRequest`를 공유합니다.
 - Swift가 프로필, 모델 경로, 크기, 프레임 수, FPS, 출력 수를 검증합니다.
 - LTX-2.3은 추가로 프레임 수가 `8n+1` 형식이어야 합니다.
-- 외부 Process는 Task 취소, 로그 기반 오류 보고, 백분율 진행률 추출을 지원합니다.
+- JSON request와 단계별 progress event는 기존 `RuntimeProcess`를 통해 실행되며 Task 취소, 로그 기반 오류 보고, 백분율 진행률 추출을 지원합니다.
 - LTX LoRA 제어 비디오는 공용 FFmpeg 계층이 VideoToolbox H.264로 생성하며 GPL `libx264`에 의존하지 않습니다.
 - MP4 출력은 `generatedVideo` 에셋으로 작업 공간에 추가되며 Web UI의 네이티브 `<video>`로 재생됩니다.
-- Python 구현을 UI나 `AppStore`에 결합하지 않고 `GENIMAGE_LTX_RUNTIME` 또는 표준 설치 위치로 Runtime을 교체할 수 있습니다.
+- Worker는 App Bundle의 `Contents/Helpers`에 복사됩니다. 개발 빌드에서는 `GENIMAGE_LTX_WORKER`로 덮어쓸 수 있지만 운영 흐름은 외부 Runtime에 의존하지 않습니다.
 
 음악은 `MusicGenerationRouter`가 `MusicRuntimeAdapter.supports`에 따라 분배하며 Router에 모델 ID를 집중 하드코딩하지 않습니다.
 

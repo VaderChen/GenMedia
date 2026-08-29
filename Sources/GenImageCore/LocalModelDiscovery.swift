@@ -27,10 +27,15 @@ public enum LocalModelDiscovery {
         discoverQwenImageEdit(root: root, fileManager: fileManager, result: &result)
         discoverLTX23(root: root, fileManager: fileManager, result: &result)
         discoverLTX23MLXQ4(root: root, fileManager: fileManager, result: &result)
+        discoverLTX23GGUFDistilledQ3KM(root: root, fileManager: fileManager, result: &result)
+        discoverLTXVideo096GGUF(root: root, fileManager: fileManager, result: &result)
+        discoverLTXCompanionModels(root: root, fileManager: fileManager, result: &result)
         discoverMiniMaxH3MLX(root: root, fileManager: fileManager, result: &result)
+        discoverMiniMaxH3GGUF(root: root, fileManager: fileManager, result: &result)
         discoverACEStep15(root: root, fileManager: fileManager, result: &result)
         discoverMiniMaxMusic3MLX(root: root, fileManager: fileManager, result: &result)
         discoverMiniMaxMusic3MLX4Bit(root: root, fileManager: fileManager, result: &result)
+        discoverMiniMaxMusic3GGUF(root: root, fileManager: fileManager, result: &result)
         discoverMiniMaxMusic3Composer(root: root, fileManager: fileManager, result: &result)
         discoverWhisperMultilingual(root: root, fileManager: fileManager, result: &result)
         discoverParaformerChinese(root: root, fileManager: fileManager, result: &result)
@@ -554,6 +559,70 @@ public enum LocalModelDiscovery {
         )
     }
 
+    private static func discoverMiniMaxMusic3GGUF(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let modelID = "audio-cpp/MiniMax-Music3-GGUF@Q4_K-LM-Q4_K-DiT-Q8_0-depth"
+        let directory = root.appendingPathComponent(
+            "minimax-music3-gguf-q4",
+            isDirectory: true
+        )
+        let requiredPaths = [
+            "config.json",
+            "config/condition_encoder.json",
+            "config/language_model.json",
+            "config/rvq_depth_decoder.json",
+            "config/transformer.json",
+            "config/vocoder.json",
+            "condition_encoder.gguf",
+            "language_model_q4_k.gguf",
+            "rvq_depth_decoder_q8_0.gguf",
+            "tokenizer/tokenizer.json",
+            "tokenizer/tokenizer_config.json",
+            "transformer_q4_k.gguf",
+            "vocoder.gguf"
+        ]
+        guard requiredPaths.allSatisfy({
+            fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }) else { return }
+
+        result.models.append(
+            ModelDescriptor(
+                id: modelID,
+                displayName: "MiniMax Music 3 GGUF Q4_K / Q8_0（本機）",
+                publisher: "Local / audio.cpp / MiniMaxAI",
+                summary: "已偵測完整 MiniMax Music 3 GGUF 元件包：語言模型與 Flow Transformer 使用 Q4_K，RVQ depth decoder 使用 Q8_0，搭配條件編碼器、Vocoder 與 Tokenizer；目前供 GGUF loader 與後續原生 Runtime 驗證。",
+                capabilities: [.textToMusic],
+                quantization: .fourBit,
+                approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                recommendedMemoryGB: 16,
+                licenseName: "MiniMax-Music3 Community License",
+                sourceURL: URL(string: "https://huggingface.co/audio-cpp/MiniMax-Music3-GGUF"),
+                localURL: directory,
+                isRecommended: false
+            )
+        )
+        result.profiles.append(
+            InferenceProfile(
+                name: "文生音樂 · MiniMax Music 3 GGUF Q4_K / Q8_0",
+                capability: .textToMusic,
+                modelID: modelID,
+                modelRevision: "main",
+                architecture: .externalCLI,
+                defaults: ProfileDefaults(steps: 20, outputCount: 1, durationSeconds: 10),
+                music: ProfileMusicConfiguration(
+                    minimumDurationSeconds: 5,
+                    maximumDurationSeconds: 300,
+                    durationSemantics: .maximum
+                ),
+                notes: "從 \(directory.path) 自動偵測；由 App 隨附的 Swift Worker 直接載入 GGUF，Q4_K 使用 INT4、Q8_0 使用 INT8，輸出由 App 內建 FFmpeg 轉碼。",
+                isBuiltIn: true
+            )
+        )
+    }
+
     private static func discoverMiniMaxMusic3Composer(
         root: URL,
         fileManager: FileManager,
@@ -654,7 +723,7 @@ public enum LocalModelDiscovery {
                     frameCount: 121,
                     frameRate: 24
                 ),
-                notes: "從 \(directory.path) 自動偵測；推論需官方 LTX-2 Python Runtime。",
+                notes: "從 \(directory.path) 自動偵測；原生 Swift Worker 目前僅支援 MLX Q4 模型格式。",
                 isBuiltIn: true
             )
         )
@@ -763,6 +832,45 @@ public enum LocalModelDiscovery {
         }
     }
 
+    private static func discoverMiniMaxH3GGUF(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let modelID = "unsloth/MiniMax-H3-GGUF@fl2va-pruned-Q4_K"
+        let directory = root.appendingPathComponent(
+            "minimax-h3-gguf-fl2va-pruned-q4-k",
+            isDirectory: true
+        )
+        let weightURL = directory.appendingPathComponent(
+            "minimax_h3_fl2va_pruned-Q4_K.gguf"
+        )
+        guard let values = try? weightURL.resourceValues(
+            forKeys: [.isRegularFileKey, .fileSizeKey]
+        ),
+        values.isRegularFile == true,
+        values.fileSize == 11_420_663_904 else {
+            return
+        }
+
+        result.models.append(
+            ModelDescriptor(
+                id: modelID,
+                displayName: "MiniMax H3 GGUF FL2VA Pruned Q4_K（本機）",
+                publisher: "Local / Unsloth / MiniMaxAI",
+                summary: "已偵測 MiniMax H3 FL2VA Pruned GGUF Q4_K 主權重，約 10.64 GiB；Qwen3-VL 文字編碼器與 Video/Audio VAE 需另行配套，尚未接入 H3 生成功能。",
+                capabilities: [.imageToVideo, .textToVideo],
+                quantization: .fourBit,
+                approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                recommendedMemoryGB: 48,
+                licenseName: "MiniMax H3 Community License",
+                sourceURL: URL(string: "https://huggingface.co/unsloth/MiniMax-H3-GGUF"),
+                localURL: directory,
+                isRecommended: false
+            )
+        )
+    }
+
     private static func discoverLTX23MLXQ4(
         root: URL,
         fileManager: FileManager,
@@ -782,7 +890,15 @@ public enum LocalModelDiscovery {
             "vae_decoder.safetensors",
             "vae_encoder.safetensors",
             "audio_vae.safetensors",
-            "vocoder.safetensors"
+            "vocoder.safetensors",
+            "gemma-3-12b/config.json",
+            "gemma-3-12b/model-00001-of-00005.safetensors",
+            "gemma-3-12b/model-00002-of-00005.safetensors",
+            "gemma-3-12b/model-00003-of-00005.safetensors",
+            "gemma-3-12b/model-00004-of-00005.safetensors",
+            "gemma-3-12b/model-00005-of-00005.safetensors",
+            "gemma-3-12b/model.safetensors.index.json",
+            "gemma-3-12b/tokenizer.json"
         ]
         let manifestURL = directory.appendingPathComponent("genimage-model.json")
         guard let manifestData = try? Data(contentsOf: manifestURL),
@@ -797,11 +913,11 @@ public enum LocalModelDiscovery {
                 id: modelID,
                 displayName: "LTX-2.3 MLX Q4",
                 publisher: "dgrauet / LTX-2 MLX",
-                summary: "已安裝原生 MLX INT4 Transformer、Video/Audio VAE、vocoder 與空間升頻器。",
+                summary: "已安裝原生 MLX INT4 Transformer、Video/Audio VAE、vocoder、空間升頻器與 Gemma 3 12B 文字編碼器。",
                 capabilities: [.imageToVideo, .textToVideo],
                 quantization: .fourBit,
                 approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
-                recommendedMemoryGB: 24,
+                recommendedMemoryGB: 48,
                 licenseName: "LTX-2 Community License / MLX Port MIT",
                 sourceURL: URL(string: "https://huggingface.co/\(modelID)"),
                 localURL: directory,
@@ -831,7 +947,7 @@ public enum LocalModelDiscovery {
                         conditioningScale: 1
                     )
                 ],
-                notes: "從 \(directory.path) 自動偵測；預設使用 Union Control IC-LoRA 與來源圖片 Canny 控制影片，由 ltx-2-mlx 使用 Apple Silicon Metal 執行。",
+                notes: "從 \(directory.path) 自動偵測；文字生影由原生 Swift Worker 執行，image conditioning 與 LoRA fusion 尚未支援，建議 48GB 以上記憶體。",
                 isBuiltIn: true
             )
         )
@@ -850,10 +966,202 @@ public enum LocalModelDiscovery {
                     frameCount: 97,
                     frameRate: 24
                 ),
-                notes: "從 \(directory.path) 自動偵測；由 ltx-2-mlx 使用 Apple Silicon Metal 執行文生影。",
+                notes: "從 \(directory.path) 自動偵測；由原生 LTX Swift Worker 使用 Apple Silicon Metal 執行文生影。建議 48GB 以上記憶體。",
                 isBuiltIn: true
             )
         )
+    }
+
+    private static func discoverLTXVideo096GGUF(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let modelID = "city96/LTX-Video-0.9.6-distilled-gguf@Q4_K_M"
+        let directory = root.appendingPathComponent(
+            "ltx-video-0.9.6-distilled-gguf",
+            isDirectory: true
+        )
+        let weightURL = directory.appendingPathComponent(
+            "ltxv-2b-0.9.6-distilled-04-25-Q4_K_M.gguf"
+        )
+        let companionPaths = [
+            "LTX-Video-0.9.6-VAE-BF16.safetensors",
+            "text_encoder/config.json",
+            "text_encoder/t5-v1_1-xxl-encoder-Q4_K_M.gguf",
+            "tokenizer/spiece.model"
+        ]
+        guard let values = try? weightURL.resourceValues(
+            forKeys: [.isRegularFileKey, .fileSizeKey]
+        ),
+        values.isRegularFile == true,
+        values.fileSize == 1_330_049_536,
+        companionPaths.allSatisfy({
+            fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }) else {
+            return
+        }
+
+        result.models.append(
+            ModelDescriptor(
+                id: modelID,
+                displayName: "LTX-Video 0.9.6 GGUF Q4_K_M（本機）",
+                publisher: "Local / city96 / Lightricks",
+                summary: "已安裝 LTX-Video 0.9.6 2B Distilled GGUF Q4_K_M、T5 XXL 文字編碼器、Tokenizer 與 BF16 VAE。",
+                capabilities: [.textToVideo],
+                quantization: .fourBit,
+                approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                recommendedMemoryGB: 16,
+                licenseName: "LTX-Video Community License",
+                sourceURL: URL(string: "https://huggingface.co/city96/LTX-Video-0.9.6-distilled-gguf"),
+                localURL: directory,
+                isRecommended: false
+            )
+        )
+    }
+
+    private static func discoverLTX23GGUFDistilledQ3KM(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let modelID = "unsloth/LTX-2.3-GGUF@distilled-1.1-Q3_K_M"
+        let directory = root.appendingPathComponent(
+            "ltx-2.3-distilled-1.1-gguf-q3-k-m",
+            isDirectory: true
+        )
+        let weightURL = directory.appendingPathComponent(
+            "distilled-1.1/ltx-2.3-22b-distilled-1.1-Q3_K_M.gguf"
+        )
+        let companionPaths = [
+            "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+            "text_encoders/gemma-3-12b-it-qat-UD-Q4_K_XL.gguf",
+            "text_encoders/ltx-2.3-22b-distilled_embeddings_connectors.safetensors",
+            "vae/ltx-2.3-22b-distilled_audio_vae.safetensors",
+            "vae/ltx-2.3-22b-distilled_video_vae.safetensors",
+            "gemma-3-12b/config.json",
+            "gemma-3-12b/tokenizer.json",
+            "gemma-3-12b/tokenizer.model",
+            "gemma-3-12b/tokenizer_config.json"
+        ]
+        guard let values = try? weightURL.resourceValues(
+            forKeys: [.isRegularFileKey, .fileSizeKey]
+        ),
+        values.isRegularFile == true,
+        values.fileSize == 10_629_508_128,
+        companionPaths.allSatisfy({
+            fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }) else {
+            return
+        }
+
+        result.models.append(
+            ModelDescriptor(
+                id: modelID,
+                displayName: "LTX-2.3 22B Distilled 1.1 GGUF Q3_K_M（本機）",
+                publisher: "Local / Unsloth / Lightricks",
+                summary: "已安裝 LTX-2.3 22B Distilled 1.1 GGUF Q3_K_M、Video/Audio VAE、Gemma 3、connector 與空間升頻器。",
+                capabilities: [.imageToVideo, .textToVideo],
+                quantization: .fourBit,
+                approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                recommendedMemoryGB: 24,
+                licenseName: "LTX-2 Community License",
+                sourceURL: URL(string: "https://huggingface.co/unsloth/LTX-2.3-GGUF"),
+                localURL: directory,
+                isRecommended: false
+            )
+        )
+    }
+
+    private static func discoverLTXCompanionModels(
+        root: URL,
+        fileManager: FileManager,
+        result: inout DiscoveredModelCatalog
+    ) {
+        let candidates: [(
+            id: String,
+            directoryName: String,
+            displayName: String,
+            publisher: String,
+            summary: String,
+            capabilities: Set<ModelCapability>,
+            quantization: ModelQuantization,
+            memory: Int,
+            license: String,
+            source: String,
+            requiredPaths: [String]
+        )] = [
+            (
+                "city96/t5-v1_1-xxl-encoder-gguf@Q4_K_M",
+                "ltx-video-0.9.6-t5-q4-k-m",
+                "LTX-Video T5 v1.1 XXL GGUF Q4_K_M（本機）",
+                "Local / city96 / Google T5",
+                "已安裝 LTX-Video 0.9.6 使用的 T5 v1.1 XXL Q4_K_M 文字編碼器。",
+                [.textToVideo],
+                .fourBit,
+                16,
+                "Apache-2.0",
+                "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf",
+                ["t5-v1_1-xxl-encoder-Q4_K_M.gguf"]
+            ),
+            (
+                "city96/LTX-Video-0.9.6-VAE@BF16",
+                "ltx-video-0.9.6-vae-bf16",
+                "LTX-Video 0.9.6 VAE BF16（本機）",
+                "Local / city96 / Lightricks",
+                "已安裝 LTX-Video 0.9.6 的 BF16 Video VAE。",
+                [.textToVideo],
+                .bf16,
+                16,
+                "LTX-Video Community License",
+                "https://huggingface.co/city96/LTX-Video-0.9.6-distilled-gguf",
+                ["LTX-Video-0.9.6-VAE-BF16.safetensors"]
+            ),
+            (
+                "unsloth/LTX-2.3-GGUF@distilled-1.1-VAE",
+                "ltx-2.3-distilled-1.1-vae",
+                "LTX-2.3 Distilled 1.1 Video／Audio VAE（本機）",
+                "Local / Unsloth / Lightricks",
+                "已安裝 LTX-2.3 Distilled 1.1 的 Video VAE 與 Audio VAE。",
+                [.imageToVideo, .textToVideo],
+                .bf16,
+                16,
+                "LTX-2 Community License",
+                "https://huggingface.co/unsloth/LTX-2.3-GGUF",
+                [
+                    "vae/ltx-2.3-22b-distilled_audio_vae.safetensors",
+                    "vae/ltx-2.3-22b-distilled_video_vae.safetensors"
+                ]
+            )
+        ]
+
+        for candidate in candidates {
+            let directory = root.appendingPathComponent(candidate.directoryName, isDirectory: true)
+            guard candidate.requiredPaths.allSatisfy({
+                fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+            }), managedManifestMatches(
+                modelID: candidate.id,
+                directory: directory,
+                fileManager: fileManager
+            ) else { continue }
+
+            result.models.append(
+                ModelDescriptor(
+                    id: candidate.id,
+                    displayName: candidate.displayName,
+                    publisher: candidate.publisher,
+                    summary: candidate.summary,
+                    capabilities: candidate.capabilities,
+                    quantization: candidate.quantization,
+                    approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                    recommendedMemoryGB: candidate.memory,
+                    licenseName: candidate.license,
+                    sourceURL: URL(string: candidate.source),
+                    localURL: directory,
+                    isRecommended: false
+                )
+            )
+        }
     }
 
     private static func discoverQwenImageEdit(

@@ -125,15 +125,15 @@ The multimodal image-to-text and text-to-text paths use `mlx-swift-lm` revision 
 
 Upscaling is handled by `CoreMLUpscaleService` with Real-ESRGAN 512 tiles and 4× stitching.
 
-Video generation is handled by `LTXVideoGenerationService`, which invokes `ltx-2-mlx generate`:
+Video generation is handled by `LTXVideoGenerationService`, which launches the bundled `GenImageLTXVideoWorker` Swift subprocess:
 
 - Text-to-video and image-to-video share `VideoGenerating` and `VideoGenerationRequest`.
 - Swift validates the profile, model path, dimensions, frame count, FPS, and output count.
 - LTX-2.3 additionally requires frame counts in the form `8n+1`.
-- The external process supports task cancellation, log-based error reporting, and percentage progress extraction.
+- JSON requests and stage-specific progress events run through the existing `RuntimeProcess`, which supports task cancellation, log-based error reporting, and percentage progress extraction.
 - LTX LoRA control videos are created through the shared FFmpeg layer with VideoToolbox H.264, without GPL `libx264`.
 - MP4 outputs are added to the workspace as `generatedVideo` assets and played with the native Web UI `<video>` element.
-- The runtime can be replaced through `GENIMAGE_LTX_RUNTIME` or standard installation locations without coupling the Python implementation to the UI or `AppStore`.
+- The Worker is copied into the app bundle's `Contents/Helpers`; development builds may override it with `GENIMAGE_LTX_WORKER`, while production does not depend on an external runtime.
 
 Music generation is dispatched by `MusicGenerationRouter` through `MusicRuntimeAdapter.supports`, keeping model IDs out of centralized router logic:
 

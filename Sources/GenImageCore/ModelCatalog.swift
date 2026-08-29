@@ -300,14 +300,76 @@ public enum ModelCatalog {
             id: "dgrauet/ltx-2.3-mlx-q4",
             displayName: "LTX-2.3 MLX Q4",
             publisher: "dgrauet / LTX-2 MLX",
-            summary: "原生 MLX INT4 圖生影模型，在 Apple Silicon 上透過 Metal 執行；包含影片與立體聲音訊生成所需元件。",
+            summary: "原生 MLX INT4 圖生影模型，在 Apple Silicon 上透過 Metal 執行；包含影片、立體聲音訊與 Gemma 3 12B 文字編碼器。",
             capabilities: [.imageToVideo, .textToVideo],
             quantization: .fourBit,
-            approximateDownloadGB: 20.5,
-            recommendedMemoryGB: 24,
+            approximateDownloadGB: 42.0,
+            recommendedMemoryGB: 48,
             licenseName: "LTX-2 Community License / MLX Port MIT",
             sourceURL: URL(string: "https://huggingface.co/dgrauet/ltx-2.3-mlx-q4"),
             isRecommended: true
+        ),
+        ModelDescriptor(
+            id: "city96/LTX-Video-0.9.6-distilled-gguf@Q4_K_M",
+            displayName: "LTX-Video 0.9.6 GGUF Q4_K_M",
+            publisher: "city96 / Lightricks",
+            summary: "LTX-Video 0.9.6 2B Distilled 的 GGUF Q4_K_M 權重；下載 Profile 時會一併取得 T5 XXL 文字編碼器、Tokenizer 與 BF16 VAE。",
+            capabilities: [.textToVideo],
+            quantization: .fourBit,
+            approximateDownloadGB: 5.70,
+            recommendedMemoryGB: 24,
+            licenseName: "LTX-Video Community License",
+            sourceURL: URL(string: "https://huggingface.co/city96/LTX-Video-0.9.6-distilled-gguf"),
+            isRecommended: false
+        ),
+        ModelDescriptor(
+            id: "city96/t5-v1_1-xxl-encoder-gguf@Q4_K_M",
+            displayName: "LTX-Video T5 v1.1 XXL GGUF Q4_K_M",
+            publisher: "city96 / Google T5",
+            summary: "LTX-Video 0.9.6 使用的 T5 v1.1 XXL Q4_K_M 文字編碼器；主模型 Profile 下載時會自動一併取得。",
+            capabilities: [.textToVideo],
+            quantization: .fourBit,
+            approximateDownloadGB: 2.14,
+            recommendedMemoryGB: 16,
+            licenseName: "Apache-2.0",
+            sourceURL: URL(string: "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf")
+        ),
+        ModelDescriptor(
+            id: "city96/LTX-Video-0.9.6-VAE@BF16",
+            displayName: "LTX-Video 0.9.6 VAE BF16",
+            publisher: "city96 / Lightricks",
+            summary: "LTX-Video 0.9.6 的 BF16 Video VAE；主模型 Profile 下載時會自動一併取得。",
+            capabilities: [.textToVideo],
+            quantization: .bf16,
+            approximateDownloadGB: 2.32,
+            recommendedMemoryGB: 16,
+            licenseName: "LTX-Video Community License",
+            sourceURL: URL(string: "https://huggingface.co/city96/LTX-Video-0.9.6-distilled-gguf")
+        ),
+        ModelDescriptor(
+            id: "unsloth/LTX-2.3-GGUF@distilled-1.1-Q3_K_M",
+            displayName: "LTX-2.3 22B Distilled 1.1 GGUF Q3_K_M",
+            publisher: "Unsloth / Lightricks",
+            summary: "LTX-2.3 22B Distilled 1.1 的 GGUF Q3_K_M 權重；下載 Profile 時會一併取得 Video/Audio VAE、Gemma 3、connector 與空間升頻器。",
+            capabilities: [.imageToVideo, .textToVideo],
+            quantization: .fourBit,
+            approximateDownloadGB: 22.50,
+            recommendedMemoryGB: 48,
+            licenseName: "LTX-2 Community License",
+            sourceURL: URL(string: "https://huggingface.co/unsloth/LTX-2.3-GGUF"),
+            isRecommended: false
+        ),
+        ModelDescriptor(
+            id: "unsloth/LTX-2.3-GGUF@distilled-1.1-VAE",
+            displayName: "LTX-2.3 Distilled 1.1 Video／Audio VAE",
+            publisher: "Unsloth / Lightricks",
+            summary: "LTX-2.3 Distilled 1.1 配套的 Video VAE 與 Audio VAE；主模型 Profile 下載時會自動一併取得。LTX-2.3 使用 Gemma 文字編碼器，不使用 T5。",
+            capabilities: [.imageToVideo, .textToVideo],
+            quantization: .bf16,
+            approximateDownloadGB: 1.69,
+            recommendedMemoryGB: 16,
+            licenseName: "LTX-2 Community License",
+            sourceURL: URL(string: "https://huggingface.co/unsloth/LTX-2.3-GGUF")
         ),
         ModelDescriptor(
             id: "pipenetwork/MiniMax-H3-MLX-8bit",
@@ -333,6 +395,19 @@ public enum ModelCatalog {
             licenseName: "MiniMax H3 Community License",
             sourceURL: URL(string: "https://huggingface.co/pipenetwork/MiniMax-H3-MLX-4bit"),
             isRecommended: true
+        ),
+        ModelDescriptor(
+            id: "unsloth/MiniMax-H3-GGUF@fl2va-pruned-Q4_K",
+            displayName: "MiniMax H3 GGUF FL2VA Pruned Q4_K",
+            publisher: "Unsloth / MiniMaxAI",
+            summary: "MiniMax H3 FL2VA Pruned GGUF Q4_K 主權重，約 10.64 GiB；此下載卡只包含去噪主權重，Qwen3-VL 文字編碼器與 Video/Audio VAE 需另行配套，尚未接入 H3 生成功能。",
+            capabilities: [.imageToVideo, .textToVideo],
+            quantization: .fourBit,
+            approximateDownloadGB: 11.42,
+            recommendedMemoryGB: 48,
+            licenseName: "MiniMax H3 Community License",
+            sourceURL: URL(string: "https://huggingface.co/unsloth/MiniMax-H3-GGUF"),
+            isRecommended: false
         ),
         ModelDescriptor(
             id: "ACE-Step/Ace-Step1.5",
@@ -372,6 +447,19 @@ public enum ModelCatalog {
             licenseName: "MiniMax Music 3 Community License",
             sourceURL: URL(string: "https://huggingface.co/mlx-community/MiniMax-Music3-4bit"),
             isRecommended: true
+        ),
+        ModelDescriptor(
+            id: "audio-cpp/MiniMax-Music3-GGUF@Q4_K-LM-Q4_K-DiT-Q8_0-depth",
+            displayName: "MiniMax Music 3 GGUF Q4_K / Q8_0",
+            publisher: "audio.cpp / MiniMaxAI",
+            summary: "完整 MiniMax Music 3 GGUF 元件包：語言模型與 Flow Transformer 使用 Q4_K，RVQ depth decoder 使用 Q8_0，包含條件編碼器、Vocoder 與 Tokenizer；實際下載約 8.96 GiB。",
+            capabilities: [.textToMusic],
+            quantization: .fourBit,
+            approximateDownloadGB: 8.96,
+            recommendedMemoryGB: 16,
+            licenseName: "MiniMax-Music3 Community License",
+            sourceURL: URL(string: "https://huggingface.co/audio-cpp/MiniMax-Music3-GGUF"),
+            isRecommended: false
         ),
         ModelDescriptor(
             id: "Mothersuperior/minimax-music3-composer-5.7b-distilled",
@@ -655,7 +743,7 @@ public enum ModelCatalog {
                 frameCount: 121,
                 frameRate: 24
             ),
-            notes: "官方 LTX-2.3 Distilled 1.1 圖生影 Profile；5 秒、24 FPS。模型中心會下載主權重、x2 空間升頻器與 Gemma 3 12B 文字編碼器，推論仍需官方 Python Runtime。",
+            notes: "官方 LTX-2.3 Distilled 1.1 圖生影 Profile；5 秒、24 FPS。模型中心會下載主權重、x2 空間升頻器與 Gemma 3 12B 文字編碼器；原生 Worker 目前僅支援 MLX Q4 模型格式。",
             isBuiltIn: true
         ),
         InferenceProfile(
@@ -680,7 +768,7 @@ public enum ModelCatalog {
                     conditioningScale: 1
                 )
             ],
-            notes: "原生 MLX INT4 LTX-2.3 Profile；預設使用 Union Control IC-LoRA 與來源圖片 Canny 控制影片，降低逐幀人物與場景漂移。由 ltx-2-mlx 使用 Apple Silicon Metal 執行，建議 24GB 以上記憶體。",
+            notes: "原生 MLX INT4 LTX-2.3 Profile；由 LTX Swift Worker 使用 Apple Silicon Metal 執行。文字生影已支援；image conditioning 與 LoRA fusion 尚未支援，建議 48GB 以上記憶體。",
             isBuiltIn: true
         ),
         InferenceProfile(
@@ -697,7 +785,58 @@ public enum ModelCatalog {
                 frameCount: 97,
                 frameRate: 24
             ),
-            notes: "原生 MLX INT4 LTX-2.3 文生影 Profile；由 ltx-2-mlx 使用 Apple Silicon Metal 執行。建議 24GB 以上記憶體，需安裝 ltx-2-mlx Python Runtime。",
+            notes: "原生 MLX INT4 LTX-2.3 文生影 Profile；由 LTX Swift Worker 使用 Apple Silicon Metal 執行。建議 48GB 以上記憶體。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "文生影 · LTX-Video 0.9.6 GGUF Q4_K_M",
+            capability: .textToVideo,
+            modelID: "city96/LTX-Video-0.9.6-distilled-gguf@Q4_K_M",
+            modelRevision: "main",
+            architecture: .externalCLI,
+            defaults: ProfileDefaults(
+                width: 1280,
+                height: 720,
+                steps: 8,
+                outputCount: 1,
+                frameCount: 97,
+                frameRate: 24
+            ),
+            notes: "LTX-Video 0.9.6 GGUF Q4_K_M Profile；安裝時會一併下載 T5 v1.1 XXL Q4_K_M、Tokenizer 與 BF16 VAE，由 LTX GGUF Swift Runtime 生成。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "圖生影 · LTX-2.3 GGUF Q3_K_M",
+            capability: .imageToVideo,
+            modelID: "unsloth/LTX-2.3-GGUF@distilled-1.1-Q3_K_M",
+            modelRevision: "main",
+            architecture: .externalCLI,
+            defaults: ProfileDefaults(
+                width: 1280,
+                height: 720,
+                steps: 8,
+                outputCount: 1,
+                frameCount: 97,
+                frameRate: 24
+            ),
+            notes: "LTX-2.3 GGUF Q3_K_M Profile；安裝時會一併下載 Video/Audio VAE、Gemma 3 tokenizer、connector 與空間升頻器，由 LTX GGUF Swift Runtime 生成。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "文生影 · LTX-2.3 GGUF Q3_K_M",
+            capability: .textToVideo,
+            modelID: "unsloth/LTX-2.3-GGUF@distilled-1.1-Q3_K_M",
+            modelRevision: "main",
+            architecture: .externalCLI,
+            defaults: ProfileDefaults(
+                width: 1280,
+                height: 720,
+                steps: 8,
+                outputCount: 1,
+                frameCount: 97,
+                frameRate: 24
+            ),
+            notes: "LTX-2.3 GGUF Q3_K_M Profile；安裝時會一併下載 Video/Audio VAE、Gemma 3 tokenizer、connector 與空間升頻器，由 LTX GGUF Swift Runtime 生成。",
             isBuiltIn: true
         ),
         InferenceProfile(
@@ -733,6 +872,42 @@ public enum ModelCatalog {
             ),
             notes: "PipeNetwork MiniMax H3 原生 MLX 4-bit Profile；預設約 5 秒、24 FPS、768p，支援首幀或首尾幀圖生影與同步音訊。推論需 pipenetwork/minimax-h3-mlx Python Runtime。",
             isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "圖生影 · MiniMax H3 GGUF Q4_K",
+            capability: .imageToVideo,
+            modelID: "unsloth/MiniMax-H3-GGUF@fl2va-pruned-Q4_K",
+            modelRevision: "main",
+            architecture: .externalCLI,
+            defaults: ProfileDefaults(
+                width: 1280,
+                height: 720,
+                steps: 16,
+                outputCount: 1,
+                frameCount: 124,
+                frameRate: 24
+            ),
+            notes: "MiniMax H3 GGUF Q4_K 下載 Profile；目前僅供下載，完整文字編碼器、Video/Audio VAE 與生成 Runtime 尚未接入。",
+            isBuiltIn: true,
+            supportsGeneration: false
+        ),
+        InferenceProfile(
+            name: "文生影 · MiniMax H3 GGUF Q4_K",
+            capability: .textToVideo,
+            modelID: "unsloth/MiniMax-H3-GGUF@fl2va-pruned-Q4_K",
+            modelRevision: "main",
+            architecture: .externalCLI,
+            defaults: ProfileDefaults(
+                width: 1280,
+                height: 720,
+                steps: 16,
+                outputCount: 1,
+                frameCount: 124,
+                frameRate: 24
+            ),
+            notes: "MiniMax H3 GGUF Q4_K 下載 Profile；目前僅供下載，完整文字編碼器、Video/Audio VAE 與生成 Runtime 尚未接入。",
+            isBuiltIn: true,
+            supportsGeneration: false
         ),
         InferenceProfile(
             name: "文生音樂 · ACE-Step 1.5 Turbo MLX",
@@ -777,6 +952,21 @@ public enum ModelCatalog {
                 durationSemantics: .maximum
             ),
             notes: "MiniMax Music 3 原生 MLX affine 4-bit Profile；由 App 隨附的 Swift Worker 執行，依音樂風格 Prompt 與歌詞生成最長 5–300 秒音訊。模型可能依歌曲結構提前自然結束；Composer 加速元件目前獨立管理，尚未自動套用。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "文生音樂 · MiniMax Music 3 GGUF Q4_K / Q8_0",
+            capability: .textToMusic,
+            modelID: "audio-cpp/MiniMax-Music3-GGUF@Q4_K-LM-Q4_K-DiT-Q8_0-depth",
+            modelRevision: "main",
+            architecture: .externalCLI,
+            defaults: ProfileDefaults(steps: 20, outputCount: 1, durationSeconds: 10),
+            music: ProfileMusicConfiguration(
+                minimumDurationSeconds: 5,
+                maximumDurationSeconds: 300,
+                durationSemantics: .maximum
+            ),
+            notes: "MiniMax Music 3 GGUF Q4_K／Q8_0 Profile；由 App 隨附的 Swift Worker 直接載入 GGUF，語言模型與 Flow Transformer 使用 INT4，RVQ depth decoder 使用 INT8，條件編碼器與 Vocoder 保持原生浮點格式。建議 16GB 以上 Apple Silicon Mac。",
             isBuiltIn: true
         ),
         InferenceProfile(

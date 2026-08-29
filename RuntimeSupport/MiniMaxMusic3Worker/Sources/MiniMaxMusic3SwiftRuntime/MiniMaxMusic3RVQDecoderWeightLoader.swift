@@ -22,9 +22,9 @@ public enum MiniMaxMusic3RVQDecoderWeightLoader {
         var quantizedPaths = Set<String>()
         quantize(
             model: model,
-            groupSize: 64,
+            groupSize: MiniMaxMusic3GGUFQuantizationStrategy.groupSize,
             bits: 4,
-            mode: .affine,
+            mode: MiniMaxMusic3GGUFQuantizationStrategy.mode,
             filter: { path, module in
                 guard module is Linear, path.hasPrefix("layers.") else { return false }
                 guard path.contains(".attn.to_q")
@@ -87,6 +87,18 @@ public enum MiniMaxMusic3RVQDecoderWeightLoader {
             tensorCount: converted.count,
             quantizedModuleCount: quantizedPaths.count,
             shardNames: shardNames
+        )
+    }
+
+    public static func loadGGUF(
+        model: MiniMaxMusic3RVQDepthDecoder,
+        from fileURL: URL
+    ) throws -> MiniMaxMusic3RVQDecoderWeightLoadReport {
+        let report = try MiniMaxMusic3GGUFWeightLoader.load(model: model, from: fileURL)
+        return MiniMaxMusic3RVQDecoderWeightLoadReport(
+            tensorCount: report.parameterCount,
+            quantizedModuleCount: report.quantizedTensorCount,
+            shardNames: [fileURL.lastPathComponent]
         )
     }
 

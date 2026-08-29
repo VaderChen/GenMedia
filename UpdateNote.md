@@ -5,8 +5,9 @@
 ## Unreleased
 
 - `build.command` 在第一次建立 App 或內建 FFmpeg 不完整時，會自動呼叫 `scripts/build-ffmpeg-macos.sh` 下載來源、建立 LGPL `ffmpeg`／`ffprobe` 與必要 dylib，不再要求使用者手動先執行建立腳本或安裝 `pkg-config`。
+- LTX 正式流程移除外部 Python Runtime：`LTXVideoGenerationService` 現在只啟動 App 隨附的 `GenImageLTXVideoWorker` Swift 子行程，並由 `build.command` 複製與簽署 Worker 及其 Metal library。LTX Q4 模型安裝方案也會一併下載 Gemma 3 12B 文字編碼器，完整模型約 42 GiB，建議 48 GB 以上記憶體；原有 `~/Library/Application Support/GenImage/Runtime/ltx-2-mlx/` 舊資料不會自動刪除，確認不再使用後可手動移除。
 - FFmpeg 建置支援含空白的專案路徑，並會清除外接磁碟產生的 AppleDouble dylib sidecar；失敗時保留原有可用版本，相關排除方式已加入四語 README。
-- 新增獨立的 `RuntimeSupport/LTXVideoWorker`，完成 LTX-2 純 Swift Block 0 parity 基礎設施與 Block 1 影片 VAE 解碼；包含 causal／non-causal 3D convolution、真實單 tile／多 tile 拼接、safetensors 權重載入、dtype 門檻比較及純邏輯測試，尚未取代現行 Python 影片生成路徑。
+- 新增獨立的 `RuntimeSupport/LTXVideoWorker`，完成 LTX-2 純 Swift Block 0–4：包含 Gemma 文字編碼、conditioning connector、兩階段 distilled denoise、影片／音訊 VAE、vocoder、FFmpeg 封裝、safetensors 權重載入、dtype parity 比較及純邏輯測試。正式服務已改用 Swift Worker，不提供 Python fallback；目前 image conditioning 與 LoRA fusion 仍明確回報不支援。
 - LTX 影片 VAE 沿用 MiniMax Music 3 的混合精度策略：神經網路主幹維持 BF16，跨 tile 的 mask、加權、累加與除法固定使用 FP32，避免 BF16 在寫入 FP32 buffer 前提早捨入。
 - MiniMax Music 3 新增真實多 chunk vocoder parity 診斷：Python `decode-chunks` 會從 AR frame hiddens 與 denoise 實際產生 latent chunks，Swift PoC 以相同 chunks 執行 `decodeChunks`；2 chunks 與 3 chunks 的 crop 參數、各段保留 samples 及最終 audio shape 全部一致。BF16 relative max diff 分別為 `1.571428571e-2`、`1.881720430e-2`，但改用 SNR 主指標後分別為 `36.0326 dB`、`37.0769 dB`，均通過 `>=30 dB` 門檻；同一批 3 chunks 改用 FP32 vocoder 後 SNR 為 `117.6912 dB`，通過 `>=80 dB` 門檻。差異分散於各 chunk 的 vocoder 輸出，不是裁切或 concat；正式 Decoder 實作未修改。
 - 最終音訊 parity 改以長度無關的 SNR dB 為主要指標；`relative max diff` 與 `mean abs diff` 保留為輔助資訊。依真實案例分布，BF16 音訊門檻訂為 `>=30 dB`（目前最低 `33.9346 dB`，保留內容與長度變動緩衝），FP32 訂為 `>=80 dB`（目前 `117.6912 dB`，仍要求極低誤差能量）。

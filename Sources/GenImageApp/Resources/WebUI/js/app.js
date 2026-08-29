@@ -4,7 +4,10 @@ import {
   refreshModelProgressDOM,
   refreshToastDOM,
   renderAssetRemovalDialog,
+  renderAssetRenameDialog,
+  renderCivitaiTokenDialog,
   renderInfoDialog,
+  renderModelRemovalDialog,
   renderPasteDialog,
   renderRoute,
   renderSidebar,
@@ -86,6 +89,7 @@ let statusMessageTimer = null;
 let activeEditableField = null;
 let composingEditableField = null;
 let renderDeferredDuringEditing = false;
+let renderDeferredDuringSelect = false;
 let deferredRenderTimer = null;
 let previewPan = null;
 let imageDragDepth = 0;
@@ -144,10 +148,16 @@ const ui = {
   workspaceCreateName: "",
   workspaceDeleteTargetID: null,
   assetRemovalDialog: null,
+  assetRenameDialog: null,
+  assetRenameValue: "",
+  modelRemovalDialog: null,
+  civitaiTokenDialog: null,
+  civitaiTokenValue: "",
   pasteDialogOpen: false,
   smallOutputWarning: null,
   infoDialog: null,
   modelFilter: "all",
+  modelFormat: "all",
   profileFilter: "all",
   modelSearch: "",
   language: getLocale(),
@@ -224,6 +234,17 @@ onState((nextState) => {
       musicOutputSettings: localMusicOutputSettings,
     };
     if (statusMessageChanged) scheduleStatusMessageDismiss(nextState.statusMessage);
+    updateSystemMetricsDOM(state, root);
+    refreshJobsPanel(workspaceStateForActiveTab(ui, state), root);
+    refreshToastDOM(state, root);
+    return;
+  }
+  if (activeSelectInteraction()) {
+    state = nextState;
+    stateContentSignature = nextContentSignature;
+    renderDeferredDuringSelect = true;
+    if (statusMessageChanged) scheduleStatusMessageDismiss(nextState.statusMessage);
+    refreshModelProgressDOM(state, root);
     updateSystemMetricsDOM(state, root);
     refreshJobsPanel(workspaceStateForActiveTab(ui, state), root);
     refreshToastDOM(state, root);
@@ -439,6 +460,48 @@ root.addEventListener("click", async (event) => {
         removeAssetFromWorkspaceTabs(ui, removal.assetID, removal.replacementAssetID);
         break;
       }
+      case "assetRenameCancel":
+        ui.assetRenameDialog = null;
+        ui.assetRenameValue = "";
+        render();
+        break;
+      case "assetRenameSave": {
+        const dialog = ui.assetRenameDialog;
+        const fileName = ui.assetRenameValue.trim();
+        if (!dialog || !fileName) break;
+        ui.assetRenameDialog = null;
+        ui.assetRenameValue = "";
+        render();
+        await invoke("renameAsset", { assetID: dialog.assetID, fileName });
+        break;
+      }
+      case "modelRemovalCancel":
+        ui.modelRemovalDialog = null;
+        render();
+        break;
+      case "modelRemovalConfirm": {
+        const dialog = ui.modelRemovalDialog;
+        if (!dialog) break;
+        ui.modelRemovalDialog = null;
+        render();
+        await invoke("removeModel", { modelID: dialog.modelID });
+        break;
+      }
+      case "civitaiTokenCancel":
+        ui.civitaiTokenDialog = null;
+        ui.civitaiTokenValue = "";
+        render();
+        break;
+      case "civitaiTokenConfirm": {
+        const dialog = ui.civitaiTokenDialog;
+        const civitaiToken = ui.civitaiTokenValue.trim();
+        if (!dialog || !civitaiToken) break;
+        ui.civitaiTokenDialog = null;
+        ui.civitaiTokenValue = "";
+        render();
+        await invoke(dialog.action, { modelID: dialog.modelID, civitaiToken });
+        break;
+      }
       case "workspaceTab":
         if (target.dataset.tabId === ui.activeWorkspaceTabID) {
           openWorkspaceTabRename(target.dataset.tabId);
@@ -598,14 +661,6 @@ root.addEventListener("click", async (event) => {
       case "clearJobs":
         await invoke("clearJobs");
         break;
-      case "modelFilter":
-        ui.modelFilter = target.dataset.filter;
-        render();
-        break;
-      case "profileFilter":
-        ui.profileFilter = target.dataset.filter;
-        render();
-        break;
       case "openModelInfo":
         ui.infoDialog = { kind: "model", id: target.dataset.modelId };
         render();
@@ -638,10 +693,19 @@ root.addEventListener("click", async (event) => {
         await invoke("clearCivitaiToken");
         break;
       case "installModel":
-      case "pauseModel":
-      case "removeModel":
       case "repairModel":
+        if (isCivitaiModel(target.dataset.modelId)) {
+          openCivitaiTokenDialog(target.dataset.modelId, action);
+        } else {
+          await invoke(action, { modelID: target.dataset.modelId });
+        }
+        break;
+      case "pauseModel":
         await invoke(action, { modelID: target.dataset.modelId });
+        break;
+      case "removeModel":
+        ui.modelRemovalDialog = { modelID: target.dataset.modelId };
+        render();
         break;
       case "installProfileModels":
         await invoke("installProfileModels", { profileID: target.dataset.profileId });
@@ -705,13 +769,35 @@ document.addEventListener("keydown", (event) => {
     root.querySelector('[data-action="workspaceCreateSave"]:not(:disabled)')?.click();
     return;
   }
+  if (event.key === "Enter" && event.target.matches?.("[data-civitai-token-prompt]")) {
+    event.preventDefault();
+    root.querySelector('[data-action="civitaiTokenConfirm"]:not(:disabled)')?.click();
+    return;
+  }
+  if (event.key === "Enter" && event.target.matches?.("[data-asset-rename-input]")) {
+    event.preventDefault();
+    root.querySelector('[data-action="assetRenameSave"]:not(:disabled)')?.click();
+    return;
+  }
   if (event.key !== "Escape") return;
   closeImageContextMenu();
-  if (ui.workspaceCreateDialogOpen || ui.workspaceDeleteTargetID || ui.assetRemovalDialog) {
+  if (
+    ui.workspaceCreateDialogOpen
+    || ui.workspaceDeleteTargetID
+    || ui.assetRemovalDialog
+    || ui.assetRenameDialog
+    || ui.modelRemovalDialog
+    || ui.civitaiTokenDialog
+  ) {
     ui.workspaceCreateDialogOpen = false;
     ui.workspaceCreateName = "";
     ui.workspaceDeleteTargetID = null;
     ui.assetRemovalDialog = null;
+    ui.assetRenameDialog = null;
+    ui.assetRenameValue = "";
+    ui.modelRemovalDialog = null;
+    ui.civitaiTokenDialog = null;
+    ui.civitaiTokenValue = "";
     render();
     return;
   }
@@ -756,6 +842,24 @@ root.addEventListener("change", async (event) => {
     }
     captureActiveWorkspaceTabDraft();
     refreshCreationPanelDOM();
+    return;
+  }
+
+  if (event.target.dataset.uiField === "modelFilter") {
+    ui.modelFilter = event.target.value;
+    render();
+    return;
+  }
+
+  if (event.target.dataset.uiField === "modelFormat") {
+    ui.modelFormat = event.target.value;
+    render();
+    return;
+  }
+
+  if (event.target.dataset.uiField === "profileFilter") {
+    ui.profileFilter = event.target.value;
+    render();
     return;
   }
 
@@ -938,6 +1042,18 @@ root.addEventListener("change", async (event) => {
 root.addEventListener("input", (event) => {
   if (!state) return;
 
+  if (event.target.matches("[data-civitai-token-prompt]")) {
+    ui.civitaiTokenValue = event.target.value;
+    const confirmButton = root.querySelector('[data-action="civitaiTokenConfirm"]');
+    if (confirmButton) confirmButton.disabled = !ui.civitaiTokenValue.trim();
+    return;
+  }
+
+  if (event.target.matches("[data-asset-rename-input]")) {
+    ui.assetRenameValue = event.target.value;
+    return;
+  }
+
   if (event.target.matches("[data-lora-scale]")) {
     state.recipe.loraScale = Math.min(1, Math.max(0, Number(event.target.value)));
     const output = root.querySelector("[data-lora-scale-value]");
@@ -1008,6 +1124,10 @@ root.addEventListener("focusin", (event) => {
 });
 
 root.addEventListener("focusout", (event) => {
+  if (event.target.matches?.("select")) {
+    scheduleDeferredRender();
+    return;
+  }
   const editableField = editableFieldFor(event.target);
   if (!editableField || activeEditableField?.element !== event.target) return;
   updateEditableFieldValue(editableField, event.target.value);
@@ -1169,6 +1289,9 @@ function render() {
       ${renderWorkspaceCreateDialog(ui)}
       ${renderWorkspaceDeleteDialog(state, ui)}
       ${renderAssetRemovalDialog(state, ui)}
+      ${renderAssetRenameDialog(state, ui)}
+      ${renderModelRemovalDialog(state, ui)}
+      ${renderCivitaiTokenDialog(state, ui)}
       ${renderPasteDialog(state, ui, pasteState)}
       ${renderSmallOutputWarningDialog(ui)}
       ${renderInfoDialog(state, ui)}
@@ -1235,6 +1358,10 @@ function openAssetContextMenu(clientX, clientY, assetID) {
     event.stopPropagation();
     const action = button.dataset.contextAction;
     closeImageContextMenu();
+    if (action === "renameAsset") {
+      openAssetRenameDialog(assetID);
+      return;
+    }
     try {
       await invoke(action, { assetID });
     } catch (error) {
@@ -1245,6 +1372,30 @@ function openAssetContextMenu(clientX, clientY, assetID) {
 
 function closeImageContextMenu() {
   document.querySelectorAll(".image-context-menu").forEach((menu) => menu.remove());
+}
+
+function openAssetRenameDialog(assetID) {
+  const asset = state.assets.find((item) => item.id === assetID);
+  if (!asset?.fileName) return;
+  ui.assetRenameDialog = { assetID };
+  ui.assetRenameValue = asset.fileName;
+  render();
+  queueMicrotask(() => {
+    const input = root.querySelector("[data-asset-rename-input]");
+    input?.focus({ preventScroll: true });
+    input?.select?.();
+  });
+}
+
+function openCivitaiTokenDialog(modelID, action) {
+  ui.civitaiTokenDialog = { modelID, action };
+  ui.civitaiTokenValue = "";
+  render();
+  queueMicrotask(() => root.querySelector("[data-civitai-token-prompt]")?.focus({ preventScroll: true }));
+}
+
+function isCivitaiModel(modelID) {
+  return typeof modelID === "string" && modelID.toLocaleLowerCase().startsWith("civitai/");
 }
 
 function setInspectorTab(tab) {
@@ -1760,14 +1911,20 @@ function syncEditableField(editableField) {
 }
 
 function scheduleDeferredRender() {
-  if (!renderDeferredDuringEditing) return;
+  if (!renderDeferredDuringEditing && !renderDeferredDuringSelect) return;
   clearTimeout(deferredRenderTimer);
   deferredRenderTimer = setTimeout(() => {
     deferredRenderTimer = null;
-    if (activeEditableField || composingEditableField) return;
+    if (activeEditableField || composingEditableField || activeSelectInteraction()) return;
     renderDeferredDuringEditing = false;
+    renderDeferredDuringSelect = false;
     render();
   }, 0);
+}
+
+function activeSelectInteraction() {
+  const active = document.activeElement;
+  return Boolean(active && active !== document.body && active.tagName === "SELECT" && root.contains(active));
 }
 
 function normalizeLegacyPromptTab(value) {

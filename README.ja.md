@@ -49,20 +49,13 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 
 ### 動画 Runtime
 
-動画生成には交換可能な外部 `ltx-2-mlx` Runtime を使用します。Swift アプリがプロファイル、パラメータ検証、ジョブキュー、キャンセル、進捗、アセット、動画再生を管理します。初回使用前に必要なのは動画 CLI のインストールだけです。
+動画生成はアプリに同梱された `GenImageLTXVideoWorker` Swift サブプロセスで実行します。Swift アプリがプロファイル、パラメータ検証、ジョブキュー、キャンセル、進捗、アセット、動画再生を管理し、追加の動画 Runtime は必要ありません。
 
-```bash
-brew install uv
-./scripts/install-ltx-runtime.command
-```
+モデルセンターの `dgrauet/ltx-2.3-mlx-q4` は、ネイティブ MLX INT4 Transformer、Video／Audio VAE、vocoder、空間アップスケーラーに加えて、`google/gemma-3-12b-it-qat-q4_0-unquantized` の Gemma 3 12B テキストエンコーダーもダウンロードします。全体で約 42 GiB の空き容量が必要で、48 GB 以上のメモリを推奨します。
 
-アプリは `GENIMAGE_LTX_RUNTIME`、`GENIMAGE_LTX_RUNTIME_ROOT/.venv/bin/ltx-2-mlx`、App Helpers、`~/.local/bin/ltx-2-mlx`、一般的な Homebrew パス、`PATH` の順に検索します。実行ファイルが独自の場所にある場合は、次のように指定します。
+開発ビルドでは `GENIMAGE_LTX_WORKER` で Worker を指定できます。リリース版は Bundle の `Contents/Helpers/GenImageLTXVideoWorker` を使用します。`GENIMAGE_LTX_GEMMA_MODEL` を設定すると Gemma ディレクトリを上書きでき、未設定時は LTX モデル内の `gemma-3-12b` を使用します。
 
-```bash
-GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
-```
-
-`ltx-2-mlx` は既定で Gemma テキストエンコーダー設定を使用します。ローカルの Gemma モデルがある場合は、`GENIMAGE_LTX_GEMMA_MODEL` にモデルディレクトリまたは Hugging Face ID を指定できます。App の DMG に Python Runtime と Gemma の重みは含まれませんが、LGPL 動的版 FFmpeg は内蔵されます。配布前に動画 Runtime とモデルのライセンスを個別に確認してください。
+LTX Worker は JSON request と段階別進捗イベントでアプリと通信し、モデルファイルはアプリに同梱しません。旧版の Runtime データは自動削除しないため、不要であることを確認した後に `~/Library/Application Support/GenImage/Runtime/ltx-2-mlx/` を手動で削除できます。
 
 ### 互換メディア読み込み
 
@@ -99,7 +92,7 @@ Qwen3-VL、Qwen3.5、Qwen3.8 はマルチモーダルモデルのため、モデ
 - テキストから画像の完了後もモデル重みと暖機 buffer を保持します。5 分間アイドルになると再利用可能な MLX 一時 buffer だけを整理し、モデルはアンロードしません。側面のメモリ解放、モデル切り替え、またはプロファイル切り替え時の RAM 90% 超過保護でのみ不要な Runtime を解放します。
 - ダウンロードでは配布元のファイル名を保持し、生成出力は `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm`、`Music-YYYYMMDD-HHmm` を使用します。同じ分に重複する場合は連番を追加します。出力ディレクトリは設定画面で変更できます。
 - 開いている各ワークスペースタブを生成プロジェクトとして扱います。アセットと lineage は Application Support にアトミック保存され、アプリ再起動後も復元されます。タブを明示的に閉じた場合のみプロジェクトのワークスペース索引を削除し、出力済みメディアはディスクに保持します。
-- アプリのデータはすべて `~/Library/Application Support/GenImage/`（`Models`、`Runtime`、`Workspace`、`Pasted`、`Generated`）に置き、`GenImageCore/ApplicationSupport.swift` が唯一の定義元です。ワークスペース索引は以前 `GenMedia/` に書かれており、起動時に現在のルートへ引き取ります。同名の項目は既存のものを残し、上書きも統合もしません。`Runtime/` 配下の Python venv が起動 script に絶対パスを埋め込んでいるため、アプリ名に合わせた `GenMedia` へは改名せず `GenImage` のままにしています。
+- アプリのデータはすべて `~/Library/Application Support/GenImage/`（`Models`、`Runtime`、`Workspace`、`Pasted`、`Generated`）に置き、`GenImageCore/ApplicationSupport.swift` が唯一の定義元です。ワークスペース索引は以前 `GenMedia/` に書かれており、起動時に現在のルートへ引き取ります。同名の項目は既存のものを残し、上書きも統合もしません。既存モデルと旧版 Runtime データとの互換性を保つため、アプリ名に合わせた `GenMedia` へは改名せず `GenImage` のままにしています。
 - プロンプトと歌詞の編集中は、カーソル、選択範囲、IME の変換状態をネイティブ状態更新から保護します。生成タイプ、プロンプト、歌詞、出力設定のタブは作成パネルだけを再描画します。避けられない全体更新でも、再生中の音声・動画ノードを再利用して再生を中断しません。
 - ワークスペースのフィルムストリップには画像読み込みボタンがあり、Finder から PNG、JPEG、WebP、GIF、TIFF、HEIC、HEIF を 1 枚以上ドロップできます。音楽生成中はメディアソースの混在を防ぐため画像読み込みを無効にします。画像生成で入力画像を選択するとメインボタンは画像から画像のプロファイルを使用し、未選択時はテキストから画像のプロファイルを使用します。
 - 画像と動画の比率項目はドロップダウンになっています。画像から画像では入力画像を選択した場合だけ「元の解像度」を表示し、入力画像のサイズを Runtime が扱える 16 の倍数へ変換します。
@@ -215,8 +208,6 @@ Patches/
 └── manifest.txt                  # ビルド時に適用する依存パッチ一覧
 scripts/
 ├── apply-runtime-patches.command  # manifest に従って依存パッケージ修正を適用・検証
-├── install-ltx-runtime.command     # LTX 動画 Runtime をインストール
-├── install-minimax-music3-mlx-audio-runtime.command # 専用 MiniMax 4-bit Runtime をインストール
 └── build-ffmpeg-macos.sh          # バンドル可能で再リンク可能な LGPL FFmpeg を構築
 ```
 

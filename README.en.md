@@ -49,20 +49,13 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 
 ### Video Runtime
 
-Video generation uses a replaceable external `ltx-2-mlx` runtime. The Swift app manages profiles, parameter validation, the job queue, cancellation, progress, assets, and video playback. Only the video CLI must be installed before first use:
+Video generation runs in the bundled `GenImageLTXVideoWorker` Swift subprocess. The Swift app manages profiles, parameter validation, the job queue, cancellation, progress, assets, and video playback without an additional video runtime.
 
-```bash
-brew install uv
-./scripts/install-ltx-runtime.command
-```
+The model-center plan for `dgrauet/ltx-2.3-mlx-q4` also downloads the native MLX INT4 transformer, video/audio VAEs, vocoder, spatial upscaler, and the Gemma 3 12B text encoder from `google/gemma-3-12b-it-qat-q4_0-unquantized`; the complete download is about 42 GiB, and 48 GB or more of memory is recommended.
 
-The app searches `GENIMAGE_LTX_RUNTIME`, `GENIMAGE_LTX_RUNTIME_ROOT/.venv/bin/ltx-2-mlx`, app helpers, `~/.local/bin/ltx-2-mlx`, common Homebrew paths, and `PATH` in order. To use a custom executable location:
+Development builds can use `GENIMAGE_LTX_WORKER` to select a custom Worker. Release apps use `Contents/Helpers/GenImageLTXVideoWorker`. `GENIMAGE_LTX_GEMMA_MODEL` can override the Gemma directory; when unset, the Worker first uses `gemma-3-12b` inside the LTX model directory.
 
-```bash
-GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
-```
-
-`ltx-2-mlx` uses its Gemma text encoder configuration by default. If a local Gemma model is available, set `GENIMAGE_LTX_GEMMA_MODEL` to its directory or Hugging Face ID. The app DMG does not bundle the Python runtime or Gemma weights, but it does include the dynamic LGPL FFmpeg build. Review the video runtime and model licenses separately before distribution.
+The LTX Worker communicates with the app through a JSON request and stage-specific progress events; model files are not bundled in the app. Legacy runtime data is not removed automatically; after confirming it is no longer needed, the old directory `~/Library/Application Support/GenImage/Runtime/ltx-2-mlx/` can be removed manually.
 
 ### Compatible Media Import
 
@@ -99,7 +92,7 @@ For legacy headless launch scripts, `CIVITAI_TOKEN` remains supported as a compa
 - Text-to-image completion keeps model weights and warm buffers resident. Reusable MLX buffers are trimmed after five idle minutes without unloading the model. Models are unloaded only by the sidebar Release Memory action, a model switch, or the over-90% RAM protection applied while switching profiles.
 - Downloads retain their upstream filenames. Generated outputs use `Image-YYYYMMDD-HHmm`, `Video-YYYYMMDD-HHmm`, or `Music-YYYYMMDD-HHmm`; a numeric suffix prevents collisions within the same minute. The output directory is configurable in Settings.
 - Each open workspace tab is treated as a generation project. Assets and lineage are atomically stored under Application Support and restored after the app relaunches. Explicitly closing a tab removes that project's workspace index while keeping exported media files on disk.
-- All app data lives under `~/Library/Application Support/GenImage/` (`Models`, `Runtime`, `Workspace`, `Pasted`, `Generated`), defined in one place by `GenImageCore/ApplicationSupport.swift`. The workspace index used to be written under `GenMedia/`; it is adopted into the current root at launch, and an entry that already exists is kept rather than overwritten or merged. The directory keeps the name `GenImage` rather than matching the app's `GenMedia` because the Python venvs under `Runtime/` bake absolute paths into their launch scripts — renaming would break the installed LTX and MiniMax runtimes.
+- All app data lives under `~/Library/Application Support/GenImage/` (`Models`, `Runtime`, `Workspace`, `Pasted`, `Generated`), defined in one place by `GenImageCore/ApplicationSupport.swift`. The workspace index used to be written under `GenMedia/`; it is adopted into the current root at launch, and an entry that already exists is kept rather than overwritten or merged. The directory keeps the name `GenImage` rather than matching the app's `GenMedia` to preserve compatibility with existing models and legacy runtime data.
 - Prompt and lyrics editors preserve the caret, selection, and IME composition while native state updates arrive. Generation type, Prompt, Lyrics, and output-setting tabs rerender only the creation panel. Unavoidable full updates reuse playing audio and video nodes instead of interrupting playback.
 - The workspace filmstrip provides an image import button and supports dropping one or more PNG, JPEG, WebP, GIF, TIFF, HEIC, or HEIF files from Finder. Image import is disabled during music generation to keep media sources separate. In image generation mode, selecting a source image automatically routes the main button to the image-to-image profile; without a source image it uses the text-to-image profile.
 - Image and video aspect-ratio choices are dropdowns. Image-to-image shows `Original Resolution` only after a source image is selected, using source dimensions quantized to Runtime-compatible multiples of 16.
@@ -215,8 +208,6 @@ Patches/
 └── manifest.txt                  # Dependency patch manifest applied during builds
 scripts/
 ├── apply-runtime-patches.command  # Apply and verify dependency patches from the manifest
-├── install-ltx-runtime.command     # Install the LTX video runtime
-├── install-minimax-music3-mlx-audio-runtime.command # Install the dedicated MiniMax 4-bit runtime
 └── build-ffmpeg-macos.sh          # Build a bundle-ready, relinkable LGPL FFmpeg distribution
 ```
 

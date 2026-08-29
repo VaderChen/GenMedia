@@ -998,8 +998,8 @@ function renderQuickTool(state, capability) {
           ${profiles.length && !activeID ? `<option value="" selected disabled>${t("profile.select")}</option>` : ""}
           ${profiles
             .map(
-              (profile) => `<option value="${profile.id}" ${profile.id === activeID ? "selected" : ""}>
-                ${escapeHTML(profile.name)}
+              (profile) => `<option value="${profile.id}" ${profile.id === activeID ? "selected" : ""} ${profile.supportsGeneration === false ? "disabled" : ""}>
+                ${escapeHTML(profile.name)}${profile.supportsGeneration === false ? ` — ${escapeHTML(t("profile.downloadOnly"))}` : ""}
               </option>`,
             )
             .join("")}

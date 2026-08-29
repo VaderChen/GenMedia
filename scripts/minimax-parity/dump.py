@@ -378,6 +378,7 @@ def dump_decode(arguments: argparse.Namespace) -> None:
     model_directory = require_model_directory(arguments)
     if arguments.latent_frames < 1:
         raise ValueError("--latent-frames must be positive")
+    input_dtype = mx.bfloat16 if arguments.input_dtype == "bfloat16" else mx.float32
     vocoder = load_vocoder(model_directory)
     if arguments.latent:
         arrays = mx.load(str(arguments.latent))
@@ -385,9 +386,11 @@ def dump_decode(arguments: argparse.Namespace) -> None:
     else:
         latent = mx.random.normal(
             (1, 128, arguments.latent_frames),
-            dtype=mx.bfloat16,
+            dtype=input_dtype,
             key=mx.random.key(arguments.seed),
         )
+    if latent.dtype != input_dtype:
+        latent = latent.astype(input_dtype)
     if latent.ndim != 3 or latent.shape[0] < 1 or latent.shape[1] != 128:
         raise ValueError(f"latent must have shape [batch, 128, frames], got {latent.shape}")
     audio = mx.clip(vocoder(latent.transpose(0, 2, 1)).astype(mx.float32), -1.0, 1.0)
@@ -400,6 +403,7 @@ def dump_decode(arguments: argparse.Namespace) -> None:
             "stage": "decode_chunks",
             "model": str(arguments.model_dir),
             "seed": str(arguments.seed),
+            "input_dtype": arguments.input_dtype,
             "sampling_rate": "44100",
             "latent_layout": "BCL",
             "audio_layout": "BCS",

@@ -110,6 +110,11 @@ private enum GenImageMiniMaxMusic3Worker {
             isDirectory: true
         )
 
+        if MiniMaxMusic3GGUFModel.isAvailable(at: modelDirectory) {
+            try await runGGUF(request, modelDirectory: modelDirectory)
+            return
+        }
+
         emit(.progress(stage: "loadingModel", value: 0.01))
         let tokenizer = try await AutoTokenizer.from(modelFolder: tokenizerDirectory)
         let modelConfiguration = try MiniMaxMusic3ModelConfiguration.load(from: modelDirectory)
@@ -166,6 +171,139 @@ private enum GenImageMiniMaxMusic3Worker {
             }
         )
 
+        let audioReport = try MiniMaxMusic3Audio.writeWAV(
+            result.audio,
+            sampleRate: result.samplingRate,
+            to: outputURL
+        )
+        guard FileManager.default.fileExists(atPath: outputURL.path) else {
+            throw WorkerError.missingOutput
+        }
+        emit(
+            .completed(
+                durationSeconds: audioReport.durationSeconds,
+                sampleRate: audioReport.sampleRate,
+                numFrames: result.numFrames,
+                numChunks: result.numChunks
+            )
+        )
+    }
+
+    private static func runGGUF(
+        _ request: WorkerRequest,
+        modelDirectory: URL
+    ) async throws {
+        emit(.progress(stage: "loadingModel", value: 0.01))
+        let tokenizerDirectory = modelDirectory.appendingPathComponent(
+            "tokenizer",
+            isDirectory: true
+        )
+        let tokenizer = try await AutoTokenizer.from(modelFolder: tokenizerDirectory)
+        let language = try MiniMaxMusic3LanguageModel(
+            ggufModelDirectory: modelDirectory
+        )
+        emit(.progress(stage: "loadingModel", value: 0.18))
+
+        let rvqURL = try MiniMaxMusic3GGUFModel.componentURL(
+            for: .rvqDepthDecoder,
+            at: modelDirectory
+        )
+        let rvqBits = try MiniMaxMusic3GGUFModel.quantizationBits(
+            for: rvqURL,
+            component: .rvqDepthDecoder
+        )
+        let rvq = MiniMaxMusic3RVQDepthDecoder(
+            configuration: .music3,
+            quantizationBits: rvqBits,
+            quantizeAudioHeads: true,
+            quantizeProjection: true
+        )
+        _ = try MiniMaxMusic3RVQDecoderWeightLoader.loadGGUF(
+            model: rvq,
+            from: rvqURL
+        )
+        emit(.progress(stage: "loadingModel", value: 0.27))
+
+        let conditionURL = try MiniMaxMusic3GGUFModel.componentURL(
+            for: .conditionEncoder,
+            at: modelDirectory
+        )
+        let condition = MiniMaxMusic3ConditionEncoder(configuration: .music3)
+        _ = try MiniMaxMusic3ConditionEncoderWeightLoader.loadGGUF(
+            model: condition,
+            from: conditionURL
+        )
+        emit(.progress(stage: "loadingModel", value: 0.31))
+
+        let transformerURL = try MiniMaxMusic3GGUFModel.componentURL(
+            for: .transformer,
+            at: modelDirectory
+        )
+        let transformerBits = try MiniMaxMusic3GGUFModel.quantizationBits(
+            for: transformerURL,
+            component: .transformer
+        )
+        let transformer = MiniMaxMusic3FlowTransformer(
+            configuration: .music3,
+            quantizationBits: transformerBits
+        )
+        _ = try MiniMaxMusic3FlowTransformerWeightLoader.loadGGUF(
+            model: transformer,
+            from: transformerURL
+        )
+        emit(.progress(stage: "loadingModel", value: 0.46))
+
+        let vocoderURL = try MiniMaxMusic3GGUFModel.componentURL(
+            for: .vocoder,
+            at: modelDirectory
+        )
+        let vocoder = MiniMaxMusic3Vocoder(configuration: .music3)
+        _ = try MiniMaxMusic3VocoderWeightLoader.loadGGUF(
+            model: vocoder,
+            from: vocoderURL
+        )
+        emit(.progress(stage: "loadingModel", value: 0.5))
+
+        let generation = MiniMaxMusic3GenerationConfiguration(
+            audioDuration: request.audioDuration,
+            seed: request.seed,
+            numInferenceSteps: request.steps,
+            arCFGScale: request.arCfgScale,
+            flowCFGScale: request.flowCfgScale,
+            topK: request.topK,
+            inputDType: .bfloat16
+        )
+        let pipeline = try MiniMaxMusic3Pipeline(
+            modelConfiguration: .music3,
+            languageModel: language,
+            rvqDepthDecoder: rvq,
+            conditionEncoder: condition,
+            transformer: transformer,
+            vocoder: vocoder,
+            tokenEncoder: { tokenizer.encode(text: $0) }
+        )
+        let result = try pipeline.generate(
+            prompt: request.prompt,
+            lyrics: request.lyrics,
+            generation: generation,
+            progress: { event in
+                let value: Double
+                let stage: String
+                switch event.stage {
+                case .autoregressive:
+                    stage = "autoregressive"
+                    value = 0.5 + event.value * 0.38
+                case .denoising:
+                    stage = "denoising"
+                    value = 0.88 + event.value * 0.08
+                case .vocoder:
+                    stage = "vocoder"
+                    value = 0.96 + event.value * 0.03
+                }
+                emit(.progress(stage: stage, value: value))
+            }
+        )
+        let outputURL = URL(fileURLWithPath: request.outputPath)
         let audioReport = try MiniMaxMusic3Audio.writeWAV(
             result.audio,
             sampleRate: result.samplingRate,

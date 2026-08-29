@@ -240,6 +240,93 @@ export function renderAssetRemovalDialog(state, ui) {
   </div>`;
 }
 
+export function renderAssetRenameDialog(state, ui) {
+  const rename = ui.assetRenameDialog;
+  if (!rename) return "";
+  const asset = state.assets.find((item) => item.id === rename.assetID);
+  if (!asset) return "";
+  return `<div class="dialog-backdrop">
+    <section class="paste-dialog" role="dialog" aria-modal="true" aria-labelledby="asset-rename-dialog-title">
+      <h2 id="asset-rename-dialog-title">${t("asset.renameDialogTitle")}</h2>
+      <p>${t("asset.renameDialogMessage", { name: escapeHTML(asset.fileName || asset.title) })}</p>
+      <label class="dialog-field">${t("asset.fileName")}
+        <input
+          class="field"
+          type="text"
+          value="${escapeHTML(ui.assetRenameValue)}"
+          data-asset-rename-input
+          data-preserve-focus="asset-rename"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary-button" data-action="assetRenameCancel">${t("common.cancel")}</button>
+        <button class="primary-button" data-action="assetRenameSave" ${ui.assetRenameValue.trim() ? "" : "disabled"}>${t("asset.rename")}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
+export function renderModelRemovalDialog(state, ui) {
+  const removal = ui.modelRemovalDialog;
+  if (!removal) return "";
+  const item = state.models.find(({ descriptor }) => descriptor.id === removal.modelID);
+  if (!item) return "";
+  const location = modelLocation(item.descriptor);
+  return `<div class="dialog-backdrop">
+    <section class="paste-dialog" role="alertdialog" aria-modal="true" aria-labelledby="model-removal-dialog-title">
+      <h2 id="model-removal-dialog-title">${t("model.removeDialogTitle")}</h2>
+      <p>${t("model.removeDialogMessage", { name: escapeHTML(item.descriptor.displayName) })}</p>
+      <p class="dialog-path"><strong>${t("model.removeDialogPath")}</strong><span>${escapeHTML(location)}</span></p>
+      <p>${t("model.removeDialogIrreversible")}</p>
+      <div class="dialog-actions">
+        <button class="secondary-button" data-action="modelRemovalCancel">${t("common.cancel")}</button>
+        <button class="danger-button" data-action="modelRemovalConfirm">${t("model.remove")}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
+export function renderCivitaiTokenDialog(state, ui) {
+  const prompt = ui.civitaiTokenDialog;
+  if (!prompt) return "";
+  const item = state.models.find(({ descriptor }) => descriptor.id === prompt.modelID);
+  const modelName = item?.descriptor.displayName || prompt.modelID;
+  return `<div class="dialog-backdrop">
+    <section class="paste-dialog" role="dialog" aria-modal="true" aria-labelledby="civitai-token-dialog-title">
+      <h2 id="civitai-token-dialog-title">${t("civitai.downloadTokenTitle")}</h2>
+      <p>${t("civitai.downloadTokenMessage", { name: escapeHTML(modelName) })}</p>
+      <label class="dialog-field">${t("settings.civitaiToken")}
+        <input
+          class="field"
+          type="password"
+          value="${escapeHTML(ui.civitaiTokenValue)}"
+          placeholder="${t("settings.civitaiTokenPlaceholder")}"
+          data-civitai-token-prompt
+          data-preserve-focus="civitai-download-token"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </label>
+      <p class="dialog-note">${t("civitai.downloadTokenNote")}</p>
+      <div class="dialog-actions">
+        <button class="secondary-button" data-action="civitaiTokenCancel">${t("common.cancel")}</button>
+        <button class="primary-button" data-action="civitaiTokenConfirm" ${ui.civitaiTokenValue.trim() ? "" : "disabled"}>${t("civitai.startDownload")}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
+function modelLocation(descriptor) {
+  if (!descriptor.localURL) return descriptor.id;
+  try {
+    return decodeURIComponent(new URL(descriptor.localURL).pathname);
+  } catch {
+    return descriptor.localURL;
+  }
+}
+
 export function renderSmallOutputWarningDialog(ui) {
   if (!ui.smallOutputWarning) return "";
   const { width, height } = ui.smallOutputWarning;

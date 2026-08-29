@@ -13,7 +13,8 @@ public final class MiniMaxMusic3GenerationService: MusicRuntimeAdapter, Sendable
             && request.profile.architecture == .externalCLI
             && [
                 HuggingFaceModelInstaller.miniMaxMusic3MLX8BitModelID,
-                HuggingFaceModelInstaller.miniMaxMusic3MLX4BitModelID
+                HuggingFaceModelInstaller.miniMaxMusic3MLX4BitModelID,
+                HuggingFaceModelInstaller.miniMaxMusic3GGUFModelID
             ].contains { request.profile.modelID.caseInsensitiveCompare($0) == .orderedSame }
     }
 
@@ -138,7 +139,23 @@ public final class MiniMaxMusic3GenerationService: MusicRuntimeAdapter, Sendable
 
     private static func validateModel(at modelURL: URL, modelID: String) throws {
         let requiredPaths: [String]
-        if modelID.caseInsensitiveCompare(HuggingFaceModelInstaller.miniMaxMusic3MLX4BitModelID) == .orderedSame {
+        if modelID.caseInsensitiveCompare(HuggingFaceModelInstaller.miniMaxMusic3GGUFModelID) == .orderedSame {
+            requiredPaths = [
+                "config.json",
+                "config/condition_encoder.json",
+                "config/language_model.json",
+                "config/rvq_depth_decoder.json",
+                "config/transformer.json",
+                "config/vocoder.json",
+                "condition_encoder.gguf",
+                "language_model_q4_k.gguf",
+                "rvq_depth_decoder_q8_0.gguf",
+                "tokenizer/tokenizer.json",
+                "tokenizer/tokenizer_config.json",
+                "transformer_q4_k.gguf",
+                "vocoder.gguf"
+            ]
+        } else if modelID.caseInsensitiveCompare(HuggingFaceModelInstaller.miniMaxMusic3MLX4BitModelID) == .orderedSame {
             requiredPaths = [
                 "config.json",
                 "model.safetensors.index.json",

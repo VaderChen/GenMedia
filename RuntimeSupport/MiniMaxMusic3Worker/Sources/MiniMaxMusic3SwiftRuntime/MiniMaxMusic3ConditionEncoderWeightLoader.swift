@@ -66,6 +66,44 @@ public enum MiniMaxMusic3ConditionEncoderWeightLoader {
         )
     }
 
+    public static func loadGGUF(
+        model: MiniMaxMusic3ConditionEncoder,
+        from fileURL: URL
+    ) throws -> MiniMaxMusic3ConditionEncoderWeightLoadReport {
+        let raw = try MiniMaxMusic3GGUFWeightLoader.loadRawArrays(from: fileURL)
+        let expected = Dictionary(
+            uniqueKeysWithValues: model.parameters().flattened().map { ($0.0, $0.1) }
+        )
+        var converted: [String: MLXArray] = [:]
+        for (key, sourceValue) in raw.arrays {
+            let value = key == "proj.weight"
+                ? sourceValue.transposed(0, 2, 1)
+                : sourceValue
+            guard expected[key] != nil else { continue }
+            guard value.shape == expected[key]!.shape else {
+                throw MiniMaxMusic3GGUFError.weightShapeMismatch(
+                    name: key,
+                    expected: expected[key]!.shape,
+                    actual: value.shape
+                )
+            }
+            converted[key] = value
+        }
+        let missing = Set(expected.keys).subtracting(converted.keys).sorted()
+        guard missing.isEmpty else {
+            throw MiniMaxMusic3GGUFError.missingWeights(missing)
+        }
+        try model.update(
+            parameters: ModuleParameters.unflattened(converted),
+            verify: .all
+        )
+        MLX.eval(model)
+        return MiniMaxMusic3ConditionEncoderWeightLoadReport(
+            tensorCount: converted.count,
+            shardNames: [fileURL.lastPathComponent]
+        )
+    }
+
     private static func shardNames(from modelDirectory: URL) throws -> [String] {
         let indexURL = modelDirectory.appendingPathComponent("model.safetensors.index.json")
         guard FileManager.default.fileExists(atPath: indexURL.path) else {

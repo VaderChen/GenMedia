@@ -74,6 +74,98 @@ public enum MiniMaxMusic3VocoderWeightLoader {
         )
     }
 
+    public static func loadGGUF(
+        model: MiniMaxMusic3Vocoder,
+        from fileURL: URL
+    ) throws -> MiniMaxMusic3VocoderWeightLoadReport {
+        let raw = try MiniMaxMusic3GGUFWeightLoader.loadRawArrays(from: fileURL)
+        let expected = Dictionary(
+            uniqueKeysWithValues: model.parameters().flattened().map { ($0.0, $0.1) }
+        )
+        var converted: [String: MLXArray] = [:]
+        for (sourceKey, sourceValue) in raw.arrays {
+            if sourceKey.hasSuffix(".weight_v") {
+                let prefix = String(sourceKey.dropLast(".weight_v".count))
+                guard let weightG = raw.arrays[prefix + ".weight_g"] else {
+                    throw MiniMaxMusic3GGUFError.missingWeights([prefix + ".weight_g"])
+                }
+                let canonicalWeightV: MLXArray
+                let canonicalWeightG: MLXArray
+                if sourceValue.ndim == 2, weightG.ndim == 1, weightG.size == 1 {
+                    canonicalWeightV = sourceValue.reshaped(
+                        1,
+                        sourceValue.shape[0],
+                        sourceValue.shape[1]
+                    )
+                    canonicalWeightG = weightG.reshaped(1, 1, 1)
+                } else {
+                    canonicalWeightV = sourceValue
+                    canonicalWeightG = weightG
+                }
+                let normalized = canonicalWeightV * canonicalWeightG
+                    / sqrt(canonicalWeightV.square().sum(axes: [1, 2], keepDims: true))
+                let key = prefix + ".weight"
+                let value = prefix.hasSuffix(".conv_t1")
+                    ? normalized.transposed(1, 2, 0)
+                    : normalized.transposed(0, 2, 1)
+                guard expected[key] != nil else { continue }
+                guard value.shape == expected[key]!.shape else {
+                    throw MiniMaxMusic3GGUFError.weightShapeMismatch(
+                        name: key,
+                        expected: expected[key]!.shape,
+                        actual: value.shape
+                    )
+                }
+                converted[key] = value
+            } else if sourceKey.hasSuffix(".weight_g") {
+                continue
+            } else if sourceKey.hasSuffix(".alpha") {
+                let key = sourceKey
+                let value: MLXArray
+                if sourceValue.ndim == 2, sourceValue.shape[1] == 1 {
+                    value = sourceValue.reshaped(1, 1, sourceValue.shape[0])
+                } else {
+                    value = sourceValue
+                }
+                guard expected[key] != nil else { continue }
+                guard value.shape == expected[key]!.shape else {
+                    throw MiniMaxMusic3GGUFError.weightShapeMismatch(
+                        name: key,
+                        expected: expected[key]!.shape,
+                        actual: value.shape
+                    )
+                }
+                converted[key] = value
+            } else if expected[sourceKey] != nil {
+                let value = sourceValue.ndim == 3
+                    ? sourceValue.transposed(0, 2, 1)
+                    : sourceValue
+                guard value.shape == expected[sourceKey]!.shape else {
+                    throw MiniMaxMusic3GGUFError.weightShapeMismatch(
+                        name: sourceKey,
+                        expected: expected[sourceKey]!.shape,
+                        actual: value.shape
+                    )
+                }
+                converted[sourceKey] = value
+            }
+        }
+        let missing = Set(expected.keys).subtracting(converted.keys).sorted()
+        guard missing.isEmpty else {
+            throw MiniMaxMusic3GGUFError.missingWeights(missing)
+        }
+        try model.update(
+            parameters: ModuleParameters.unflattened(converted),
+            verify: .all
+        )
+        MLX.eval(model)
+        return MiniMaxMusic3VocoderWeightLoadReport(
+            tensorCount: converted.count,
+            shardNames: [fileURL.lastPathComponent],
+            transposedAlphaTensorCount: 0
+        )
+    }
+
     private static func vocoderShardNames(from modelDirectory: URL) throws -> [String] {
         let indexURL = modelDirectory.appendingPathComponent("model.safetensors.index.json")
         guard FileManager.default.fileExists(atPath: indexURL.path) else {

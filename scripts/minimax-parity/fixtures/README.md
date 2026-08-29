@@ -14,6 +14,11 @@
 | `music3-2chunks.safetensors` | 210 | 2 | `[1, 2, 370176]` | `36.03255579 dB` |
 | `music3-3chunks.safetensors` | 310 | 3 | `[1, 2, 546816]` | `37.07690447 dB` |
 
+兩個 fixture 均固定保存為 BF16 計算路徑；最終 `audio` 張量仍是 FP32。
+`CHUNK_FRAMES = 200` 作用於 autoregressive `frame_hiddens`，不是 latent
+chunk 長度：完整 chunk 為 689 latent frames，最後的部分 chunk 為 378 latent
+frames。
+
 使用 Swift PoC 產生 actual 後比較：
 
 ```bash

@@ -21,5 +21,8 @@ cert/
 *.p12
 *.p8
 *.provisionprofile
+
+RuntimeSupport/mlx-swift-0.31.6.metallib
+RuntimeSupport/mlx-swift-0.31.6.metallib.sha256
 package-dmg.sh
 package-dmg.command

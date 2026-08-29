@@ -1,5 +1,5 @@
-// Block 5 will invoke this runtime as an independent Swift subprocess.
-// The app integration will replace the Python process boundary without changing this runtime's API.
+// The app invokes this runtime as an independent Swift subprocess.
+// Keep the process boundary stable so the App integration does not need a second audio API.
 
 import Foundation
 import MLX

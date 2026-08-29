@@ -159,6 +159,45 @@ struct WorkflowGraphTests {
         #expect(result.loras.first?.displayName == "example-style")
     }
 
+    @Test func localDiscoveryRecognizesLTXGGUFWeight() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("genimage-ltx-gguf-\(UUID().uuidString)", isDirectory: true)
+        let directory = root.appendingPathComponent(
+            "ltx-video-0.9.6-distilled-gguf",
+            isDirectory: true
+        )
+        let weightURL = directory.appendingPathComponent(
+            "ltxv-2b-0.9.6-distilled-04-25-Q4_K_M.gguf"
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: weightURL.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: weightURL)
+        try handle.seek(toOffset: 1_330_049_535)
+        try handle.write(contentsOf: Data([0]))
+        try handle.close()
+        let companionPaths = [
+            "LTX-Video-0.9.6-VAE-BF16.safetensors",
+            "text_encoder/config.json",
+            "text_encoder/t5-v1_1-xxl-encoder-Q4_K_M.gguf",
+            "tokenizer/spiece.model"
+        ]
+        for relativePath in companionPaths {
+            let companionURL = directory.appendingPathComponent(relativePath)
+            try FileManager.default.createDirectory(
+                at: companionURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data("fixture".utf8).write(to: companionURL)
+        }
+
+        let discovered = LocalModelDiscovery.discover(at: root)
+
+        #expect(discovered.models.contains {
+            $0.id == "city96/LTX-Video-0.9.6-distilled-gguf@Q4_K_M"
+        })
+    }
+
     @Test func recipeRejectsOutOfRangeLoRAScale() {
         var recipe = GenerationRecipe(prompt: "test", modelID: "test")
         recipe.lora = LoRASelection(

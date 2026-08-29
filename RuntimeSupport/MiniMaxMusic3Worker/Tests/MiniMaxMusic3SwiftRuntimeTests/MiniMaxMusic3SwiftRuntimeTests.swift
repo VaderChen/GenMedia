@@ -3,6 +3,23 @@ import Testing
 @testable import MiniMaxMusic3SwiftRuntime
 
 struct MiniMaxMusic3SwiftRuntimeTests {
+    @Test func ggufQuantizationStrategyMatchesMLXPolicy() {
+        #expect(
+            MiniMaxMusic3GGUFQuantizationStrategy.groupStrategy
+                == MiniMaxMusic3GGUFGroupStrategy(groupSize: 64, mode: .affine)
+        )
+        #expect(MiniMaxMusic3GGUFQuantizationStrategy.groupSize == 64)
+        #expect(MiniMaxMusic3GGUFQuantizationStrategy.mode == .affine)
+        #expect(MiniMaxMusic3GGUFQuantizationStrategy.targetBits(for: "Q2_K") == 4)
+        #expect(MiniMaxMusic3GGUFQuantizationStrategy.targetBits(for: "Q4_K") == 4)
+        #expect(MiniMaxMusic3GGUFQuantizationStrategy.targetBits(for: "Q5_K") == 8)
+        #expect(MiniMaxMusic3GGUFQuantizationStrategy.targetBits(for: "Q8_0") == 8)
+        #expect(MiniMaxMusic3GGUFQuantizationStrategy.targetBits(for: "BF16") == nil)
+        #expect(MiniMaxMusic3GGUFQuantizationStrategy.isSourcePrecision("F16"))
+        #expect(MiniMaxMusic3GGUFQuantizationStrategy.isSourcePrecision("BF16"))
+        #expect(MiniMaxMusic3GGUFQuantizationStrategy.isSourcePrecision("F32"))
+    }
+
     @Test func conditionEncoderConfigurationMatchesCheckpoint() throws {
         let configuration = MiniMaxMusic3ConditionEncoderConfiguration.music3
 

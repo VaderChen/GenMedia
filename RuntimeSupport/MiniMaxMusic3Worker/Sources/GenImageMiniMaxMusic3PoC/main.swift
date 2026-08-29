@@ -47,20 +47,15 @@ private func comparisonThreshold(
 // Final audio is judged by error energy rather than the single worst sample.
 // The relative max diff remains the primary metric for deterministic tensors.
 private func audioSNRThreshold(
-    referenceDType: DType,
-    actualDType: DType,
     declaredInputDType: String?
-) -> (value: Double, label: String) {
+) -> (value: Double, label: String)? {
     switch declaredInputDType {
     case "bfloat16":
-        return (30.0, "bf16 audio")
+        return (30.0, "bf16 compute")
     case "float32":
-        return (80.0, "fp32 audio")
+        return (80.0, "fp32 compute")
     default:
-        if referenceDType == .bfloat16 || actualDType == .bfloat16 {
-            return (30.0, "bf16 audio")
-        }
-        return (80.0, "fp32 audio")
+        return nil
     }
 }
 
@@ -1153,7 +1148,7 @@ private func runCompare(_ arguments: Arguments) throws {
         throw PoCError.missingArgument("--actual")
     }
     let (referenceArrays, referenceMetadata) = try MLX.loadArraysAndMetadata(url: referenceURL)
-    let (actualArrays, actualMetadata) = try MLX.loadArraysAndMetadata(url: actualURL)
+    let (actualArrays, _) = try MLX.loadArraysAndMetadata(url: actualURL)
     let reference = try tensor(arguments.key, from: referenceArrays, url: referenceURL)
     let actual = try tensor(arguments.key, from: actualArrays, url: actualURL)
     guard reference.shape == actual.shape else {
@@ -1209,18 +1204,16 @@ private func runCompare(_ arguments: Arguments) throws {
     let referenceNorm = sqrt(referenceSquaredSum)
     let actualNorm = sqrt(actualSquaredSum)
     let meanAbsDiff = finiteCount == 0 ? 0 : sumAbsDiff / Double(finiteCount)
-    let declaredInputDType = referenceMetadata["input_dtype"] ?? actualMetadata["input_dtype"]
+    let declaredInputDType = referenceMetadata["input_dtype"]
     let threshold = comparisonThreshold(
         referenceDType: reference.dtype,
         actualDType: actual.dtype,
         declaredInputDType: declaredInputDType
     )
     let finalAudio = arguments.key == "audio" || arguments.key == "waveform"
-    let snrThreshold = audioSNRThreshold(
-        referenceDType: reference.dtype,
-        actualDType: actual.dtype,
-        declaredInputDType: declaredInputDType
-    )
+    let snrThreshold = finalAudio
+        ? audioSNRThreshold(declaredInputDType: declaredInputDType)
+        : nil
     let snrDB: Double
     if nonFiniteMismatchCount > 0 {
         snrDB = -.infinity
@@ -1252,12 +1245,16 @@ private func runCompare(_ arguments: Arguments) throws {
     print(String(format: "cosine similarity: %.10g", cosine))
     print("non-finite mismatches: \(nonFiniteMismatchCount)")
     if finalAudio {
-        print(String(
-            format: "SNR threshold: %.1f dB [%@] (%@)",
-            snrThreshold.value,
-            snrThreshold.label,
-            nonFiniteMismatchCount == 0 && snrDB >= snrThreshold.value ? "PASS" : "FAIL"
-        ))
+        if let snrThreshold {
+            print(String(
+                format: "SNR threshold: %.1f dB [%@] (%@)",
+                snrThreshold.value,
+                snrThreshold.label,
+                nonFiniteMismatchCount == 0 && snrDB >= snrThreshold.value ? "PASS" : "FAIL"
+            ))
+        } else {
+            print("SNR threshold: unavailable [input_dtype metadata missing or unsupported] (UNDETERMINED)")
+        }
         print("relative max diff: auxiliary for final audio")
     } else {
         print(String(

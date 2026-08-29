@@ -173,6 +173,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
     public var profileRevision: Int
     public var notes: String
     public var isBuiltIn: Bool
+    public var supportsGeneration: Bool
 
     public init(
         id: UUID = UUID(),
@@ -186,7 +187,8 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         loras: [ProfileLoRAConfiguration] = [],
         profileRevision: Int = 1,
         notes: String = "",
-        isBuiltIn: Bool = false
+        isBuiltIn: Bool = false,
+        supportsGeneration: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -200,6 +202,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         self.profileRevision = profileRevision
         self.notes = notes
         self.isBuiltIn = isBuiltIn
+        self.supportsGeneration = supportsGeneration
     }
 
     public var requiredModelIDs: [String] {
@@ -221,6 +224,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         case profileRevision
         case notes
         case isBuiltIn
+        case supportsGeneration
     }
 
     public init(from decoder: Decoder) throws {
@@ -238,6 +242,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         profileRevision = try container.decodeIfPresent(Int.self, forKey: .profileRevision) ?? 1
         notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         isBuiltIn = try container.decodeIfPresent(Bool.self, forKey: .isBuiltIn) ?? false
+        supportsGeneration = try container.decodeIfPresent(Bool.self, forKey: .supportsGeneration) ?? true
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -254,6 +259,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         try container.encode(profileRevision, forKey: .profileRevision)
         try container.encode(notes, forKey: .notes)
         try container.encode(isBuiltIn, forKey: .isBuiltIn)
+        try container.encode(supportsGeneration, forKey: .supportsGeneration)
     }
 }
 
