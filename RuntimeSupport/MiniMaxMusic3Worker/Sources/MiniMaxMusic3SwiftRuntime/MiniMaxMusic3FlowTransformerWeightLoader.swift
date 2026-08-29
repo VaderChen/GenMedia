@@ -68,6 +68,29 @@ public enum MiniMaxMusic3FlowTransformerWeightLoader {
         )
     }
 
+    public static func loadGGUF(
+        model: MiniMaxMusic3FlowTransformer,
+        from fileURL: URL
+    ) throws -> MiniMaxMusic3FlowTransformerWeightLoadReport {
+        let report = try MiniMaxMusic3GGUFWeightLoader.load(
+            model: model,
+            from: fileURL,
+            valueTransform: { name, value in
+                switch name {
+                case "preprocess_conv.weight", "postprocess_conv.weight":
+                    return value.transposed(0, 2, 1)
+                default:
+                    return value
+                }
+            }
+        )
+        return MiniMaxMusic3FlowTransformerWeightLoadReport(
+            tensorCount: report.parameterCount,
+            quantizedModuleCount: report.quantizedTensorCount,
+            shardNames: [fileURL.lastPathComponent]
+        )
+    }
+
     private static func transformerShardNames(from modelDirectory: URL) throws -> [String] {
         let indexURL = modelDirectory.appendingPathComponent("model.safetensors.index.json")
         guard FileManager.default.fileExists(atPath: indexURL.path) else {

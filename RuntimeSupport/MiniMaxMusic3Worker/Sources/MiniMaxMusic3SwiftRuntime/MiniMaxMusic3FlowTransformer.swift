@@ -247,38 +247,37 @@ private final class MiniMaxMusic3FlowAttention: Module {
     private let headDimension: Int
     private let innerDimension: Int
 
-    init(configuration: MiniMaxMusic3FlowTransformerConfiguration) {
+    init(
+        configuration: MiniMaxMusic3FlowTransformerConfiguration,
+        quantizationBits: Int?
+    ) {
         heads = configuration.numAttentionHeads
         headDimension = configuration.attentionHeadDim
         innerDimension = configuration.innerDim
-        self._query.wrappedValue = QuantizedLinear(
+        self._query.wrappedValue = miniMaxMusic3Linear(
             configuration.innerDim,
             configuration.innerDim,
             bias: false,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
-        self._key.wrappedValue = QuantizedLinear(
+        self._key.wrappedValue = miniMaxMusic3Linear(
             configuration.innerDim,
             configuration.innerDim,
             bias: false,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
-        self._value.wrappedValue = QuantizedLinear(
+        self._value.wrappedValue = miniMaxMusic3Linear(
             configuration.innerDim,
             configuration.innerDim,
             bias: false,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
         self._output.wrappedValue = [
-            QuantizedLinear(
+            miniMaxMusic3Linear(
                 configuration.innerDim,
                 configuration.innerDim,
                 bias: false,
-                groupSize: 64,
-                bits: 4
+                quantizationBits: quantizationBits
             )
         ]
         super.init()
@@ -322,21 +321,25 @@ private final class MiniMaxMusic3FlowTransformerBlock: Module {
     @ModuleInfo(key: "ff_in") private var feedForwardIn: Linear
     @ModuleInfo(key: "ff_out") private var feedForwardOut: Linear
 
-    init(configuration: MiniMaxMusic3FlowTransformerConfiguration) {
+    init(
+        configuration: MiniMaxMusic3FlowTransformerConfiguration,
+        quantizationBits: Int?
+    ) {
         self._norm1.wrappedValue = LayerNorm(dimensions: configuration.innerDim)
-        self._attention.wrappedValue = MiniMaxMusic3FlowAttention(configuration: configuration)
+        self._attention.wrappedValue = MiniMaxMusic3FlowAttention(
+            configuration: configuration,
+            quantizationBits: quantizationBits
+        )
         self._norm2.wrappedValue = LayerNorm(dimensions: configuration.innerDim)
-        self._feedForwardIn.wrappedValue = QuantizedLinear(
+        self._feedForwardIn.wrappedValue = miniMaxMusic3Linear(
             configuration.innerDim,
             configuration.ffInnerDim * 2,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
-        self._feedForwardOut.wrappedValue = QuantizedLinear(
+        self._feedForwardOut.wrappedValue = miniMaxMusic3Linear(
             configuration.ffInnerDim,
             configuration.innerDim,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
         super.init()
     }
@@ -363,7 +366,10 @@ public final class MiniMaxMusic3FlowTransformer: Module {
     @ModuleInfo(key: "proj_out") private var outputProjection: Linear
     @ModuleInfo(key: "postprocess_conv") private var postprocessConvolution: Conv1d
 
-    public init(configuration: MiniMaxMusic3FlowTransformerConfiguration = .music3) {
+    public init(
+        configuration: MiniMaxMusic3FlowTransformerConfiguration = .music3,
+        quantizationBits: Int? = 4
+    ) {
         precondition((try? configuration.validate()) != nil)
         self.configuration = configuration
         self._timeProjection.wrappedValue = MiniMaxMusic3FourierEmbedding(
@@ -379,22 +385,23 @@ public final class MiniMaxMusic3FlowTransformer: Module {
             kernelSize: 1,
             bias: false
         )
-        self._inputProjection.wrappedValue = QuantizedLinear(
+        self._inputProjection.wrappedValue = miniMaxMusic3Linear(
             configuration.concatChannels,
             configuration.innerDim,
             bias: false,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
         self._blocks.wrappedValue = (0..<configuration.numLayers).map { _ in
-            MiniMaxMusic3FlowTransformerBlock(configuration: configuration)
+            MiniMaxMusic3FlowTransformerBlock(
+                configuration: configuration,
+                quantizationBits: quantizationBits
+            )
         }
-        self._outputProjection.wrappedValue = QuantizedLinear(
+        self._outputProjection.wrappedValue = miniMaxMusic3Linear(
             configuration.innerDim,
             configuration.inChannels,
             bias: false,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
         self._postprocessConvolution.wrappedValue = Conv1d(
             inputChannels: configuration.inChannels,

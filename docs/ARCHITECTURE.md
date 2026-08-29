@@ -125,15 +125,15 @@ Web UI 只能透過 Bridge 使用本機能力，不可直接讀取任意檔案�
 
 Upscale 由 `CoreMLUpscaleService` 執行 Real-ESRGAN 512 tile 與 4× 拼接。
 
-影片由 `LTXVideoGenerationService` 呼叫 `ltx-2-mlx generate`：
+影片由 `LTXVideoGenerationService` 啟動 App 隨附的 `GenImageLTXVideoWorker` Swift 子行程：
 
 - 文生影與圖生影共用 `VideoGenerating` 與 `VideoGenerationRequest`。
 - Swift 驗證 Profile、模型路徑、尺寸、幀數、FPS 與輸出數量。
 - LTX-2.3 額外要求幀數符合 `8n+1`。
-- 外部 Process 支援 Task cancellation、日誌錯誤回報與百分比進度擷取。
+- JSON request 與逐階段 progress event 經由既有 `RuntimeProcess` 執行，支援 Task cancellation、日誌錯誤回報與百分比進度擷取。
 - LTX LoRA 控制影片由共用 FFmpeg 層以 VideoToolbox H.264 建立，不依賴 GPL `libx264`。
 - MP4 輸出以 `generatedVideo` 資產加入工作區，Web UI 使用原生 `<video>` 播放。
-- Runtime 可透過 `GENIMAGE_LTX_RUNTIME` 或標準安裝位置替換，不將 Python 實作耦合進 UI 或 AppStore。
+- Worker 編譯時放入 App Bundle 的 `Contents/Helpers`；開發建置可用 `GENIMAGE_LTX_WORKER` 覆寫，正式流程不依賴外部 Runtime。
 
 音樂由 `MusicGenerationRouter` 依 `MusicRuntimeAdapter.supports` 分派，不在 Router 內集中硬編碼模型 ID：
 

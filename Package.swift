@@ -13,6 +13,7 @@ let package = Package(
         .executable(name: "GenImageMCP", targets: ["GenImageMCP"]),
         .executable(name: "ACEStepSwiftPoC", targets: ["ACEStepSwiftPoC"]),
         .library(name: "GenImageCore", targets: ["GenImageCore"]),
+        .library(name: "GenImageGGUF", targets: ["GenImageGGUF"]),
         .library(name: "GenImageRuntime", targets: ["GenImageRuntime"]),
         .library(name: "ACEStepSwiftRuntime", targets: ["ACEStepSwiftRuntime"]),
         .library(name: "GenImageMCPServer", targets: ["GenImageMCPServer"])
@@ -46,6 +47,12 @@ let package = Package(
     targets: [
         .target(name: "GenImageCore"),
         .target(
+            name: "GenImageGGUF",
+            dependencies: [
+                .product(name: "MLX", package: "mlx-swift")
+            ]
+        ),
+        .target(
             name: "ACEStepSwiftRuntime",
             dependencies: [
                 .product(name: "ZImage", package: "z-image.swift"),
@@ -62,12 +69,13 @@ let package = Package(
         ),
         .executableTarget(
             name: "GenImageDoctor",
-            dependencies: ["GenImageCore", "GenImageRuntime"]
+            dependencies: ["GenImageCore", "GenImageRuntime", "GenImageGGUF"]
         ),
         .target(
             name: "GenImageRuntime",
             dependencies: [
                 "GenImageCore",
+                "GenImageGGUF",
                 "ACEStepSwiftRuntime",
                 .product(name: "ZImage", package: "z-image.swift"),
                 .product(name: "MLXVLM", package: "mlx-swift-lm"),
@@ -107,6 +115,13 @@ let package = Package(
         .testTarget(
             name: "GenImageRuntimeTests",
             dependencies: ["GenImageCore", "GenImageRuntime"]
+        ),
+        .testTarget(
+            name: "GenImageGGUFTests",
+            dependencies: [
+                "GenImageGGUF",
+                .product(name: "MLX", package: "mlx-swift")
+            ]
         ),
         .testTarget(
             name: "GenImageMCPServerTests",

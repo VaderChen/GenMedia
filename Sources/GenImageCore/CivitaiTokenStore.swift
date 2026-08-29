@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 /// Secure storage for the Civitai API token used by model downloads.
@@ -8,14 +9,18 @@ import Security
 public enum CivitaiTokenStore {
     private static let service = "com.genimage.civitai"
     private static let account = "api-token"
+    private static let configuredMarkerKey = "com.genimage.civitai.token-configured"
 
     public static func token() -> String? {
+        let authenticationContext = LAContext()
+        authenticationContext.interactionNotAllowed = true
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationContext as String: authenticationContext
         ]
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
@@ -29,11 +34,38 @@ public enum CivitaiTokenStore {
             }
             return nil
         }
+        UserDefaults.standard.set(true, forKey: configuredMarkerKey)
         return storedToken
     }
 
     public static func isConfigured() -> Bool {
-        token() != nil
+        if UserDefaults.standard.bool(forKey: configuredMarkerKey) {
+            return true
+        }
+        if let environmentToken = ProcessInfo.processInfo.environment["CIVITAI_TOKEN"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !environmentToken.isEmpty {
+            return true
+        }
+
+        let authenticationContext = LAContext()
+        authenticationContext.interactionNotAllowed = true
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnAttributes as String: true,
+            kSecReturnData as String: false,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationContext as String: authenticationContext
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecSuccess {
+            UserDefaults.standard.set(true, forKey: configuredMarkerKey)
+            return true
+        }
+        return false
     }
 
     public static func save(_ rawToken: String) throws {
@@ -62,6 +94,7 @@ public enum CivitaiTokenStore {
         } else if status != errSecSuccess {
             throw CivitaiTokenStoreError.keychainStatus(status)
         }
+        UserDefaults.standard.set(true, forKey: configuredMarkerKey)
     }
 
     public static func delete() throws {
@@ -74,6 +107,7 @@ public enum CivitaiTokenStore {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw CivitaiTokenStoreError.keychainStatus(status)
         }
+        UserDefaults.standard.removeObject(forKey: configuredMarkerKey)
     }
 }
 

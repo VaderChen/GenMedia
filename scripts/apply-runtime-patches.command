@@ -152,9 +152,11 @@ for index in {1..${#patch_files}}; do
   fi
 
   print "正在套用 $description…"
-  # -N 已套用的 hunk 直接略過、-t 不互動詢問、-F 0 禁止模糊比對（避免貼到錯誤的位置）。
+  # -N 已套用的 hunk 直接略過、-t 不互動詢問。
+  # 不要加 -F 0：它連合法的行號偏移都會擋掉（實測 Z-Image 的 patch 只差 1 行就被拒）。
+  # 防止貼到錯誤位置靠的是後置的標記驗證，不是禁止偏移。
   # 舊版流程用 stdin 餵 patch，遇到 "Assume -R?" 會把 patch 內容當成回答，可能反向套用。
-  if ! /usr/bin/patch -p1 -d "$checkout" -i "$patch_file" -N -t -F 0 -V none; then
+  if ! /usr/bin/patch -p1 -d "$checkout" -i "$patch_file" -N -t -V none; then
     fail "$description 套用失敗（$checkout_dir）。" \
       "若 $pin_identity 已升級，請重新產生 Patches/${patch_files[$index]}。"
   fi

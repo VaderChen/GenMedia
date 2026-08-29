@@ -1,0 +1,36 @@
+{
+  "stage": "transformer_block_2",
+  "reference_script": "scripts/ltx-parity/dump.py",
+  "runner": "scripts/ltx-parity/run-transformer-matrix.command",
+  "weights_argument": "relative_to_model_dir",
+  "effective_input_dtype": "bfloat16",
+  "cases": [
+    {
+      "name": "small",
+      "video_grid": [4, 8, 8],
+      "video_tokens": 256,
+      "audio_tokens": 256,
+      "text_tokens": 64
+    },
+    {
+      "name": "medium",
+      "video_grid": [8, 16, 16],
+      "video_tokens": 2048,
+      "audio_tokens": 256,
+      "text_tokens": 64
+    },
+    {
+      "name": "large",
+      "video_grid": [16, 16, 32],
+      "video_tokens": 8192,
+      "audio_tokens": 256,
+      "text_tokens": 64
+    }
+  ],
+  "tiled": {
+    "frame_tiles": 2,
+    "frame_overlap": 1,
+    "height_tiles": 1,
+    "width_tiles": 1
+  }
+}

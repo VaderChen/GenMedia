@@ -1,5 +1,6 @@
 import Foundation
 import GenImageCore
+import GenImageGGUF
 import GenImageRuntime
 
 @main
@@ -21,6 +22,10 @@ struct GenImageDoctor {
         }
         if arguments.first == "describe-test" {
             await runDescribeTest(arguments: Array(arguments.dropFirst()))
+            return
+        }
+        if arguments.first == "gguf-test" {
+            runGGUFTest(arguments: Array(arguments.dropFirst()))
             return
         }
 
@@ -111,10 +116,135 @@ struct GenImageDoctor {
         GenImageDoctor upscale-test <model.mlmodel> <input-image> <output-directory>
         GenImageDoctor generate-test <model-directory> <output-directory> [prompt]
         GenImageDoctor describe-test <model-directory> <input-image> [language-code]
+        GenImageDoctor gguf-test [model-root]
 
         驗證 GenImage 可辨識的本機模型與自動產生的 Profiles。
         未提供 model-root 時，依序使用 GENIMAGE_MODEL_ROOT 與內建預設路徑。
         """)
+    }
+
+    private static func runGGUFTest(arguments: [String]) {
+        let explicitPaths = arguments.filter { !$0.hasPrefix("-") }
+        let rootURL = explicitPaths.first.map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        } ?? ModelStorage.rootURL(explicitPath: nil)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            FileHandle.standardError.write(Data("找不到 GGUF 模型目錄：\(rootURL.path)\n".utf8))
+            Foundation.exit(2)
+        }
+
+        let reports = GGUFDiagnosticRunner.run(modelRoot: rootURL)
+        if arguments.contains("--json") {
+            outputGGUFJSON(rootURL: rootURL, reports: reports)
+        } else {
+            outputGGUFText(rootURL: rootURL, reports: reports)
+        }
+        guard reports.allSatisfy(\.structurePassed) else {
+            Foundation.exit(5)
+        }
+    }
+
+    private static func outputGGUFText(rootURL: URL, reports: [GGUFDiagnosticReport]) {
+        print("GenImage GGUF Diagnostic")
+        print("root: \(rootURL.path)")
+        for report in reports {
+            let status = report.structurePassed ? "PASS" : "FAIL"
+            print("\n[\(status)] \(report.spec.displayName)")
+            print("  model: \(report.spec.modelID)")
+            print("  weight: \(report.weightURL.path)")
+            if let fileSize = report.fileSize {
+                print("  fileSize: \(ByteCountFormatter.string(fromByteCount: Int64(fileSize), countStyle: .binary))")
+            }
+            if let inspection = report.inspection {
+                let quantization = inspection.quantizationCounts
+                    .sorted { $0.key < $1.key }
+                    .map { "\($0.key)=\($0.value)" }
+                    .joined(separator: ", ")
+                let storage = inspection.storageTypeCounts
+                    .sorted { $0.key.rawValue < $1.key.rawValue }
+                    .map { "\($0.key.rawValue)=\($0.value)" }
+                    .joined(separator: ", ")
+                print("  header: v\(inspection.version), alignment=\(inspection.alignment), dataOffset=\(inspection.dataOffset)")
+                print("  tensors: \(inspection.tensorCount)")
+                print("  sourceTypes: \(quantization)")
+                print("  storagePlan: groupSize=64, \(storage)")
+                let unsupported = inspection.unsupportedTypes.isEmpty
+                    ? "none"
+                    : inspection.unsupportedTypes.joined(separator: ", ")
+                print("  unsupported: \(unsupported)")
+            }
+            if let errorMessage = report.errorMessage {
+                print("  error: \(errorMessage)")
+            }
+            if report.missingCompanionPaths.isEmpty {
+                print("  companions: complete")
+            } else {
+                print("  missingCompanions: \(report.missingCompanionPaths.joined(separator: ", "))")
+            }
+            let generationStatus = report.generationReady ? "ready" : "blocked"
+            print("  generation: \(generationStatus)")
+            if !report.generationReady {
+                print("  blocker: \(report.spec.runtimeBlocker)")
+            }
+        }
+    }
+
+    private static func outputGGUFJSON(rootURL: URL, reports: [GGUFDiagnosticReport]) {
+        struct JSONReport: Encodable {
+            struct Item: Encodable {
+                let modelID: String
+                let displayName: String
+                let modelDirectory: String
+                let weightPath: String
+                let fileSize: UInt64?
+                let structurePassed: Bool
+                let generationReady: Bool
+                let tensorCount: Int?
+                let sourceQuantizationCounts: [String: Int]
+                let storageTypeCounts: [String: Int]
+                let unsupportedTypes: [String]
+                let missingCompanions: [String]
+                let error: String?
+                let blocker: String
+            }
+
+            let root: String
+            let models: [Item]
+        }
+
+        let items = reports.map { report in
+            let inspection = report.inspection
+            return JSONReport.Item(
+                modelID: report.spec.modelID,
+                displayName: report.spec.displayName,
+                modelDirectory: report.modelDirectory.path,
+                weightPath: report.weightURL.path,
+                fileSize: report.fileSize,
+                structurePassed: report.structurePassed,
+                generationReady: report.generationReady,
+                tensorCount: inspection?.tensorCount,
+                sourceQuantizationCounts: inspection?.quantizationCounts ?? [:],
+                storageTypeCounts: Dictionary(uniqueKeysWithValues: (inspection?.storageTypeCounts ?? [:]).map {
+                    ($0.key.rawValue, $0.value)
+                }),
+                unsupportedTypes: inspection?.unsupportedTypes ?? [],
+                missingCompanions: report.missingCompanionPaths,
+                error: report.errorMessage,
+                blocker: report.spec.runtimeBlocker
+            )
+        }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            let data = try encoder.encode(JSONReport(root: rootURL.path, models: items))
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data("\n".utf8))
+        } catch {
+            FileHandle.standardError.write(Data("無法輸出 GGUF JSON：\(error.localizedDescription)\n".utf8))
+            Foundation.exit(4)
+        }
     }
 
     private static func runUpscaleTest(arguments: [String]) async {

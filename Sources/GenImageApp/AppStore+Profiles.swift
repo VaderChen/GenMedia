@@ -15,6 +15,10 @@ extension AppStore {
         guard let profile = profiles.first(where: { $0.id == profileID && $0.capability == capability }) else {
             return
         }
+        guard profile.supportsGeneration else {
+            statusMessage = "「\(profile.name)」目前僅供下載，尚未接入可用的生成 Runtime。"
+            return
+        }
         let missingModels = missingProfileModels(profile)
         guard missingModels.isEmpty else {
             statusMessage = "請先下載並驗證「\(profile.name)」的相關模型：\(missingModels.map(\.displayName).joined(separator: "、"))。"
@@ -244,7 +248,8 @@ extension AppStore {
             loras: profile.loras,
             profileRevision: 1,
             notes: profile.notes,
-            isBuiltIn: false
+            isBuiltIn: false,
+            supportsGeneration: profile.supportsGeneration
         )
         profiles.append(copy)
         selectProfile(copy.id, for: copy.capability)

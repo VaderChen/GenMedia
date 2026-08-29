@@ -56,7 +56,7 @@ public final class MiniMaxMusic3LanguageModel {
     private let tokenEmbeddingWeight: MLXArray
     private let languageHeadWeight: MLXArray
 
-    public init(modelDirectory: URL) throws {
+    public convenience init(modelDirectory: URL) throws {
         let configurationURL = modelDirectory.appendingPathComponent("config.json")
         guard let data = try? Data(contentsOf: configurationURL) else {
             throw MiniMaxMusic3LanguageModelError.missingFile(configurationURL)
@@ -73,6 +73,48 @@ public final class MiniMaxMusic3LanguageModel {
             model: model,
             from: modelDirectory
         )
+        try self.init(model: model, report: report)
+    }
+
+    public convenience init(ggufModelDirectory: URL) throws {
+        let configurationURL = ggufModelDirectory
+            .appendingPathComponent("config", isDirectory: true)
+            .appendingPathComponent("language_model.json")
+        guard let data = try? Data(contentsOf: configurationURL) else {
+            throw MiniMaxMusic3LanguageModelError.missingFile(configurationURL)
+        }
+        let configuration: Qwen3Configuration
+        do {
+            configuration = try JSONDecoder().decode(Qwen3Configuration.self, from: data)
+        } catch {
+            throw MiniMaxMusic3LanguageModelError.invalidConfiguration(configurationURL)
+        }
+        let model = Qwen3Model(configuration)
+        let weightURL = try MiniMaxMusic3GGUFModel.componentURL(
+            for: .languageModel,
+            at: ggufModelDirectory
+        )
+        let quantizationBits = try MiniMaxMusic3GGUFModel.quantizationBits(
+            for: weightURL,
+            component: .languageModel
+        )
+        let ggufReport = try MiniMaxMusic3LanguageModelWeightLoader.loadGGUF(
+            model: model,
+            from: weightURL,
+            quantizationBits: quantizationBits
+        )
+        let report = MiniMaxMusic3LanguageModelLoadReport(
+            tensorCount: ggufReport.parameterCount,
+            quantizedModuleCount: ggufReport.quantizedTensorCount,
+            shardNames: [weightURL.lastPathComponent]
+        )
+        try self.init(model: model, report: report)
+    }
+
+    private init(
+        model: Qwen3Model,
+        report: MiniMaxMusic3LanguageModelLoadReport
+    ) throws {
         guard let originalTokenEmbedding = model.model.children()[unwrapping: "embed_tokens"] as? Embedding else {
             throw MiniMaxMusic3LanguageModelError.unsupportedInterface(
                 "Qwen3ModelInner 沒有可替換的 embed_tokens。"
@@ -191,9 +233,9 @@ public enum MiniMaxMusic3LanguageModelWeightLoader {
         var quantizedPaths = Set<String>()
         quantize(
             model: model,
-            groupSize: 64,
+            groupSize: MiniMaxMusic3GGUFQuantizationStrategy.groupSize,
             bits: 4,
-            mode: .affine,
+            mode: MiniMaxMusic3GGUFQuantizationStrategy.mode,
             filter: { path, module in
                 guard module is Linear else { return false }
                 guard path.hasPrefix("model.layers.") else { return false }
@@ -258,6 +300,36 @@ public enum MiniMaxMusic3LanguageModelWeightLoader {
             quantizedModuleCount: quantizedPaths.count,
             shardNames: shardNames
         )
+    }
+
+    public static func loadGGUF(
+        model: Qwen3Model,
+        from fileURL: URL,
+        quantizationBits: Int?
+    ) throws -> MiniMaxMusic3GGUFLoadReport {
+        if let quantizationBits {
+            quantize(
+                model: model,
+                groupSize: MiniMaxMusic3GGUFQuantizationStrategy.groupSize,
+                bits: quantizationBits,
+                mode: MiniMaxMusic3GGUFQuantizationStrategy.mode,
+                filter: { path, module in
+                    guard module is Linear else { return false }
+                    guard path.hasPrefix("model.layers.") else { return false }
+                    guard path.contains(".self_attn.q_proj")
+                        || path.contains(".self_attn.k_proj")
+                        || path.contains(".self_attn.v_proj")
+                        || path.contains(".self_attn.o_proj")
+                        || path.contains(".mlp.gate_proj")
+                        || path.contains(".mlp.up_proj")
+                        || path.contains(".mlp.down_proj") else {
+                        return false
+                    }
+                    return true
+                }
+            )
+        }
+        return try MiniMaxMusic3GGUFWeightLoader.load(model: model, from: fileURL)
     }
 
     private static func languageModelShardNames(from modelDirectory: URL) throws -> [String] {

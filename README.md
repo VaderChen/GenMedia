@@ -49,20 +49,13 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 
 ### 影片 Runtime
 
-影片生成使用可替換的 `ltx-2-mlx` 外部 Runtime；Swift App 負責 Profile、參數驗證、工作佇列、取消、進度、資產與影片播放。第一次使用前只需安裝影片 CLI：
+影片生成由 App 隨附的 `GenImageLTXVideoWorker` Swift 子行程執行；Swift App 負責 Profile、參數驗證、工作佇列、取消、進度、資產與影片播放，不需要額外安裝影片 Runtime。
 
-```bash
-brew install uv
-./scripts/install-ltx-runtime.command
-```
+模型中心的 `dgrauet/ltx-2.3-mlx-q4` 下載方案會一併取得原生 MLX INT4 Transformer、影片／音訊 VAE、vocoder、空間升頻器，以及 `google/gemma-3-12b-it-qat-q4_0-unquantized` 的 Gemma 3 12B 文字編碼器；完整下載量約 42 GiB，建議使用 48 GB 以上記憶體。
 
-App 會依序尋找 `GENIMAGE_LTX_RUNTIME`、`GENIMAGE_LTX_RUNTIME_ROOT/.venv/bin/ltx-2-mlx`、App Helpers、`~/.local/bin/ltx-2-mlx`、常見 Homebrew 路徑及 `PATH`。若執行檔位於自訂位置，可指定：
+開發建置可透過 `GENIMAGE_LTX_WORKER` 指定自訂 Worker；正式 App 會使用 Bundle `Contents/Helpers/GenImageLTXVideoWorker`。`GENIMAGE_LTX_GEMMA_MODEL` 可覆寫 Gemma 目錄，未設定時優先使用 LTX 模型目錄內的 `gemma-3-12b`。
 
-```bash
-GENIMAGE_LTX_RUNTIME="/absolute/path/to/ltx-2-mlx" ./run.command
-```
-
-`ltx-2-mlx` 預設會使用其 Gemma 文字編碼器設定；已有本機 Gemma 模型時可透過 `GENIMAGE_LTX_GEMMA_MODEL` 指定模型目錄或 Hugging Face ID。App 的 DMG 不內含 Python Runtime 或 Gemma 權重，但會封裝 LGPL 動態版 FFmpeg；正式散佈時仍需分別確認影片 Runtime 與模型授權。
+LTX Worker 透過 JSON request 與逐階段事件和 App 通訊；模型檔案不會打包進 App。現有舊版資料目錄不會自動刪除，確認不再使用後可手動移除 `~/Library/Application Support/GenImage/Runtime/ltx-2-mlx/`。
 
 ### 媒體相容匯入
 
@@ -99,7 +92,7 @@ Qwen3-VL、Qwen3.5 與 Qwen3.8 屬於多模態模型，因此模型中心會同�
 - 文生圖完成後保留模型權重與暖機 buffer；5 分鐘後只清理可重用的 MLX 暫存 buffer，不卸載模型。按下側欄「釋放記憶體」、切換模型，或切換 Profile 時 RAM 超過 90%，才會卸載不再需要的 Runtime。
 - 下載保留來源原始檔名；生成輸出使用 `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm` 或 `Music-YYYYMMDD-HHmm`，同分鐘重複時自動加上流水號，並可在設定頁更改輸出目錄。
 - 每個開啟的工作區分頁視為一個生成專案；資產與 lineage 會原子寫入 Application Support，App 關閉後仍可恢復。只有明確關閉分頁時才移除該專案的工作區索引，已輸出的媒體檔仍保留於磁碟。
-- App 的資料一律位於 `~/Library/Application Support/GenImage/`（`Models`、`Runtime`、`Workspace`、`Pasted`、`Generated`），由 `GenImageCore/ApplicationSupport.swift` 統一定義。工作區索引曾寫在 `GenMedia/`，啟動時會自動接回目前的根目錄；同名項目一律保留現有的，不覆蓋也不合併。目錄名稱維持 `GenImage` 而非改為與 App 一致的 `GenMedia`，因為 `Runtime/` 底下的 Python venv 把絕對路徑寫死在啟動 script 內，改名會讓已安裝的 LTX 與 MiniMax Runtime 失效。
+- App 的資料一律位於 `~/Library/Application Support/GenImage/`（`Models`、`Runtime`、`Workspace`、`Pasted`、`Generated`），由 `GenImageCore/ApplicationSupport.swift` 統一定義。工作區索引曾寫在 `GenMedia/`，啟動時會自動接回目前的根目錄；同名項目一律保留現有的，不覆蓋也不合併。目錄名稱維持 `GenImage` 而非改為與 App 一致的 `GenMedia`，以相容既有模型與舊版 Runtime 資料。
 - Prompt 與歌詞編輯期間會保留游標、選取範圍及輸入法組字狀態；生成類型、Prompt、歌詞與輸出設定 TAB 只局部更新創作面板。必要的完整畫面更新會沿用播放中的音訊或影片節點，避免中斷播放。
 - 工作區底片列提供圖片匯入按鈕，並支援從 Finder 拖放一張或多張 PNG、JPEG、WebP、GIF、TIFF、HEIC 與 HEIF 圖片；音樂生成模式會停用圖片匯入，避免混用媒體來源。圖片生成時若已選取來源圖片，主按鈕會自動使用圖生圖 Profile，未選取時則使用文生圖 Profile。
 - 圖片與影片比例選項改為下拉選單；圖生圖選取來源圖片後才會顯示「原解析度」，並依來源尺寸換算為符合 Runtime 的 16 倍數寬高。
@@ -215,8 +208,6 @@ Patches/
 └── manifest.txt                  # 建置時套用的相依套件修正清單
 scripts/
 ├── apply-runtime-patches.command  # 依 manifest 套用與驗證相依套件修正
-├── install-ltx-runtime.command     # 安裝 LTX 影片 Runtime
-├── install-minimax-music3-mlx-audio-runtime.command # 安裝 MiniMax 4-bit 專用 Runtime
 └── build-ffmpeg-macos.sh          # 建立可封裝、可重新連結的 LGPL 動態版 FFmpeg
 ```
 

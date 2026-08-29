@@ -139,37 +139,36 @@ private final class MiniMaxMusic3RVQDepthAttention: Module {
     private let headDimension: Int
     private let hiddenSize: Int
 
-    init(configuration: MiniMaxMusic3RVQDecoderConfiguration) {
+    init(
+        configuration: MiniMaxMusic3RVQDecoderConfiguration,
+        quantizationBits: Int?
+    ) {
         self.numberOfHeads = configuration.numberOfAttentionHeads
         self.headDimension = configuration.hiddenSize / configuration.numberOfAttentionHeads
         self.hiddenSize = configuration.hiddenSize
-        self._query.wrappedValue = QuantizedLinear(
+        self._query.wrappedValue = miniMaxMusic3Linear(
             configuration.hiddenSize,
             configuration.hiddenSize,
             bias: false,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
-        self._key.wrappedValue = QuantizedLinear(
+        self._key.wrappedValue = miniMaxMusic3Linear(
             configuration.hiddenSize,
             configuration.hiddenSize,
             bias: false,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
-        self._value.wrappedValue = QuantizedLinear(
+        self._value.wrappedValue = miniMaxMusic3Linear(
             configuration.hiddenSize,
             configuration.hiddenSize,
             bias: false,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
-        self._output.wrappedValue = QuantizedLinear(
+        self._output.wrappedValue = miniMaxMusic3Linear(
             configuration.hiddenSize,
             configuration.hiddenSize,
             bias: false,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
         super.init()
     }
@@ -208,38 +207,39 @@ private final class MiniMaxMusic3RVQDecoderBlock: Module {
     @ModuleInfo(key: "up_proj") private var upProjection: Linear
     @ModuleInfo(key: "down_proj") private var downProjection: Linear
 
-    init(configuration: MiniMaxMusic3RVQDecoderConfiguration) {
+    init(
+        configuration: MiniMaxMusic3RVQDecoderConfiguration,
+        quantizationBits: Int?
+    ) {
         self._inputLayerNorm.wrappedValue = RMSNorm(
             dimensions: configuration.hiddenSize,
             eps: configuration.rmsNormEpsilon
         )
         self._attention.wrappedValue = MiniMaxMusic3RVQDepthAttention(
-            configuration: configuration
+            configuration: configuration,
+            quantizationBits: quantizationBits
         )
         self._postAttentionLayerNorm.wrappedValue = RMSNorm(
             dimensions: configuration.hiddenSize,
             eps: configuration.rmsNormEpsilon
         )
-        self._gateProjection.wrappedValue = QuantizedLinear(
+        self._gateProjection.wrappedValue = miniMaxMusic3Linear(
             configuration.hiddenSize,
             configuration.intermediateSize,
             bias: false,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
-        self._upProjection.wrappedValue = QuantizedLinear(
+        self._upProjection.wrappedValue = miniMaxMusic3Linear(
             configuration.hiddenSize,
             configuration.intermediateSize,
             bias: false,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
-        self._downProjection.wrappedValue = QuantizedLinear(
+        self._downProjection.wrappedValue = miniMaxMusic3Linear(
             configuration.intermediateSize,
             configuration.hiddenSize,
             bias: false,
-            groupSize: 64,
-            bits: 4
+            quantizationBits: quantizationBits
         )
         super.init()
     }
@@ -312,7 +312,10 @@ public final class MiniMaxMusic3RVQDepthDecoder: Module {
     @ModuleInfo(key: "audio_heads") private var audioHeads: [Linear]
 
     public init(
-        configuration: MiniMaxMusic3RVQDecoderConfiguration = .music3
+        configuration: MiniMaxMusic3RVQDecoderConfiguration = .music3,
+        quantizationBits: Int? = 4,
+        quantizeAudioHeads: Bool = false,
+        quantizeProjection: Bool = false
     ) {
         precondition((try? configuration.validate()) != nil)
         self.configuration = configuration
@@ -321,24 +324,44 @@ public final class MiniMaxMusic3RVQDepthDecoder: Module {
                 * (configuration.numberOfCodebooks - 1),
             dimensions: configuration.hiddenSize
         )
-        self._projection.wrappedValue = Linear(
-            configuration.hiddenSize,
-            configuration.hiddenSize,
-            bias: false
-        )
+        if quantizeProjection {
+            self._projection.wrappedValue = miniMaxMusic3Linear(
+                configuration.hiddenSize,
+                configuration.hiddenSize,
+                bias: false,
+                quantizationBits: quantizationBits
+            )
+        } else {
+            self._projection.wrappedValue = Linear(
+                configuration.hiddenSize,
+                configuration.hiddenSize,
+                bias: false
+            )
+        }
         self._positionEmbedding.wrappedValue = Embedding(
             embeddingCount: configuration.maxPositionEmbeddings,
             dimensions: configuration.hiddenSize
         )
         self._layers.wrappedValue = (0..<configuration.numberOfLayers).map { _ in
-            MiniMaxMusic3RVQDecoderBlock(configuration: configuration)
+            MiniMaxMusic3RVQDecoderBlock(
+                configuration: configuration,
+                quantizationBits: quantizationBits
+            )
         }
         self._norm.wrappedValue = RMSNorm(
             dimensions: configuration.hiddenSize,
             eps: configuration.rmsNormEpsilon
         )
         self._audioHeads.wrappedValue = (0..<(configuration.numberOfCodebooks - 1)).map { _ in
-            Linear(configuration.hiddenSize, configuration.audioVocabularySize, bias: false)
+            if quantizeAudioHeads {
+                return miniMaxMusic3Linear(
+                    configuration.hiddenSize,
+                    configuration.audioVocabularySize,
+                    bias: false,
+                    quantizationBits: quantizationBits
+                )
+            }
+            return Linear(configuration.hiddenSize, configuration.audioVocabularySize, bias: false)
         }
         super.init()
     }

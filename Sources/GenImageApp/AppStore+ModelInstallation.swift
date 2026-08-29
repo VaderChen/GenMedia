@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import GenImageCore
 import GenImageRuntime
@@ -31,7 +30,7 @@ extension AppStore {
             : "「\(profile.name)」的相關模型皆已安裝。"
     }
 
-    func installModel(_ model: ModelDescriptor) {
+    func installModel(_ model: ModelDescriptor, civitaiToken: String? = nil) {
         if model.localURL != nil {
             installations[model.id] = ModelInstallation(
                 phase: .installed,
@@ -73,6 +72,7 @@ extension AppStore {
                 let localURL = try await modelInstaller.install(
                     modelID: model.id,
                     rootURL: rootURL,
+                    civitaiToken: civitaiToken,
                     progress: { [weak self] update in
                         guard progressGate.shouldEmit(update) else { return }
                         Task { @MainActor [weak self] in
@@ -148,7 +148,6 @@ extension AppStore {
     }
 
     func removeModel(_ model: ModelDescriptor) {
-        guard confirmModelRemoval(model) else { return }
         modelTaskTokens[model.id] = nil
         modelTasks[model.id]?.cancel()
         modelTasks[model.id] = nil
@@ -191,18 +190,7 @@ extension AppStore {
         }
     }
 
-    private func confirmModelRemoval(_ model: ModelDescriptor) -> Bool {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "確定要移除模型嗎？"
-        let location = model.localURL?.path ?? model.id
-        alert.informativeText = "將移除「\(model.displayName)」及其本機檔案。\n\n路徑：\(location)\n\n此操作無法復原。"
-        alert.addButton(withTitle: "移除")
-        alert.addButton(withTitle: "取消")
-        return alert.runModal() == .alertFirstButtonReturn
-    }
-
-    func repairModel(_ model: ModelDescriptor) {
+    func repairModel(_ model: ModelDescriptor, civitaiToken: String? = nil) {
         if HuggingFaceModelInstaller.supports(modelID: model.id) {
             let rootURL = URL(fileURLWithPath: modelRootPath, isDirectory: true)
             do {
@@ -228,7 +216,7 @@ extension AppStore {
                 }
                 var downloadableModel = model
                 downloadableModel.localURL = nil
-                installModel(downloadableModel)
+                installModel(downloadableModel, civitaiToken: civitaiToken)
             }
             return
         }

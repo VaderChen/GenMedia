@@ -17,13 +17,7 @@ export function renderProfiles(state, ui) {
           <h1>${t("profile.title")}</h1>
           <p>${t("profile.subtitle")}</p>
         </div>
-        <div class="filter-row" role="group" aria-label="${t("profile.title")}">
-          ${profileFilterChip("all", t("common.all"), selectedCapability)}
-          ${primaryCapabilities
-            .map((capability) =>
-              profileFilterChip(capability, capabilityLabel(capability), selectedCapability))
-            .join("")}
-        </div>
+        ${renderProfileFilter(selectedCapability)}
       </header>
       <div class="page-scroll" data-scroll-id="profiles">
         ${visibleCapabilities.map((capability) => renderProfileSection(state, capability)).join("")}
@@ -32,14 +26,37 @@ export function renderProfiles(state, ui) {
   `;
 }
 
-function profileFilterChip(value, label, selectedCapability) {
-  const active = selectedCapability === value;
-  return `<button
-    class="chip ${active ? "active" : ""}"
-    data-action="profileFilter"
-    data-filter="${value}"
-    aria-pressed="${active}"
-  >${label}</button>`;
+function renderProfileFilter(selectedCapability) {
+  const groups = [
+    [t("common.image"), [
+      "imageToText",
+      "textToImage",
+      "imageToImage",
+      "textToVideo",
+      "imageToVideo",
+      "videoToText",
+      "upscale",
+    ]],
+    [t("common.audio"), ["textToMusic"]],
+    [t("common.text"), ["textToText"]],
+    [t("common.other"), []],
+  ].map(([label, capabilities]) => [
+    label,
+    capabilities
+      .filter((capability) => primaryCapabilities.includes(capability))
+      .map((capability) => [capability, capabilityLabel(capability)]),
+  ]).filter(([, options]) => options.length);
+  return `<label class="filter-select-control">
+    <span class="filter-select-label">${escapeHTML(t("common.filter"))}</span>
+    <select class="field filter-select" data-ui-field="profileFilter" aria-label="${escapeHTML(t("common.filter"))}">
+      <option value="all" ${selectedCapability === "all" ? "selected" : ""}>${escapeHTML(t("common.all"))}</option>
+      ${groups.map(([groupLabel, groupOptions]) => `<optgroup label="${escapeHTML(groupLabel)}">
+        ${groupOptions
+          .map(([value, label]) => `<option value="${value}" ${value === selectedCapability ? "selected" : ""}>${escapeHTML(label)}</option>`)
+          .join("")}
+      </optgroup>`).join("")}
+    </select>
+  </label>`;
 }
 
 function renderProfileSection(state, capability) {
@@ -110,6 +127,7 @@ function renderProfileCard(profile, isActive, isDisabled, models) {
         <div class="card-title-actions">
           ${isActive ? `<span class="badge active">${t("common.active")}</span>` : ""}
           ${isDisabled ? `<span class="badge">${t("profile.disabled")}</span>` : ""}
+          ${profile.supportsGeneration === false ? `<span class="badge">${t("profile.downloadOnly")}</span>` : ""}
           ${profile.isBuiltIn ? `<span class="badge">${t("common.builtIn")}</span>` : ""}
           <button
             class="icon-button card-info-button"
@@ -157,6 +175,9 @@ function renderCustomCardActions(profile, isActive, models) {
 }
 
 function renderActivationButton(profile, isActive, models = []) {
+  if (profile.supportsGeneration === false) {
+    return `<button class="secondary-button compact" disabled title="${escapeHTML(t("profile.downloadOnlyNote"))}">${t("profile.downloadOnly")}</button>`;
+  }
   if (isActive) {
     return `<button class="danger-button compact" data-action="deactivateProfile" data-profile-id="${profile.id}" data-capability="${profile.capability}">${t("profile.deactivate")}</button>`;
   }

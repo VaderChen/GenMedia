@@ -8,35 +8,24 @@ export function renderModels(state, ui) {
       (ui.modelFilter === "installed"
         ? installation.phase === "installed"
         : descriptor.capabilities.includes(ui.modelFilter));
+    const matchesFormat =
+      ui.modelFormat === "all" || modelFormatFor(descriptor) === ui.modelFormat;
     const query = ui.modelSearch.trim().toLocaleLowerCase();
     const matchesSearch =
       !query ||
       descriptor.displayName.toLocaleLowerCase().includes(query) ||
       descriptor.publisher.toLocaleLowerCase().includes(query);
-    return matchesCapability && matchesSearch;
+    return matchesCapability && matchesFormat && matchesSearch;
   });
 
   return `
     <section class="page">
-      <header class="page-header">
+      <header class="page-header model-page-header">
         <div class="page-header-copy">
           <h1>${t("model.title")}</h1>
           <p>${t("model.subtitle")}</p>
         </div>
-        <div class="filter-row" role="group" aria-label="${t("model.title")}">
-          ${filterChip("all", t("common.all"), ui)}
-          ${filterChip("installed", t("phase.installed"), ui)}
-          ${filterChip("textToImage", capabilityLabel("textToImage"), ui)}
-          ${filterChip("imageToText", capabilityLabel("imageToText"), ui)}
-          ${filterChip("textToText", capabilityLabel("textToText"), ui)}
-          ${filterChip("imageToImage", capabilityLabel("imageToImage"), ui)}
-          ${filterChip("textToVideo", capabilityLabel("textToVideo"), ui)}
-          ${filterChip("imageToVideo", capabilityLabel("imageToVideo"), ui)}
-          ${filterChip("textToMusic", capabilityLabel("textToMusic"), ui)}
-          ${filterChip("videoToText", capabilityLabel("videoToText"), ui)}
-          ${filterChip("upscale", capabilityLabel("upscale"), ui)}
-          ${filterChip("lora", capabilityLabel("lora"), ui)}
-        </div>
+        ${renderModelFilters(ui)}
       </header>
       <div class="page-scroll" data-scroll-id="models">
         <div class="model-toolbar-row">
@@ -81,11 +70,12 @@ export function renderModels(state, ui) {
 }
 
 export function renderModelCard({ descriptor, installation }) {
+  const format = modelFormatFor(descriptor);
   const capabilities = descriptor.capabilities
     .map((capability) => `<span class="badge capability-badge">${capabilityLabel(capability)}</span>`)
     .join("");
   return `
-    <article class="model-card" data-model-card="${escapeHTML(descriptor.id)}">
+    <article class="model-card model-format-${format}" data-model-card="${escapeHTML(descriptor.id)}" data-model-format="${format}">
       <div class="card-title-row">
         <div>
           <h2>${escapeHTML(descriptor.displayName)}</h2>
@@ -163,8 +153,91 @@ function infoIcon() {
   </svg>`;
 }
 
-function filterChip(value, label, ui) {
-  return `<button class="chip ${ui.modelFilter === value ? "active" : ""}" data-action="modelFilter" data-filter="${value}">${label}</button>`;
+function renderModelFilters(ui) {
+  return `<div class="model-filter-controls" role="group" aria-label="${escapeHTML(t("model.title"))}">
+    ${renderModelFormatFilter(ui)}
+    ${renderModelCapabilityFilter(ui)}
+  </div>`;
+}
+
+function renderModelFormatFilter(ui) {
+  const options = [
+    ["all", t("common.all")],
+    ["mlx", t("model.mlx")],
+    ["gguf", t("model.gguf")],
+  ];
+  const selected = options.some(([value]) => value === ui.modelFormat)
+    ? ui.modelFormat
+    : "all";
+  return `<label class="filter-select-control">
+    <span class="filter-select-label">${escapeHTML(t("model.format"))}</span>
+    <select class="field filter-select" data-ui-field="modelFormat" aria-label="${escapeHTML(t("model.format"))}">
+      ${options
+        .map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHTML(label)}</option>`)
+        .join("")}
+    </select>
+  </label>`;
+}
+
+function renderModelCapabilityFilter(ui) {
+  const groups = [
+    [t("common.image"), [
+      ["textToImage", capabilityLabel("textToImage")],
+      ["imageToText", capabilityLabel("imageToText")],
+      ["imageToImage", capabilityLabel("imageToImage")],
+      ["textToVideo", capabilityLabel("textToVideo")],
+      ["imageToVideo", capabilityLabel("imageToVideo")],
+      ["videoToText", capabilityLabel("videoToText")],
+      ["upscale", capabilityLabel("upscale")],
+    ]],
+    [t("common.audio"), [
+      ["textToMusic", capabilityLabel("textToMusic")],
+    ]],
+    [t("common.text"), [
+      ["textToText", capabilityLabel("textToText")],
+    ]],
+    [t("common.other"), [
+      ["lora", capabilityLabel("lora")],
+    ]],
+  ];
+  const standaloneOptions = [
+    ["all", t("common.all")],
+    ["installed", t("phase.installed")],
+  ];
+  const options = [...standaloneOptions, ...groups.flatMap(([, values]) => values)];
+  const selected = options.some(([value]) => value === ui.modelFilter)
+    ? ui.modelFilter
+    : "all";
+  return `<label class="filter-select-control">
+    <span class="filter-select-label">${escapeHTML(t("common.filter"))}</span>
+    <select class="field filter-select" data-ui-field="modelFilter" aria-label="${escapeHTML(t("common.filter"))}">
+      ${standaloneOptions
+        .map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHTML(label)}</option>`)
+        .join("")}
+      ${groups.map(([groupLabel, groupOptions]) => `<optgroup label="${escapeHTML(groupLabel)}">
+        ${groupOptions
+          .map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHTML(label)}</option>`)
+          .join("")}
+      </optgroup>`).join("")}
+    </select>
+  </label>`;
+}
+
+function modelFormatFor(descriptor) {
+  const searchable = [
+    descriptor.id,
+    descriptor.displayName,
+    descriptor.publisher,
+    descriptor.summary,
+    descriptor.sourceURL,
+    descriptor.quantization,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase();
+  if (/\bgguf\b/.test(searchable)) return "gguf";
+  if (/\bcore\s*ml\b|\bcoreml\b/.test(searchable)) return "other";
+  return "mlx";
 }
 
 function emptyModels() {

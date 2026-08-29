@@ -1,5 +1,6 @@
 import Foundation
 import GenImageCore
+import GenImageGGUF
 
 public struct ModelInstallProgress: Sendable {
     public var fractionCompleted: Double
@@ -39,11 +40,18 @@ public actor HuggingFaceModelInstaller {
     public static let qwen38Multimodal27BModelID = "lmstudio-community/Qwen3.8-27B-MLX-4bit"
     public static let ltx23DistilledModelID = "Lightricks/LTX-2.3@distilled-1.1"
     public static let ltx23MLXQ4ModelID = "dgrauet/ltx-2.3-mlx-q4"
+    public static let ltxVideo096GGUFQ4KMModelID = "city96/LTX-Video-0.9.6-distilled-gguf@Q4_K_M"
+    public static let ltxVideo096T5Q4KMModelID = "city96/t5-v1_1-xxl-encoder-gguf@Q4_K_M"
+    public static let ltxVideo096VAEModelID = "city96/LTX-Video-0.9.6-VAE@BF16"
+    public static let ltx23GGUFDistilledQ3KMModelID = "unsloth/LTX-2.3-GGUF@distilled-1.1-Q3_K_M"
+    public static let ltx23GGUFVAEModelID = "unsloth/LTX-2.3-GGUF@distilled-1.1-VAE"
     public static let miniMaxH3MLX8BitModelID = "pipenetwork/MiniMax-H3-MLX-8bit"
     public static let miniMaxH3MLX4BitModelID = "pipenetwork/MiniMax-H3-MLX-4bit"
+    public static let miniMaxH3GGUFFL2VAPrunedQ4KModelID = "unsloth/MiniMax-H3-GGUF@fl2va-pruned-Q4_K"
     public static let aceStep15TurboModelID = "ACE-Step/Ace-Step1.5"
     public static let miniMaxMusic3MLX8BitModelID = "vanch007/MiniMax-Music3-MLX-8bit"
     public static let miniMaxMusic3MLX4BitModelID = "mlx-community/MiniMax-Music3-4bit"
+    public static let miniMaxMusic3GGUFModelID = "audio-cpp/MiniMax-Music3-GGUF@Q4_K-LM-Q4_K-DiT-Q8_0-depth"
     public static let miniMaxMusic3ComposerModelID = "Mothersuperior/minimax-music3-composer-5.7b-distilled"
     public static let whisperLargeV3TurboCoreMLModelID = "argmaxinc/whisperkit-coreml@large-v3-turbo"
     public static let paraformerChineseCoreMLModelID = "FluidInference/paraformer-large-zh-coreml"
@@ -201,6 +209,7 @@ public actor HuggingFaceModelInstaller {
     public func install(
         modelID: String,
         rootURL: URL,
+        civitaiToken: String? = nil,
         progress: @escaping @Sendable (ModelInstallProgress) -> Void
     ) async throws -> URL {
         guard let plan = Self.plan(for: modelID) else {
@@ -276,6 +285,7 @@ public actor HuggingFaceModelInstaller {
                     try await self.download(
                         file,
                         destination: destination,
+                        civitaiToken: civitaiToken,
                         progressTracker: progressTracker
                     )
                 }
@@ -288,6 +298,7 @@ public actor HuggingFaceModelInstaller {
                     try await self.download(
                         file,
                         destination: destination,
+                        civitaiToken: civitaiToken,
                         progressTracker: progressTracker
                     )
                 }
@@ -298,6 +309,7 @@ public actor HuggingFaceModelInstaller {
 
         try Self.materializeQuantizationManifest(at: destination)
         try Self.validateRequiredRuntimeFiles(for: plan, at: destination)
+        try Self.validateGGUFWeights(modelID: modelID, at: destination)
 
         let manifest = InstallManifest(
             schemaVersion: 2,
@@ -324,6 +336,7 @@ public actor HuggingFaceModelInstaller {
     private func download(
         _ file: ResolvedFile,
         destination: URL,
+        civitaiToken: String?,
         progressTracker: DownloadProgressTracker
     ) async throws {
         try Task.checkCancellation()
@@ -339,6 +352,7 @@ public actor HuggingFaceModelInstaller {
                 try await downloadSegmented(
                     file,
                     fileURL: fileURL,
+                    civitaiToken: civitaiToken,
                     progressTracker: progressTracker,
                     segmentKeys: segmentKeys
                 )
@@ -355,7 +369,7 @@ public actor HuggingFaceModelInstaller {
             }
         }
 
-        let request = try Self.downloadRequest(for: file)
+        let request = try Self.downloadRequest(for: file, civitaiToken: civitaiToken)
         let downloader = FileDownloadDelegate(
             destination: fileURL,
             expectedBytes: file.size,
@@ -383,6 +397,7 @@ public actor HuggingFaceModelInstaller {
     private func downloadSegmented(
         _ file: ResolvedFile,
         fileURL: URL,
+        civitaiToken: String?,
         progressTracker: DownloadProgressTracker,
         segmentKeys: [String]
     ) async throws {
@@ -416,7 +431,7 @@ public actor HuggingFaceModelInstaller {
                         progressTracker.report(key, received: expectedBytes)
                         return
                     }
-                    var request = try Self.downloadRequest(for: file)
+                    var request = try Self.downloadRequest(for: file, civitaiToken: civitaiToken)
                     request.setValue(
                         "bytes=\(range.start)-\(range.end)",
                         forHTTPHeaderField: "Range"
@@ -504,6 +519,7 @@ public actor HuggingFaceModelInstaller {
             }
         }
         try validateRequiredRuntimeFiles(for: plan, at: destination)
+        try validateGGUFWeights(modelID: modelID, at: destination)
         let runtimeURL = runtimeURL(for: plan, destination: destination)
         guard FileManager.default.fileExists(atPath: runtimeURL.path) else {
             throw ModelInstallerError.runtimeNotFound(runtimeURL)
@@ -588,12 +604,18 @@ public actor HuggingFaceModelInstaller {
         return try JSONDecoder().decode([HubTreeEntry].self, from: data)
     }
 
-    private nonisolated static func downloadRequest(for file: ResolvedFile) throws -> URLRequest {
+    private nonisolated static func downloadRequest(
+        for file: ResolvedFile,
+        civitaiToken: String? = nil
+    ) throws -> URLRequest {
         if let downloadURL = file.downloadURL {
             var request = URLRequest(url: downloadURL)
             request.timeoutInterval = 60 * 60 * 24
             request.setValue("GenImage/1.0", forHTTPHeaderField: "User-Agent")
-            if let token = CivitaiTokenStore.token() {
+            if let token = civitaiToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !token.isEmpty {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            } else if let token = CivitaiTokenStore.token() {
                 request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             }
             return request
@@ -975,6 +997,199 @@ public actor HuggingFaceModelInstaller {
                             "vae_encoder.safetensors",
                             "vocoder.safetensors"
                         ]
+                    ),
+                    SourcePlan(
+                        repository: "google/gemma-3-12b-it-qat-q4_0-unquantized",
+                        destinationSubdirectory: "gemma-3-12b",
+                        prefixes: [],
+                        exactFiles: [
+                            "added_tokens.json",
+                            "chat_template.json",
+                            "config.json",
+                            "generation_config.json",
+                            "model-00001-of-00005.safetensors",
+                            "model-00002-of-00005.safetensors",
+                            "model-00003-of-00005.safetensors",
+                            "model-00004-of-00005.safetensors",
+                            "model-00005-of-00005.safetensors",
+                            "model.safetensors.index.json",
+                            "preprocessor_config.json",
+                            "processor_config.json",
+                            "special_tokens_map.json",
+                            "tokenizer.json",
+                            "tokenizer.model",
+                            "tokenizer_config.json"
+                        ]
+                    )
+                ]
+            )
+        case ltxVideo096GGUFQ4KMModelID:
+            return InstallPlan(
+                directoryName: "ltx-video-0.9.6-distilled-gguf",
+                requiredRuntimeFiles: [
+                    "LTX-Video-0.9.6-VAE-BF16.safetensors",
+                    "ltxv-2b-0.9.6-distilled-04-25-Q4_K_M.gguf",
+                    "text_encoder/config.json",
+                    "text_encoder/t5-v1_1-xxl-encoder-Q4_K_M.gguf",
+                    "tokenizer/spiece.model"
+                ],
+                sources: [
+                    SourcePlan(
+                        repository: "city96/LTX-Video-0.9.6-distilled-gguf",
+                        revision: "f5ccd5ad1821ff03addbb1bc97a9f0829adc1026",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "LICENSE.md",
+                            "README.md",
+                            "LTX-Video-0.9.6-VAE-BF16.safetensors",
+                            "ltxv-2b-0.9.6-distilled-04-25-Q4_K_M.gguf"
+                        ]
+                    ),
+                    SourcePlan(
+                        repository: "city96/t5-v1_1-xxl-encoder-gguf",
+                        revision: "005a6ea51a7d0b84d677b3e633bb52a8c85a83d9",
+                        destinationSubdirectory: "text_encoder",
+                        prefixes: [],
+                        exactFiles: ["t5-v1_1-xxl-encoder-Q4_K_M.gguf"]
+                    ),
+                    SourcePlan(
+                        repository: "Lightricks/LTX-Video",
+                        revision: "8984fa25007f376c1a299016d0957a37a2f797bb",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "text_encoder/config.json",
+                            "tokenizer/added_tokens.json",
+                            "tokenizer/special_tokens_map.json",
+                            "tokenizer/spiece.model",
+                            "tokenizer/tokenizer_config.json"
+                        ]
+                    )
+                ]
+            )
+        case ltxVideo096T5Q4KMModelID:
+            return InstallPlan(
+                directoryName: "ltx-video-0.9.6-t5-q4-k-m",
+                requiredRuntimeFiles: [
+                    "t5-v1_1-xxl-encoder-Q4_K_M.gguf"
+                ],
+                sources: [
+                    SourcePlan(
+                        repository: "city96/t5-v1_1-xxl-encoder-gguf",
+                        revision: "005a6ea51a7d0b84d677b3e633bb52a8c85a83d9",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "README.md",
+                            "t5-v1_1-xxl-encoder-Q4_K_M.gguf"
+                        ]
+                    )
+                ]
+            )
+        case ltxVideo096VAEModelID:
+            return InstallPlan(
+                directoryName: "ltx-video-0.9.6-vae-bf16",
+                requiredRuntimeFiles: [
+                    "LTX-Video-0.9.6-VAE-BF16.safetensors"
+                ],
+                sources: [
+                    SourcePlan(
+                        repository: "city96/LTX-Video-0.9.6-distilled-gguf",
+                        revision: "f5ccd5ad1821ff03addbb1bc97a9f0829adc1026",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "LTX-Video-0.9.6-VAE-BF16.safetensors"
+                        ]
+                    )
+                ]
+            )
+        case ltx23GGUFDistilledQ3KMModelID:
+            return InstallPlan(
+                directoryName: "ltx-2.3-distilled-1.1-gguf-q3-k-m",
+                requiredRuntimeFiles: [
+                    "distilled-1.1/ltx-2.3-22b-distilled-1.1-Q3_K_M.gguf",
+                    "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+                    "text_encoders/gemma-3-12b-it-qat-UD-Q4_K_XL.gguf",
+                    "text_encoders/ltx-2.3-22b-distilled_embeddings_connectors.safetensors",
+                    "vae/ltx-2.3-22b-distilled_audio_vae.safetensors",
+                    "vae/ltx-2.3-22b-distilled_video_vae.safetensors",
+                    "gemma-3-12b/config.json",
+                    "gemma-3-12b/tokenizer.json",
+                    "gemma-3-12b/tokenizer.model",
+                    "gemma-3-12b/tokenizer_config.json"
+                ],
+                sources: [
+                    SourcePlan(
+                        repository: "unsloth/LTX-2.3-GGUF",
+                        revision: "96e8ed4925ead3db9ff4d0084f165ef6a74f28d0",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "LICENSE",
+                            "README.md",
+                            "distilled-1.1/ltx-2.3-22b-distilled-1.1-Q3_K_M.gguf"
+                        ]
+                    ),
+                    SourcePlan(
+                        repository: "unsloth/LTX-2.3-GGUF",
+                        revision: "96e8ed4925ead3db9ff4d0084f165ef6a74f28d0",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "text_encoders/gemma-3-12b-it-qat-UD-Q4_K_XL.gguf",
+                            "text_encoders/ltx-2.3-22b-distilled_embeddings_connectors.safetensors",
+                            "vae/ltx-2.3-22b-distilled_audio_vae.safetensors",
+                            "vae/ltx-2.3-22b-distilled_video_vae.safetensors"
+                        ]
+                    ),
+                    SourcePlan(
+                        repository: "unsloth/gemma-3-12b-it-qat-GGUF",
+                        revision: "858acec7ec0541a46c39985c95d3b52d8f3ab183",
+                        destinationSubdirectory: "text_encoders",
+                        prefixes: [],
+                        exactFiles: ["gemma-3-12b-it-qat-UD-Q4_K_XL.gguf"]
+                    ),
+                    SourcePlan(
+                        repository: "Lightricks/LTX-2.3",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: ["ltx-2.3-spatial-upscaler-x2-1.1.safetensors"]
+                    ),
+                    SourcePlan(
+                        repository: "google/gemma-3-12b-it-qat-q4_0-unquantized",
+                        destinationSubdirectory: "gemma-3-12b",
+                        prefixes: [],
+                        exactFiles: [
+                            "added_tokens.json",
+                            "chat_template.json",
+                            "config.json",
+                            "special_tokens_map.json",
+                            "tokenizer.json",
+                            "tokenizer.model",
+                            "tokenizer_config.json"
+                        ]
+                    )
+                ]
+            )
+        case ltx23GGUFVAEModelID:
+            return InstallPlan(
+                directoryName: "ltx-2.3-distilled-1.1-vae",
+                requiredRuntimeFiles: [
+                    "vae/ltx-2.3-22b-distilled_audio_vae.safetensors",
+                    "vae/ltx-2.3-22b-distilled_video_vae.safetensors"
+                ],
+                sources: [
+                    SourcePlan(
+                        repository: "unsloth/LTX-2.3-GGUF",
+                        revision: "96e8ed4925ead3db9ff4d0084f165ef6a74f28d0",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "vae/ltx-2.3-22b-distilled_audio_vae.safetensors",
+                            "vae/ltx-2.3-22b-distilled_video_vae.safetensors"
+                        ]
                     )
                 ]
             )
@@ -987,6 +1202,27 @@ public actor HuggingFaceModelInstaller {
             return miniMaxH3MLXPlan(
                 repository: "pipenetwork/MiniMax-H3-MLX-4bit",
                 directoryName: "minimax-h3-mlx-4bit"
+            )
+        case miniMaxH3GGUFFL2VAPrunedQ4KModelID:
+            return InstallPlan(
+                directoryName: "minimax-h3-gguf-fl2va-pruned-q4-k",
+                requiredRuntimeFiles: [
+                    "minimax_h3_fl2va_pruned-Q4_K.gguf"
+                ],
+                sources: [
+                    SourcePlan(
+                        repository: "unsloth/MiniMax-H3-GGUF",
+                        revision: "d629413c2e5b51b38c453668b75ca3b06ca92703",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "LICENSE",
+                            "README.md",
+                            "NOTICE",
+                            "minimax_h3_fl2va_pruned-Q4_K.gguf"
+                        ]
+                    )
+                ]
             )
         case aceStep15TurboModelID:
             return InstallPlan(
@@ -1060,6 +1296,35 @@ public actor HuggingFaceModelInstaller {
                             "tokenizer/chat_template.jinja",
                             "tokenizer/tokenizer.json",
                             "tokenizer/tokenizer_config.json"
+                        ]
+                    )
+                ]
+            )
+        case miniMaxMusic3GGUFModelID:
+            return InstallPlan(
+                directoryName: "minimax-music3-gguf-q4",
+                sources: [
+                    SourcePlan(
+                        repository: "audio-cpp/MiniMax-Music3-GGUF",
+                        revision: "2a19a42dd84d9ab9411316977ff3c9fd143ab214",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "LICENSE",
+                            "README.md",
+                            "config.json",
+                            "config/condition_encoder.json",
+                            "config/language_model.json",
+                            "config/rvq_depth_decoder.json",
+                            "config/transformer.json",
+                            "config/vocoder.json",
+                            "condition_encoder.gguf",
+                            "language_model_q4_k.gguf",
+                            "rvq_depth_decoder_q8_0.gguf",
+                            "tokenizer/tokenizer.json",
+                            "tokenizer/tokenizer_config.json",
+                            "transformer_q4_k.gguf",
+                            "vocoder.gguf"
                         ]
                     )
                 ]
@@ -1424,6 +1689,35 @@ public actor HuggingFaceModelInstaller {
         }
     }
 
+    private nonisolated static func validateGGUFWeights(
+        modelID: String,
+        at directory: URL
+    ) throws {
+        guard let spec = GGUFDiagnosticPlan.all.first(where: { $0.modelID == modelID }) else {
+            return
+        }
+        let weightURL = directory.appendingPathComponent(spec.weightRelativePath)
+        do {
+            let inspection = try GGUFModelLoader.inspect(fileURL: weightURL)
+            guard inspection.unsupportedTypes.isEmpty else {
+                throw ModelInstallerError.invalidGGUF(
+                    weightURL,
+                    "包含不支援的 tensor type：\(inspection.unsupportedTypes.joined(separator: ", "))。"
+                )
+            }
+            guard inspection.quantizationCounts[spec.expectedSourceType, default: 0] > 0 else {
+                throw ModelInstallerError.invalidGGUF(
+                    weightURL,
+                    "找不到預期的 \(spec.expectedSourceType) 量化 tensor。"
+                )
+            }
+        } catch let error as ModelInstallerError {
+            throw error
+        } catch {
+            throw ModelInstallerError.invalidGGUF(weightURL, error.localizedDescription)
+        }
+    }
+
     private nonisolated static func isSafeRelativePath(_ path: String) -> Bool {
         !path.isEmpty
             && !path.hasPrefix("/")
@@ -1741,6 +2035,7 @@ public enum ModelInstallerError: LocalizedError, Sendable {
     case sizeMismatch(path: String, expected: Int64, actual: Int64)
     case invalidQuantizationConfig(URL, String)
     case requiredRuntimeFileMissing(String)
+    case invalidGGUF(URL, String)
 
     public var errorDescription: String? {
         switch self {
@@ -1770,6 +2065,8 @@ public enum ModelInstallerError: LocalizedError, Sendable {
             "量化設定無法轉換：\(url.lastPathComponent)；\(message)"
         case let .requiredRuntimeFileMissing(path):
             "模型缺少 Runtime 必要檔案：\(path)"
+        case let .invalidGGUF(url, message):
+            "GGUF 權重驗證失敗：\(url.path)；\(message)"
         }
     }
 }
