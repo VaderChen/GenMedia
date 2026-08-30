@@ -30,7 +30,11 @@ extension AppStore {
             : "「\(profile.name)」的相關模型皆已安裝。"
     }
 
-    func installModel(_ model: ModelDescriptor, civitaiToken: String? = nil) {
+    func installModel(
+        _ model: ModelDescriptor,
+        civitaiToken: String? = nil,
+        huggingFaceToken: String? = nil
+    ) {
         if model.localURL != nil {
             installations[model.id] = ModelInstallation(
                 phase: .installed,
@@ -73,6 +77,7 @@ extension AppStore {
                     modelID: model.id,
                     rootURL: rootURL,
                     civitaiToken: civitaiToken,
+                    huggingFaceToken: huggingFaceToken,
                     progress: { [weak self] update in
                         guard progressGate.shouldEmit(update) else { return }
                         Task { @MainActor [weak self] in
@@ -131,6 +136,9 @@ extension AppStore {
                 if let installerError = error as? ModelInstallerError,
                    case .authenticationRequired = installerError {
                     statusMessage = "Civitai LoRA 下載需要有效的 API Token，請至設定輸入後重試。"
+                } else if let installerError = error as? ModelInstallerError,
+                          case .httpStatus(401, _) = installerError {
+                    statusMessage = "模型需要 Hugging Face API Token，請點選下載並輸入金鑰後重試。"
                 } else {
                     statusMessage = "模型下載失敗：\(error.localizedDescription)"
                 }
@@ -190,7 +198,11 @@ extension AppStore {
         }
     }
 
-    func repairModel(_ model: ModelDescriptor, civitaiToken: String? = nil) {
+    func repairModel(
+        _ model: ModelDescriptor,
+        civitaiToken: String? = nil,
+        huggingFaceToken: String? = nil
+    ) {
         if HuggingFaceModelInstaller.supports(modelID: model.id) {
             let rootURL = URL(fileURLWithPath: modelRootPath, isDirectory: true)
             do {
@@ -216,7 +228,11 @@ extension AppStore {
                 }
                 var downloadableModel = model
                 downloadableModel.localURL = nil
-                installModel(downloadableModel, civitaiToken: civitaiToken)
+                installModel(
+                    downloadableModel,
+                    civitaiToken: civitaiToken,
+                    huggingFaceToken: huggingFaceToken
+                )
             }
             return
         }

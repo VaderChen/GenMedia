@@ -1,7 +1,10 @@
 import Foundation
 import GenImageCore
+import MLXLLM
 import MLXLMCommon
 import MLXVLM
+import MLXHuggingFace
+import Tokenizers
 
 public actor QwenTextGenerationService: TextGenerating {
     private var container: ModelContainer?
@@ -62,22 +65,32 @@ public actor QwenTextGenerationService: TextGenerating {
         var result = ""
         var chunks = 0
         var lastRepetitionCheck = 0
+        var stopReason: GenerateStopReason?
 
-        for await event in stream {
+        generationLoop: for await event in stream {
             try Task.checkCancellation()
-            guard case let .chunk(text) = event else { continue }
-            result += text
-            chunks += 1
-            progress(min(0.99, 0.55 + Double(chunks) / Double(expectedChunks) * 0.44))
-            if chunks - lastRepetitionCheck >= 32, result.count > 400 {
-                lastRepetitionCheck = chunks
-                if Self.hasRepeatingTail(result) { break }
+            switch event {
+            case let .chunk(text):
+                result += text
+                chunks += 1
+                progress(min(0.99, 0.55 + Double(chunks) / Double(expectedChunks) * 0.44))
+                if !request.expectsStructuredOutput,
+                   chunks - lastRepetitionCheck >= 32,
+                   result.count > 400 {
+                    lastRepetitionCheck = chunks
+                    if Self.hasRepeatingTail(result) { break generationLoop }
+                }
+            case let .info(info):
+                stopReason = info.stopReason
+            case .toolCall:
+                continue
             }
         }
 
-        let output = Self.finalAnswer(
-            result.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
+        if case .some(.length) = stopReason {
+            throw QwenTextGenerationError.outputTruncated(maximumOutputTokens: maximumOutputTokens)
+        }
+        let output = TextGenerationOutputNormalizer.finalAnswer(result)
         guard !output.isEmpty else {
             throw QwenTextGenerationError.emptyResponse
         }
@@ -101,22 +114,55 @@ public actor QwenTextGenerationService: TextGenerating {
         }
         container = nil
         loadedModelURL = nil
-        let loaded = try await VLMModelFactory.shared.loadContainer(
-            configuration: ModelConfiguration(directory: normalizedURL)
-        ) { value in
-            progress(value.fractionCompleted * 0.45)
+        let loaded: ModelContainer
+        switch Self.factoryKind(at: normalizedURL) {
+        case .language:
+            loaded = try await LLMModelFactory.shared.loadContainer(
+                from: normalizedURL,
+                using: #huggingFaceTokenizerLoader()
+            )
+        case .visionLanguage:
+            loaded = try await VLMModelFactory.shared.loadContainer(
+                from: normalizedURL,
+                using: #huggingFaceTokenizerLoader()
+            )
         }
+        progress(0.45)
         container = loaded
         loadedModelURL = normalizedURL
         return loaded
     }
 
-    private static func finalAnswer(_ output: String) -> String {
-        guard let marker = output.range(of: "</think>", options: .backwards) else {
-            return output
+    private enum FactoryKind {
+        case language
+        case visionLanguage
+    }
+
+    private static func factoryKind(at modelURL: URL) -> FactoryKind {
+        guard let data = try? Data(contentsOf: modelURL.appendingPathComponent("config.json")),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .language
         }
-        return output[marker.upperBound...]
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let multimodalKeys = [
+            "vision_config", "vision_tower", "image_token_id", "video_token_id",
+            "mm_projector_type", "image_processor_type"
+        ]
+        if multimodalKeys.contains(where: { object[$0] != nil }) {
+            return .visionLanguage
+        }
+        if let languageModelOnly = object["language_model_only"] as? Bool,
+           !languageModelOnly {
+            return .visionLanguage
+        }
+
+        let modelType = (object["model_type"] as? String ?? "").lowercased()
+        let architectures = (object["architectures"] as? [String] ?? [])
+            .joined(separator: " ")
+            .lowercased()
+        let signature = "\(modelType) \(architectures)"
+        let visionMarkers = ["vision", "_vl", "vl_", "llava", "paligemma", "pixtral", "idefics"]
+        return visionMarkers.contains(where: signature.contains) ? .visionLanguage : .language
     }
 
     private static func hasRepeatingTail(_ output: String) -> Bool {
@@ -144,6 +190,7 @@ public enum QwenTextGenerationError: LocalizedError, Sendable {
     case emptyPrompt
     case modelNotFound(URL)
     case emptyResponse
+    case outputTruncated(maximumOutputTokens: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -157,6 +204,8 @@ public enum QwenTextGenerationError: LocalizedError, Sendable {
             "找不到文生文模型：\(url.path)"
         case .emptyResponse:
             "文生文模型沒有回傳內容。"
+        case let .outputTruncated(maximumOutputTokens):
+            "文生文模型輸出達到 \(maximumOutputTokens) token 上限，內容可能被截斷；請縮小字幕批次或改用 token 上限較大的模型。"
         }
     }
 }

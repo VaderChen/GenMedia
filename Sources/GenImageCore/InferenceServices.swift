@@ -320,17 +320,20 @@ public struct TextGenerationRequest: Sendable, Hashable {
     public var profile: InferenceProfile
     public var modelURL: URL
     public var maximumOutputTokens: Int?
+    public var expectsStructuredOutput: Bool
 
     public init(
         prompt: String,
         profile: InferenceProfile,
         modelURL: URL,
-        maximumOutputTokens: Int? = nil
+        maximumOutputTokens: Int? = nil,
+        expectsStructuredOutput: Bool = false
     ) {
         self.prompt = prompt
         self.profile = profile
         self.modelURL = modelURL
         self.maximumOutputTokens = maximumOutputTokens
+        self.expectsStructuredOutput = expectsStructuredOutput
     }
 }
 

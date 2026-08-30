@@ -60,6 +60,19 @@ public enum LocalModelDiscovery {
         var isRecommended: Bool
     }
 
+    private struct WhisperModelSpec {
+        var modelID: String
+        var revision: String
+        var installationDirectoryName: String
+        var runtimeDirectoryName: String
+        var displayName: String
+        var summary: String
+        var profileName: String
+        var profileNotes: String
+        var recommendedMemoryGB: Int
+        var isRecommended: Bool
+    }
+
     private static let managedMultimodalModelSpecs = [
         ManagedMultimodalModelSpec(
             modelID: "lmstudio-community/Qwen3.5-4B-MLX-4bit",
@@ -86,6 +99,33 @@ public enum LocalModelDiscovery {
             displayName: "Qwen3.8 27B MLX 4-bit",
             maximumTokens: 8_192,
             recommendedMemoryGB: 64,
+            isRecommended: false
+        )
+    ]
+
+    private static let whisperModelSpecs = [
+        WhisperModelSpec(
+            modelID: "argmaxinc/whisperkit-coreml@small",
+            revision: "0f63a7800b00dd0226abd051b906c246e1907482",
+            installationDirectoryName: "whisper-small-coreml",
+            runtimeDirectoryName: "openai_whisper-small_216MB",
+            displayName: "Whisper Small Core ML",
+            summary: "已安裝較輕量的多語 Whisper Small，可自動偵測來源語言並快速產生字幕時間軸。",
+            profileName: "多語字幕 · Whisper Small",
+            profileNotes: "較輕量的多語言 Core ML Profile；以較低記憶體需求換取更快的字幕辨識速度。",
+            recommendedMemoryGB: 8,
+            isRecommended: true
+        ),
+        WhisperModelSpec(
+            modelID: "argmaxinc/whisperkit-coreml@large-v3-turbo",
+            revision: "0f63a7800b00dd0226abd051b906c246e1907482",
+            installationDirectoryName: "whisper-large-v3-turbo-coreml",
+            runtimeDirectoryName: "openai_whisper-large-v3_turbo_954MB",
+            displayName: "Whisper Large v3 Turbo",
+            summary: "已安裝多語 Whisper Large v3 Turbo，可自動偵測來源語言並產生字幕時間軸。",
+            profileName: "多語字幕 · Whisper Large v3 Turbo",
+            profileNotes: "多語言 Core ML Profile；自動偵測來源語言並輸出字幕時間軸。",
+            recommendedMemoryGB: 16,
             isRecommended: false
         )
     ]
@@ -171,16 +211,6 @@ public enum LocalModelDiscovery {
         fileManager: FileManager,
         result: inout DiscoveredModelCatalog
     ) {
-        let modelID = "argmaxinc/whisperkit-coreml@large-v3-turbo"
-        let revision = "0f63a7800b00dd0226abd051b906c246e1907482"
-        let installationDirectory = root.appendingPathComponent(
-            "whisper-large-v3-turbo-coreml",
-            isDirectory: true
-        )
-        let runtimeDirectory = installationDirectory.appendingPathComponent(
-            "openai_whisper-large-v3_turbo_954MB",
-            isDirectory: true
-        )
         let requiredPaths = [
             "MelSpectrogram.mlmodelc/coremldata.bin",
             "AudioEncoder.mlmodelc/coremldata.bin",
@@ -190,43 +220,53 @@ public enum LocalModelDiscovery {
             "tokenizer.json",
             "tokenizer_config.json"
         ]
-        guard requiredPaths.allSatisfy({
-            fileManager.fileExists(atPath: runtimeDirectory.appendingPathComponent($0).path)
-        }) else { return }
-        guard managedManifestMatches(
-            modelID: modelID,
-            directory: installationDirectory,
-            fileManager: fileManager
-        ) else { return }
+        for spec in whisperModelSpecs {
+            let installationDirectory = root.appendingPathComponent(
+                spec.installationDirectoryName,
+                isDirectory: true
+            )
+            let runtimeDirectory = installationDirectory.appendingPathComponent(
+                spec.runtimeDirectoryName,
+                isDirectory: true
+            )
+            guard requiredPaths.allSatisfy({
+                fileManager.fileExists(atPath: runtimeDirectory.appendingPathComponent($0).path)
+            }) else { continue }
+            guard managedManifestMatches(
+                modelID: spec.modelID,
+                directory: installationDirectory,
+                fileManager: fileManager
+            ) else { continue }
 
-        result.models.append(
-            ModelDescriptor(
-                id: modelID,
-                displayName: "Whisper Large v3 Turbo Core ML（本機）",
-                publisher: "Local / Argmax / OpenAI",
-                summary: "已安裝多語 Whisper Large v3 Turbo，可自動偵測來源語言並產生字幕時間軸。",
-                capabilities: [.videoToText],
-                quantization: .coreML,
-                approximateDownloadGB: sizeInGB(of: installationDirectory, fileManager: fileManager),
-                recommendedMemoryGB: 16,
-                licenseName: "MIT / Apache-2.0",
-                sourceURL: URL(string: "https://huggingface.co/argmaxinc/whisperkit-coreml"),
-                localURL: runtimeDirectory,
-                isRecommended: true
+            result.models.append(
+                ModelDescriptor(
+                    id: spec.modelID,
+                    displayName: "\(spec.displayName)（本機）",
+                    publisher: "Local / Argmax / OpenAI",
+                    summary: spec.summary,
+                    capabilities: [.videoToText],
+                    quantization: .coreML,
+                    approximateDownloadGB: sizeInGB(of: installationDirectory, fileManager: fileManager),
+                    recommendedMemoryGB: spec.recommendedMemoryGB,
+                    licenseName: "MIT / Apache-2.0",
+                    sourceURL: URL(string: "https://huggingface.co/argmaxinc/whisperkit-coreml"),
+                    localURL: runtimeDirectory,
+                    isRecommended: spec.isRecommended
+                )
             )
-        )
-        result.profiles.append(
-            InferenceProfile(
-                name: "多語字幕 · Whisper Large v3 Turbo",
-                capability: .videoToText,
-                modelID: modelID,
-                modelRevision: revision,
-                architecture: .coreML,
-                defaults: ProfileDefaults(languageCode: "auto"),
-                notes: "從 \(runtimeDirectory.path) 自動偵測；自動辨識語言並輸出字幕時間軸。",
-                isBuiltIn: true
+            result.profiles.append(
+                InferenceProfile(
+                    name: spec.profileName,
+                    capability: .videoToText,
+                    modelID: spec.modelID,
+                    modelRevision: spec.revision,
+                    architecture: .coreML,
+                    defaults: ProfileDefaults(languageCode: "auto"),
+                    notes: "從 \(runtimeDirectory.path) 自動偵測；\(spec.profileNotes)",
+                    isBuiltIn: true
+                )
             )
-        )
+        }
     }
 
     private static func discoverParakeetJapanese(

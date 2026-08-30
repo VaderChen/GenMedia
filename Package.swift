@@ -20,20 +20,20 @@ let package = Package(
     ],
     dependencies: [
         .package(
-            url: "https://github.com/zhutao100/Z-Image.swift.git",
-            revision: "28bfcf3148c041a554629247170eb54d9ac46830"
-        ),
-        .package(
             url: "https://github.com/ml-explore/mlx-swift-lm.git",
-            revision: "7da33441c7c08b010ff1aa8da9dc3d82277272f5"
+            exact: "3.31.4"
         ),
         .package(
             url: "https://github.com/ml-explore/mlx-swift.git",
-            exact: "0.30.6"
+            exact: "0.31.6"
         ),
         .package(
             url: "https://github.com/apple/swift-log.git",
             from: "1.6.4"
+        ),
+        .package(
+            url: "https://github.com/huggingface/swift-transformers",
+            exact: "1.3.3"
         ),
         .package(
             url: "https://github.com/argmaxinc/argmax-oss-swift.git",
@@ -55,9 +55,11 @@ let package = Package(
         .target(
             name: "ACEStepSwiftRuntime",
             dependencies: [
-                .product(name: "ZImage", package: "z-image.swift"),
                 .product(name: "MLX", package: "mlx-swift"),
-                .product(name: "MLXNN", package: "mlx-swift")
+                .product(name: "MLXFast", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+                .product(name: "Hub", package: "swift-transformers"),
+                .product(name: "Tokenizers", package: "swift-transformers")
             ]
         ),
         .executableTarget(
@@ -77,9 +79,11 @@ let package = Package(
                 "GenImageCore",
                 "GenImageGGUF",
                 "ACEStepSwiftRuntime",
-                .product(name: "ZImage", package: "z-image.swift"),
+                .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXVLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
+                .product(name: "Tokenizers", package: "swift-transformers"),
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "Logging", package: "swift-log")

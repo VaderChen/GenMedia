@@ -162,7 +162,6 @@ export function renderProfileDetails(profile, isActive, models) {
 function renderBuiltInActions(profile, isActive, models) {
   return `<div class="button-row">
     ${renderActivationButton(profile, isActive, models)}
-    <button class="secondary-button compact" data-action="duplicateProfile" data-profile-id="${profile.id}">${t("profile.duplicate")}</button>
     ${renderProfileInstallButton(profile, models)}
   </div>`;
 }

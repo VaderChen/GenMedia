@@ -162,4 +162,4 @@ Upscale 由 `CoreMLUpscaleService` 執行 Real-ESRGAN 512 tile 與 4× 拼接。
 
 `scripts/build-ffmpeg-macos.sh` 產生 Apple Silicon、LGPL-only、動態連結且可重新替換的 FFmpeg 發佈目錄。`build.command` 驗證未啟用 GPL／nonfree 編碼器，複製 `ffmpeg`、`ffprobe`、dylib 與授權文件，將 install name 改為 `@rpath`，依序簽署 dylib、工具與 App，再交由既有 DMG 公證流程處理。Developer ID 測試確認 FFmpeg dylib 與工具使用相同 Team ID 時不需額外 library-validation entitlement；本機 ad-hoc 建置則不對 FFmpeg 啟用 hardened runtime。預建二進位位於被 Git 忽略的 `third_party/ffmpeg/`，不進入 GitHub Source archive。
 
-MLX metallib 已由 `RuntimeSupport/mlx.metallib` 與 `build.command` 放入 Release 執行目錄。發佈前仍需完成模型授權檢查與 16/24/32GB 壓力測試。
+MLX metallib 依 MLX Swift 版本分開管理。主程式、Qwen、MiniMax Music 3 與 LTX Worker 使用 `mlx-swift 0.31.6`，建置時由 `RuntimeSupport/mlx-swift-0.31.6.metallib` 複製到各自的 Release 執行目錄；Z-Image Worker 因相依套件限制使用 `mlx-swift 0.30.6`，則使用 `RuntimeSupport/mlx-swift-0.30.6-zimage.metallib`，並放在 App Bundle 的 `Contents/Helpers/ZImage/`。`build.command` 會從各套件的 `Package.resolved` 讀取版本、檢查相容 Worker 版本一致，再以 MLX kernel 與 lockfile 指紋決定是否重建，避免不同版本共用或誤用未標版本的 `mlx.metallib`。發佈前仍需完成模型授權檢查與 16/24/32GB 壓力測試。

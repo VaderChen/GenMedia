@@ -2,8 +2,47 @@
 
 import MLX
 import MLXNN
-import ZImage
 import Foundation
+
+struct QwenTextEncoderConfiguration {
+    var vocabSize: Int
+    var hiddenSize: Int
+    var numHiddenLayers: Int
+    var numAttentionHeads: Int
+    var numKeyValueHeads: Int
+    var intermediateSize: Int
+    var ropeTheta: Float
+    var maxPositionEmbeddings: Int
+    var rmsNormEps: Float
+    var promptDropIndex: Int
+    var headDim: Int
+
+    init(
+        vocabSize: Int,
+        hiddenSize: Int,
+        numHiddenLayers: Int,
+        numAttentionHeads: Int,
+        numKeyValueHeads: Int,
+        intermediateSize: Int,
+        ropeTheta: Float,
+        maxPositionEmbeddings: Int,
+        rmsNormEps: Float,
+        promptDropIndex: Int,
+        headDim: Int
+    ) {
+        self.vocabSize = vocabSize
+        self.hiddenSize = hiddenSize
+        self.numHiddenLayers = numHiddenLayers
+        self.numAttentionHeads = numAttentionHeads
+        self.numKeyValueHeads = numKeyValueHeads
+        self.intermediateSize = intermediateSize
+        self.ropeTheta = ropeTheta
+        self.maxPositionEmbeddings = maxPositionEmbeddings
+        self.rmsNormEps = rmsNormEps
+        self.promptDropIndex = promptDropIndex
+        self.headDim = headDim
+    }
+}
 
 struct QwenEmbeddingConfiguration: Decodable {
     let vocabSize: Int

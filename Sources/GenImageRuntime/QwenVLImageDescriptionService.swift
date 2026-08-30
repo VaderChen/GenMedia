@@ -3,6 +3,8 @@ import GenImageCore
 import ImageIO
 import MLXLMCommon
 import MLXVLM
+import MLXHuggingFace
+import Tokenizers
 import UniformTypeIdentifiers
 
 public actor QwenVLImageDescriptionService: ImageDescribing {
@@ -242,10 +244,10 @@ public actor QwenVLImageDescriptionService: ImageDescribing {
         container = nil
         loadedModelPath = nil
         let loaded = try await VLMModelFactory.shared.loadContainer(
-            configuration: ModelConfiguration(directory: modelURL)
-        ) { value in
-            progress(value.fractionCompleted * 0.45)
-        }
+            from: modelURL,
+            using: #huggingFaceTokenizerLoader()
+        )
+        progress(0.45)
         container = loaded
         loadedModelPath = modelURL.standardizedFileURL.path
         return loaded

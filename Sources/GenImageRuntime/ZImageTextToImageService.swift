@@ -1,30 +1,18 @@
 import Foundation
 import GenImageCore
-import Logging
-import ZImage
 
 public actor ZImageTextToImageService: TextToImageGenerating {
     private var outputDirectory: URL
-    private let pipeline: ZImagePipeline
-    private var cacheTrimTask: Task<Void, Never>?
 
     public init(outputDirectory: URL) {
         self.outputDirectory = outputDirectory
-        let logger = Logger(label: "genimage.zimage") { _ in
-            SwiftLogNoOpLogHandler()
-        }
-        pipeline = ZImagePipeline(logger: logger)
     }
 
     public func setOutputDirectory(_ outputDirectory: URL) {
         self.outputDirectory = outputDirectory
     }
 
-    /// 釋放目前常駐的 MLX 模型，供記憶體壓力保護使用。
     public func unload() {
-        cacheTrimTask?.cancel()
-        cacheTrimTask = nil
-        pipeline.unloadModel()
     }
 
     public func generate(
@@ -41,27 +29,26 @@ public actor ZImageTextToImageService: TextToImageGenerating {
         try request.recipe.validate()
         let modelURL = URL(fileURLWithPath: request.profile.modelID, isDirectory: true)
         var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: modelURL.path, isDirectory: &isDirectory) else {
+        guard FileManager.default.fileExists(atPath: modelURL.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
             throw ZImageRuntimeError.modelNotFound(modelURL)
         }
 
-        cacheTrimTask?.cancel()
-        cacheTrimTask = nil
-        defer { scheduleWarmCacheTrim() }
-
-        let loraConfiguration: LoRAConfiguration?
+        let loraPath: URL?
+        let loraScale: Double?
         if let selection = request.recipe.lora {
             let loraURL = selection.localURL.resolvingSymlinksInPath().standardizedFileURL
             var isLoRADirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: loraURL.path, isDirectory: &isLoRADirectory) else {
                 throw ZImageRuntimeError.loraNotFound(loraURL)
             }
-            let compatibleLoRAURL = isLoRADirectory.boolValue
+            loraPath = isLoRADirectory.boolValue
                 ? loraURL
                 : try normalizedLoRAURLIfNeeded(loraURL)
-            loraConfiguration = .local(compatibleLoRAURL, scale: Float(selection.scale))
+            loraScale = selection.scale
         } else {
-            loraConfiguration = nil
+            loraPath = nil
+            loraScale = nil
         }
 
         try FileManager.default.createDirectory(
@@ -69,109 +56,178 @@ public actor ZImageTextToImageService: TextToImageGenerating {
             withIntermediateDirectories: true
         )
 
-        let outputCount = request.recipe.outputCount
-        var assets: [MediaAsset] = []
-        assets.reserveCapacity(outputCount)
-
-        for index in 0..<outputCount {
-            try Task.checkCancellation()
-            let seed = request.recipe.seed &+ UInt64(index)
-            let outputURL = OutputFileNaming.imageURL(in: outputDirectory, pathExtension: "png")
-            let generationRequest = ZImageGenerationRequest(
-                prompt: request.recipe.prompt,
-                negativePrompt: request.recipe.negativePrompt.isEmpty
-                    ? nil
-                    : request.recipe.negativePrompt,
-                width: request.recipe.width,
-                height: request.recipe.height,
-                steps: request.recipe.steps,
-                guidanceScale: 0,
-                seed: seed,
-                outputPath: outputURL,
-                model: modelURL.path,
-                lora: loraConfiguration,
-                runtimeOptions: ZImageRuntimeOptions(residencyPolicy: .warm)
-            )
-
-            var lastFraction = 0.0
-            var lastReportedFraction = -1.0
-            var lastReportedAt = Date.distantPast
-            do {
-                _ = try await pipeline.generate(generationRequest) { update in
-                    let currentFraction: Double
-                    switch update.stage {
-                    case .loadingModel:
-                        currentFraction = 0.02
-                    case .encodingText:
-                        currentFraction = 0.12
-                    case .loadingTransformer:
-                        currentFraction = 0.18
-                    case .loadingLoRA:
-                        currentFraction = 0.22
-                    case .loadingVAE:
-                        currentFraction = 0.24
-                    case .denoising:
-                        currentFraction = 0.25 + update.fractionCompleted * 0.60
-                    case .decoding:
-                        currentFraction = 0.90
-                    case .saving:
-                        currentFraction = 0.98
-                    }
-                    lastFraction = max(lastFraction, currentFraction)
-                    let aggregateFraction = (Double(index) + lastFraction) / Double(outputCount)
-                    let now = Date()
-                    guard aggregateFraction >= 1
-                        || aggregateFraction - lastReportedFraction >= 0.01
-                        || now.timeIntervalSince(lastReportedAt) >= 0.1 else {
-                        return
-                    }
-                    lastReportedFraction = aggregateFraction
-                    lastReportedAt = now
-                    progress(aggregateFraction)
+        let outputURLs = (0..<request.recipe.outputCount).map { _ in
+            OutputFileNaming.imageURL(in: outputDirectory, pathExtension: "png")
+        }
+        var completed = false
+        defer {
+            if !completed {
+                for outputURL in outputURLs {
+                    try? FileManager.default.removeItem(at: outputURL)
                 }
-            } catch let error as ZImagePipeline.PipelineError {
-                throw ZImageRuntimeError.pipelineFailure(Self.pipelineErrorMessage(error))
             }
-            try Task.checkCancellation()
-            progress(Double(index + 1) / Double(outputCount))
+        }
 
-            guard FileManager.default.fileExists(atPath: outputURL.path) else {
-                throw ZImageRuntimeError.outputMissing(outputURL)
+        let identifier = UUID().uuidString
+        let requestURL = outputDirectory.appendingPathComponent("z-image-\(identifier)-request.json")
+        let logURL = outputDirectory.appendingPathComponent("z-image-\(identifier).log")
+        defer {
+            try? FileManager.default.removeItem(at: requestURL)
+            try? FileManager.default.removeItem(at: logURL)
+        }
+        let payload = WorkerRequest(
+            modelDirectory: modelURL.path,
+            outputPaths: outputURLs.map(\.path),
+            prompt: request.recipe.prompt,
+            negativePrompt: request.recipe.negativePrompt,
+            width: request.recipe.width,
+            height: request.recipe.height,
+            steps: request.recipe.steps,
+            seed: request.recipe.seed,
+            loraPath: loraPath?.path,
+            loraScale: loraScale
+        )
+        try JSONEncoder().encode(payload).write(to: requestURL, options: .atomic)
+        let log = try RuntimeLog(at: logURL)
+        defer { log.close() }
+
+        let executable = try Self.workerExecutable()
+        progress(0.01)
+        let status = try await RuntimeProcess.run(
+            executable: executable,
+            arguments: ["--request", requestURL.path],
+            environment: RuntimeExecutable.environment(),
+            log: log,
+            pollInterval: .milliseconds(300)
+        ) {
+            if let value = Self.latestProgress(in: log) {
+                progress(min(0.99, max(0.01, value)))
             }
-            assets.append(
-                MediaAsset(
-                    projectID: request.projectID,
-                    parentAssetID: request.sourceAsset?.id,
-                    kind: .generated,
-                    title: outputCount == 1 ? "生成結果" : "生成結果 \(index + 1)",
-                    fileURL: outputURL,
-                    pixelWidth: request.recipe.width,
-                    pixelHeight: request.recipe.height,
-                    recipeID: request.recipe.id
-                )
+        }
+        guard status == 0 else {
+            throw ZImageRuntimeError.workerFailed(
+                status: status,
+                message: Self.logMessage(in: log)
+            )
+        }
+        try Task.checkCancellation()
+        guard outputURLs.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {
+            let missing = outputURLs.first(where: { !FileManager.default.fileExists(atPath: $0.path) })
+                ?? outputURLs[0]
+            throw ZImageRuntimeError.outputMissing(missing)
+        }
+
+        let outputCount = outputURLs.count
+        let assets = outputURLs.enumerated().map { index, outputURL in
+            MediaAsset(
+                projectID: request.projectID,
+                parentAssetID: request.sourceAsset?.id,
+                kind: .generated,
+                title: outputCount == 1 ? "生成結果" : "生成結果 \(index + 1)",
+                fileURL: outputURL,
+                pixelWidth: request.recipe.width,
+                pixelHeight: request.recipe.height,
+                recipeID: request.recipe.id
             )
         }
 
+        completed = true
         progress(1)
         return assets
     }
 
-    private func scheduleWarmCacheTrim() {
-        cacheTrimTask?.cancel()
-        cacheTrimTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: .seconds(300))
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            await self?.trimWarmCache()
-        }
+    private struct WorkerRequest: Encodable {
+        var modelDirectory: String
+        var outputPaths: [String]
+        var prompt: String
+        var negativePrompt: String
+        var width: Int
+        var height: Int
+        var steps: Int
+        var seed: UInt64
+        var loraPath: String?
+        var loraScale: Double?
     }
 
-    private func trimWarmCache() {
-        pipeline.trimCache()
-        cacheTrimTask = nil
+    private struct WorkerEvent: Decodable {
+        var type: String
+        var value: Double?
+        var message: String?
+    }
+
+    private nonisolated static func workerExecutable() throws -> URL {
+        let name = "GenImageZImageWorker"
+        let environment = ProcessInfo.processInfo.environment
+        var candidates: [URL] = []
+        if let configured = environment["GENIMAGE_ZIMAGE_WORKER"], !configured.isEmpty {
+            candidates.append(URL(fileURLWithPath: configured))
+        }
+        if let executableDirectory = Bundle.main.executableURL?.deletingLastPathComponent() {
+            candidates.append(executableDirectory.appendingPathComponent(name))
+            candidates.append(
+                executableDirectory
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("Helpers", isDirectory: true)
+                    .appendingPathComponent(name)
+            )
+            candidates.append(
+                executableDirectory
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("Helpers/ZImage", isDirectory: true)
+                    .appendingPathComponent(name)
+            )
+        }
+        candidates.append(
+            Bundle.main.bundleURL
+                .appendingPathComponent("Contents/Helpers/ZImage", isDirectory: true)
+                .appendingPathComponent(name)
+        )
+
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let packageRoot = sourceRoot
+            .appendingPathComponent("RuntimeSupport/ZImageWorker", isDirectory: true)
+        candidates.append(
+            packageRoot
+                .appendingPathComponent(".build/out/Products/Release", isDirectory: true)
+                .appendingPathComponent(name)
+        )
+        candidates.append(
+            packageRoot
+                .appendingPathComponent(".build/release", isDirectory: true)
+                .appendingPathComponent(name)
+        )
+        candidates.append(
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+                .appendingPathComponent("RuntimeSupport/ZImageWorker/.build/release/\(name)")
+        )
+
+        guard let executable = RuntimeExecutable.locate(candidates) else {
+            throw ZImageRuntimeError.workerNotFound(candidates.map(\.path))
+        }
+        return executable
+    }
+
+    private nonisolated static func latestProgress(in log: RuntimeLog) -> Double? {
+        guard let data = log.data() else { return nil }
+        return data.split(separator: 0x0A).compactMap { line -> Double? in
+            guard let event = try? JSONDecoder().decode(WorkerEvent.self, from: Data(line)),
+                  event.type == "progress" else { return nil }
+            return event.value
+        }.last
+    }
+
+    private nonisolated static func logMessage(in log: RuntimeLog) -> String {
+        guard let data = log.data() else { return "Z-Image Worker 未提供錯誤訊息。" }
+        let events = data.split(separator: 0x0A).compactMap {
+            try? JSONDecoder().decode(WorkerEvent.self, from: Data($0))
+        }
+        if let message = events.last(where: { $0.type == "error" })?.message {
+            return message
+        }
+        return log.message(maximumBytes: 4_096, fallback: "Z-Image Worker 執行失敗。")
     }
 
     private func normalizedLoRAURLIfNeeded(_ url: URL) throws -> URL {
@@ -257,26 +313,6 @@ public actor ZImageTextToImageService: TextToImageGenerating {
         return normalizedURL
     }
 
-    private static func pipelineErrorMessage(_ error: ZImagePipeline.PipelineError) -> String {
-        switch error {
-        case .notImplemented:
-            return "Z-Image Runtime 尚未實作此功能。"
-        case .tokenizerNotLoaded:
-            return "Z-Image tokenizer 尚未載入。"
-        case let .invalidDimensions(message), let .invalidModelPath(message), let .weightsMissing(message):
-            return message
-        case .textEncoderNotLoaded:
-            return "Z-Image 文字編碼器尚未載入。"
-        case .transformerNotLoaded:
-            return "Z-Image Transformer 尚未載入。"
-        case .vaeNotLoaded:
-            return "Z-Image VAE 尚未載入。"
-        case .modelNotLoaded:
-            return "Z-Image 模型尚未載入。"
-        case let .loraError(error):
-            return "LoRA 載入失敗：\(error.localizedDescription)"
-        }
-    }
 }
 
 public enum ZImageRuntimeError: LocalizedError, Sendable {
@@ -285,7 +321,8 @@ public enum ZImageRuntimeError: LocalizedError, Sendable {
     case modelNotFound(URL)
     case loraNotFound(URL)
     case unsupportedLoRAFormat(URL)
-    case pipelineFailure(String)
+    case workerNotFound([String])
+    case workerFailed(status: Int32, message: String)
     case outputMissing(URL)
 
     public var errorDescription: String? {
@@ -300,8 +337,10 @@ public enum ZImageRuntimeError: LocalizedError, Sendable {
             "找不到 LoRA 模型：\(url.path)"
         case let .unsupportedLoRAFormat(url):
             "LoRA 必須是 .safetensors 檔案：\(url.path)"
-        case let .pipelineFailure(message):
-            message
+        case let .workerNotFound(paths):
+            "找不到 Z-Image Runtime Worker。已檢查：\(paths.joined(separator: "、"))"
+        case let .workerFailed(status, message):
+            "Z-Image Runtime 結束（\(status)）：\(message)"
         case let .outputMissing(url):
             "Z-Image 完成推論但沒有產生檔案：\(url.path)"
         }

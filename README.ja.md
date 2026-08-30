@@ -69,7 +69,9 @@ LTX Worker は JSON request と段階別進捗イベントでアプリと通信�
 
 ### 字幕生成
 
-字幕フローは動画または音声を読み込み、内蔵 `ffprobe` でトラックを検査し、内蔵 `ffmpeg` で選択した音声を 16 kHz モノラル PCM に統一してから `SubtitleGenerationRouter` がネイティブ Core ML ASR Adapter を選択します。区間タイムラインを保持したまま SRT または WebVTT を出力します。多言語 Whisper Large v3 Turbo、中国語 Paraformer Large、日本語 Parakeet 0.6B をサポートし、入力言語は自動検出または Profile で指定できます。
+字幕フローは動画または音声を読み込み、内蔵 `ffprobe` でトラックを検査し、内蔵 `ffmpeg` で選択した音声を 16 kHz モノラル PCM に統一してから `SubtitleGenerationRouter` がネイティブ Core ML ASR Adapter を選択します。区間タイムラインを保持したまま SRT または WebVTT を出力します。高速でメモリ使用量の少ない多言語 Whisper Small を既定の推奨とし、高い認識品質が必要な場合は Whisper Large v3 Turbo に切り替えられます。中国語 Paraformer Large と日本語 Parakeet 0.6B もサポートし、入力言語は自動検出または Profile で指定できます。
+
+Whisper Small と Large v3 Turbo は Model Center からそれぞれ `argmaxinc/whisperkit-coreml@small` と `argmaxinc/whisperkit-coreml@large-v3-turbo` としてダウンロードできます。Small は約 216 MB、推奨メモリ 8 GB、Large は約 954 MB、推奨メモリ 16 GB です。どちらも同じネイティブ WhisperKit／Core ML Runtime を使用します。
 
 認識後はローカル Qwen3.5／Qwen3.8 MLX テキストモデルを任意で使用し、タイムラインを変えずに繁体字中国語、簡体字中国語、英語、日本語、韓国語、スペイン語、フランス語、ドイツ語、イタリア語、ポルトガル語、ロシア語、アラビア語、ヒンディー語、ベンガル語、インドネシア語、ベトナム語、タイ語、トルコ語、ポーランド語、オランダ語、スウェーデン語、チェコ語、ウクライナ語、マレー語、フィリピン語の 25 言語へ翻訳できます。結果は入力動画または音声を parent とする `generatedSubtitle` アセットとして現在のワークスペースに保存されます。
 

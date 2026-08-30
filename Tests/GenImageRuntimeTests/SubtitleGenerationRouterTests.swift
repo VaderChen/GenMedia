@@ -94,6 +94,65 @@ struct SubtitleGenerationRouterTests {
         #expect(!FileManager.default.fileExists(atPath: outputDirectory.path))
     }
 
+    @Test func translationBatchesUseTheReducedStructuredOutputLimits() {
+        let segments = (0..<13).map { index in
+            TimedTranscriptSegment(start: Double(index), end: Double(index + 1), text: "字幕 \(index)")
+        }
+
+        let batches = SubtitleGenerationRouter.translationBatches(segments)
+
+        #expect(batches.count == 2)
+        #expect(batches[0].count == 12)
+        #expect(batches[1].count == 1)
+        #expect(batches.allSatisfy { $0.count <= SubtitleGenerationRouter.maximumTranslationBatchItems })
+        #expect(batches.allSatisfy {
+            $0.reduce(0) { $0 + $1.text.count }
+                <= SubtitleGenerationRouter.maximumTranslationBatchCharacters
+        })
+    }
+
+    @Test func translationKeepsOriginalRecognitionAboveTranslatedText() async throws {
+        let outputDirectory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+        let router = SubtitleGenerationRouter(
+            outputDirectory: outputDirectory,
+            adapters: [StubTranscriber(supportedModelIDs: ["test-model"])],
+            translator: StubTextGenerator(
+                output: "[{\"index\":0,\"text\":\"Translated subtitle\"}]"
+            )
+        )
+        var translationRequest = request()
+        translationRequest.translation = SubtitleTranslationConfiguration(
+            targetLanguage: .english,
+            profile: InferenceProfile(
+                name: "測試翻譯 Profile",
+                capability: .textToText,
+                modelID: "translation-model",
+                architecture: .coreML
+            ),
+            modelURL: URL(fileURLWithPath: "/tmp/translation-model", isDirectory: true)
+        )
+
+        let result = try await router.generate(request: translationRequest) { _ in }
+        let segment = try #require(result.transcript.segments.first)
+        let subtitleURL = try #require(result.asset.fileURL)
+        let document = try String(contentsOf: subtitleURL, encoding: .utf8)
+        let originalSubtitleURL = subtitleURL
+            .deletingPathExtension()
+            .appendingPathExtension("org")
+            .appendingPathExtension("srt")
+        let originalDocument = try String(
+            contentsOf: originalSubtitleURL,
+            encoding: .utf8
+        )
+
+        #expect(segment.text == "測試字幕\nTranslated subtitle")
+        #expect(result.transcript.languageCode == "en")
+        #expect(document.contains("00:00:00,000 --> 00:00:01,250\n測試字幕\nTranslated subtitle"))
+        #expect(originalDocument.contains("00:00:00,000 --> 00:00:01,250\n測試字幕"))
+        #expect(!originalDocument.contains("Translated subtitle"))
+    }
+
     private func temporaryDirectory() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(
             "genimage-subtitle-router-test-\(UUID().uuidString)",
@@ -161,11 +220,21 @@ private actor StubTranscriber: MediaTranscribing {
 }
 
 private actor StubTextGenerator: TextGenerating {
+    private let output: String?
+
+    init(output: String? = nil) {
+        self.output = output
+    }
+
     func generateText(
         request: TextGenerationRequest,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> String {
-        throw StubTextGeneratorError.unexpectedCall
+        guard let output else {
+            throw StubTextGeneratorError.unexpectedCall
+        }
+        progress(1)
+        return output
     }
 
     func unload() async {}

@@ -6,6 +6,7 @@ import {
   renderAssetRemovalDialog,
   renderAssetRenameDialog,
   renderCivitaiTokenDialog,
+  renderHuggingFaceTokenDialog,
   renderInfoDialog,
   renderModelRemovalDialog,
   renderPasteDialog,
@@ -153,6 +154,8 @@ const ui = {
   modelRemovalDialog: null,
   civitaiTokenDialog: null,
   civitaiTokenValue: "",
+  huggingFaceTokenDialog: null,
+  huggingFaceTokenValue: "",
   pasteDialogOpen: false,
   smallOutputWarning: null,
   infoDialog: null,
@@ -502,6 +505,21 @@ root.addEventListener("click", async (event) => {
         await invoke(dialog.action, { modelID: dialog.modelID, civitaiToken });
         break;
       }
+      case "huggingFaceTokenCancel":
+        ui.huggingFaceTokenDialog = null;
+        ui.huggingFaceTokenValue = "";
+        render();
+        break;
+      case "huggingFaceTokenConfirm": {
+        const dialog = ui.huggingFaceTokenDialog;
+        const huggingFaceToken = ui.huggingFaceTokenValue.trim();
+        if (!dialog || !huggingFaceToken) break;
+        ui.huggingFaceTokenDialog = null;
+        ui.huggingFaceTokenValue = "";
+        render();
+        await invoke(dialog.action, { modelID: dialog.modelID, huggingFaceToken });
+        break;
+      }
       case "workspaceTab":
         if (target.dataset.tabId === ui.activeWorkspaceTabID) {
           openWorkspaceTabRename(target.dataset.tabId);
@@ -696,6 +714,8 @@ root.addEventListener("click", async (event) => {
       case "repairModel":
         if (isCivitaiModel(target.dataset.modelId)) {
           openCivitaiTokenDialog(target.dataset.modelId, action);
+        } else if (modelNeedsHuggingFaceToken(target.dataset.modelId)) {
+          openHuggingFaceTokenDialog(target.dataset.modelId, action);
         } else {
           await invoke(action, { modelID: target.dataset.modelId });
         }
@@ -774,6 +794,11 @@ document.addEventListener("keydown", (event) => {
     root.querySelector('[data-action="civitaiTokenConfirm"]:not(:disabled)')?.click();
     return;
   }
+  if (event.key === "Enter" && event.target.matches?.("[data-huggingface-token-prompt]")) {
+    event.preventDefault();
+    root.querySelector('[data-action="huggingFaceTokenConfirm"]:not(:disabled)')?.click();
+    return;
+  }
   if (event.key === "Enter" && event.target.matches?.("[data-asset-rename-input]")) {
     event.preventDefault();
     root.querySelector('[data-action="assetRenameSave"]:not(:disabled)')?.click();
@@ -788,6 +813,7 @@ document.addEventListener("keydown", (event) => {
     || ui.assetRenameDialog
     || ui.modelRemovalDialog
     || ui.civitaiTokenDialog
+    || ui.huggingFaceTokenDialog
   ) {
     ui.workspaceCreateDialogOpen = false;
     ui.workspaceCreateName = "";
@@ -798,6 +824,8 @@ document.addEventListener("keydown", (event) => {
     ui.modelRemovalDialog = null;
     ui.civitaiTokenDialog = null;
     ui.civitaiTokenValue = "";
+    ui.huggingFaceTokenDialog = null;
+    ui.huggingFaceTokenValue = "";
     render();
     return;
   }
@@ -1049,6 +1077,13 @@ root.addEventListener("input", (event) => {
     return;
   }
 
+  if (event.target.matches("[data-huggingface-token-prompt]")) {
+    ui.huggingFaceTokenValue = event.target.value;
+    const confirmButton = root.querySelector('[data-action="huggingFaceTokenConfirm"]');
+    if (confirmButton) confirmButton.disabled = !ui.huggingFaceTokenValue.trim();
+    return;
+  }
+
   if (event.target.matches("[data-asset-rename-input]")) {
     ui.assetRenameValue = event.target.value;
     return;
@@ -1292,6 +1327,7 @@ function render() {
       ${renderAssetRenameDialog(state, ui)}
       ${renderModelRemovalDialog(state, ui)}
       ${renderCivitaiTokenDialog(state, ui)}
+      ${renderHuggingFaceTokenDialog(state, ui)}
       ${renderPasteDialog(state, ui, pasteState)}
       ${renderSmallOutputWarningDialog(ui)}
       ${renderInfoDialog(state, ui)}
@@ -1394,8 +1430,21 @@ function openCivitaiTokenDialog(modelID, action) {
   queueMicrotask(() => root.querySelector("[data-civitai-token-prompt]")?.focus({ preventScroll: true }));
 }
 
+function openHuggingFaceTokenDialog(modelID, action) {
+  ui.huggingFaceTokenDialog = { modelID, action };
+  ui.huggingFaceTokenValue = "";
+  render();
+  queueMicrotask(() => root.querySelector("[data-huggingface-token-prompt]")?.focus({ preventScroll: true }));
+}
+
 function isCivitaiModel(modelID) {
   return typeof modelID === "string" && modelID.toLocaleLowerCase().startsWith("civitai/");
+}
+
+function modelNeedsHuggingFaceToken(modelID) {
+  const item = state?.models?.find(({ descriptor }) => descriptor.id === modelID);
+  const message = item?.installation?.errorMessage || "";
+  return message.includes("HTTP 401") || message.includes("Hugging Face API Token");
 }
 
 function setInspectorTab(tab) {

@@ -4,7 +4,7 @@
 
 `GenImageASRPoC` 是獨立的本機語音辨識驗證程式，不會修改 GenMedia 主 App 的 UI、工作區或資產資料。它使用原生 Swift／Core ML 的 WhisperKit，將影片或音訊檔轉成帶時間軸的原文字幕。
 
-主 App 已整合完整字幕流程，並另外支援中文 Paraformer Large、日文 Parakeet 0.6B、SRT／WebVTT 資產與可選的 Qwen MLX 字幕翻譯。PoC 保留為 WhisperKit 媒體解碼、語言辨識與時間碼的獨立驗證入口。
+主 App 已整合完整字幕流程，並支援 Whisper Small（預設速度優先）與 Whisper Large v3 Turbo、中文 Paraformer Large、日文 Parakeet 0.6B、SRT／WebVTT 資產與可選的 Qwen MLX 字幕翻譯。PoC 保留為 WhisperKit 媒體解碼、語言辨識與時間碼的獨立驗證入口。
 
 ## 支援的輸入
 

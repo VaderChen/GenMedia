@@ -1168,6 +1168,19 @@ function comparisonPane(title, asset, width) {
   `;
 }
 
+function renderVideoSubtitleTrack(asset) {
+  if (!asset.subtitleURL) return "";
+  const format = String(asset.sidecarSubtitleFormat || "").toUpperCase();
+  const label = format ? `${t("asset.subtitle")} (${format})` : t("asset.subtitle");
+  return `<track
+          kind="subtitles"
+          src="${escapeHTML(asset.subtitleURL)}"
+          srclang="${escapeHTML(asset.languageCode || "und")}"
+          label="${escapeHTML(label)}"
+          default
+        />`;
+}
+
 function renderArtwork(asset, controls = false, showKind = true) {
   const hasMedia = Boolean(asset.previewURL);
   const isVideo = isVideoAsset(asset);
@@ -1177,7 +1190,6 @@ function renderArtwork(asset, controls = false, showKind = true) {
       ? isSubtitle
         ? controls && asset.textContent
           ? `<div class="subtitle-document-preview">
-              <span class="subtitle-document-icon" aria-hidden="true">CC</span>
               <pre>${escapeHTML(asset.textContent)}</pre>
             </div>`
           : `<span class="subtitle-placeholder" aria-label="${escapeHTML(asset.title)}">CC</span>`
@@ -1203,7 +1215,7 @@ function renderArtwork(asset, controls = false, showKind = true) {
           preload="metadata"
           playsinline
           ${controls ? "controls" : "muted"}
-        ></video>`
+        >${controls ? renderVideoSubtitleTrack(asset) : ""}</video>`
       : `<img src="${escapeHTML(asset.previewURL)}" data-asset-id="${escapeHTML(asset.id)}" alt="${escapeHTML(asset.title)}" draggable="false" />`
     : `<span class="placeholder-icon">${asset.kind === "upscaled" ? "↗" : asset.kind === "generated" ? "✦" : isAudio ? "♫" : isSubtitle ? "CC" : "▧"}</span>`;
   return `

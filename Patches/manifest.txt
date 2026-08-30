@@ -14,12 +14,10 @@
 # 同一個 checkout 的多個 patch 會依此檔案的順序套用；後面的 patch 可以依賴前面的結果。
 # 升級相依套件版本時，請先確認 patch 仍然正確，再更新此處的 expected_pin。
 
-. | z-image.swift | 28bfcf3148c041a554629247170eb54d9ac46830 | Z-Image.swift | Z-Image-Giniiki-mlx4.patch | Sources/ZImage/Model/Transformer/ZImageTransformer2D.swift | private func denseWeight | Z-Image MLX 量化相容性修正
-. | z-image.swift | 28bfcf3148c041a554629247170eb54d9ac46830 | Z-Image.swift | Z-Image-Quantized-Pad-Tokens.patch | Sources/ZImage/Model/Transformer/ZImageTransformer2D.swift | public func loadPadTokens | Z-Image packed pad token 修正
-. | z-image.swift | 28bfcf3148c041a554629247170eb54d9ac46830 | Z-Image.swift | Z-Image-Quantized-DType.patch | Sources/ZImage/Weights/ZImageWeightsMapper.swift | loadQuantizedComponent("transformer", dtype: dtype) | Z-Image 量化 dtype 修正
-. | z-image.swift | 28bfcf3148c041a554629247170eb54d9ac46830 | Z-Image.swift | Z-Image-Warm-Cache.patch | Sources/ZImage/Pipeline/ZImagePipeline.swift | public func trimCache() | Z-Image 暖機快取修正
-. | mlx-swift-lm | 7da33441c7c08b010ff1aa8da9dc3d82277272f5 | mlx-swift-lm | MLX-Swift-LM-Qwen35-Text-Only.patch | Libraries/MLXVLM/Models/Qwen35.swift | let inputs = inputs.ndim == 1 ? inputs.expandedDimensions(axis: 0) : inputs | Qwen3.5 多模態模型純文字輸入修正
-
+RuntimeSupport/ZImageWorker | z-image.swift | 28bfcf3148c041a554629247170eb54d9ac46830 | Z-Image.swift | Z-Image-Giniiki-mlx4.patch | Sources/ZImage/Model/Transformer/ZImageTransformer2D.swift | private func denseWeight | Z-Image MLX 量化相容性修正
+RuntimeSupport/ZImageWorker | z-image.swift | 28bfcf3148c041a554629247170eb54d9ac46830 | Z-Image.swift | Z-Image-Quantized-Pad-Tokens.patch | Sources/ZImage/Model/Transformer/ZImageTransformer2D.swift | public func loadPadTokens | Z-Image packed pad token 修正
+RuntimeSupport/ZImageWorker | z-image.swift | 28bfcf3148c041a554629247170eb54d9ac46830 | Z-Image.swift | Z-Image-Quantized-DType.patch | Sources/ZImage/Weights/ZImageWeightsMapper.swift | loadQuantizedComponent("transformer", dtype: dtype) | Z-Image 量化 dtype 修正
+RuntimeSupport/ZImageWorker | z-image.swift | 28bfcf3148c041a554629247170eb54d9ac46830 | Z-Image.swift | Z-Image-Warm-Cache.patch | Sources/ZImage/Pipeline/ZImagePipeline.swift | public func trimCache() | Z-Image 暖機快取修正
 RuntimeSupport/Qwen2511Worker | qwen-image-edit-swift | 0.7.2 | qwen-image-edit-swift | Qwen-Image-Edit-Output-Size.patch | Sources/QwenImageEdit/Pipeline.swift | width: Int? = nil | Qwen Image Edit 輸出解析度 API
 RuntimeSupport/Qwen2511Worker | qwen-image-edit-swift | 0.7.2 | qwen-image-edit-swift | Qwen-Image-Edit-Target-Size.patch | Sources/QwenImageEdit/Pipeline.swift | let (tw, th): (Int, Int) | Qwen Image Edit 目標尺寸
 RuntimeSupport/Qwen2511Worker | qwen-image-edit-swift | 0.7.2 | qwen-image-edit-swift | Qwen-Image-Edit-Cond-Grid.patch | Sources/QwenImageEdit/Pipeline.swift | for (imageIndex, image) in images.enumerated() | Qwen Image Edit 條件網格對齊

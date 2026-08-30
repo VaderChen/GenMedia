@@ -69,7 +69,9 @@ LTX Worker 透過 JSON request 與逐階段事件和 App 通訊；模型檔案�
 
 ### 字幕生成
 
-字幕流程可匯入影片或音訊，由內建 `ffprobe` 探測軌道，再以內建 `ffmpeg` 統一轉為 16 kHz 單聲道 PCM，交由 `SubtitleGenerationRouter` 選擇原生 Core ML ASR Adapter，保留片段時間軸並輸出 SRT 或 WebVTT。支援多語言 Whisper Large v3 Turbo、中文 Paraformer Large 與日文 Parakeet 0.6B；來源語言可自動偵測或由 Profile 指定。
+字幕流程可匯入影片或音訊，由內建 `ffprobe` 探測軌道，再以內建 `ffmpeg` 統一轉為 16 kHz 單聲道 PCM，交由 `SubtitleGenerationRouter` 選擇原生 Core ML ASR Adapter，保留片段時間軸並輸出 SRT 或 WebVTT。預設推薦較快、較省記憶體的多語言 Whisper Small；需要較高辨識品質時可切換 Whisper Large v3 Turbo，另支援中文 Paraformer Large 與日文 Parakeet 0.6B，來源語言可自動偵測或由 Profile 指定。
+
+Whisper Small 與 Large v3 Turbo 都可在模型中心下載，分別使用 `argmaxinc/whisperkit-coreml@small` 與 `argmaxinc/whisperkit-coreml@large-v3-turbo`；Small 安裝資料約 216 MB、建議 8 GB 記憶體，Large 約 954 MB、建議 16 GB 記憶體。兩者皆由同一套原生 WhisperKit／Core ML Runtime 執行。
 
 辨識完成後可選用本機 Qwen3.5／Qwen3.8 MLX 文生文模型，在不改變時間軸的前提下翻譯為繁中、簡中、英、日、韓、西、法、德、義、葡、俄、阿拉伯、印地、孟加拉、印尼、越南、泰、土耳其、波蘭、荷蘭、瑞典、捷克、烏克蘭、馬來或菲律賓文，共 25 種目標語言。字幕會以 `generatedSubtitle` 資產保存於目前工作區，並以來源影片或音訊為 parent。
 

@@ -69,7 +69,9 @@ LTX Worker는 JSON request와 단계별 진행률 이벤트로 앱과 통신하�
 
 ### 자막 생성
 
-자막 흐름은 비디오 또는 오디오를 가져와 내장 `ffprobe`로 트랙을 검사하고, 내장 `ffmpeg`로 선택한 오디오를 16 kHz 모노 PCM으로 통일한 뒤 `SubtitleGenerationRouter`가 네이티브 Core ML ASR Adapter를 선택합니다. 구간 타임라인을 보존하며 SRT 또는 WebVTT로 출력합니다. 다국어 Whisper Large v3 Turbo, 중국어 Paraformer Large, 일본어 Parakeet 0.6B를 지원하고 입력 언어는 자동 감지하거나 Profile에서 지정할 수 있습니다.
+자막 흐름은 비디오 또는 오디오를 가져와 내장 `ffprobe`로 트랙을 검사하고, 내장 `ffmpeg`로 선택한 오디오를 16 kHz 모노 PCM으로 통일한 뒤 `SubtitleGenerationRouter`가 네이티브 Core ML ASR Adapter를 선택합니다. 구간 타임라인을 보존하며 SRT 또는 WebVTT로 출력합니다. 더 빠르고 메모리 사용량이 적은 다국어 Whisper Small을 기본 권장으로 제공하며, 더 높은 인식 품질이 필요하면 Whisper Large v3 Turbo로 전환할 수 있습니다. 중국어 Paraformer Large와 일본어 Parakeet 0.6B도 지원하며 입력 언어는 자동 감지하거나 Profile에서 지정할 수 있습니다.
+
+Whisper Small과 Large v3 Turbo는 Model Center에서 각각 `argmaxinc/whisperkit-coreml@small` 및 `argmaxinc/whisperkit-coreml@large-v3-turbo`로 다운로드할 수 있습니다. Small은 약 216 MB와 8 GB 메모리, Large는 약 954 MB와 16 GB 메모리를 권장합니다. 두 모델 모두 동일한 네이티브 WhisperKit/Core ML Runtime을 사용합니다.
 
 인식 후에는 로컬 Qwen3.5/Qwen3.8 MLX 텍스트 모델로 타임라인을 유지한 채 번체 중국어, 간체 중국어, 영어, 일본어, 한국어, 스페인어, 프랑스어, 독일어, 이탈리아어, 포르투갈어, 러시아어, 아랍어, 힌디어, 벵골어, 인도네시아어, 베트남어, 태국어, 터키어, 폴란드어, 네덜란드어, 스웨덴어, 체코어, 우크라이나어, 말레이어, 필리핀어의 25개 언어로 번역할 수 있습니다. 결과는 원본 비디오 또는 오디오를 parent로 하는 `generatedSubtitle` 에셋으로 현재 작업 공간에 저장됩니다.
 

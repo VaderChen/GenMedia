@@ -69,7 +69,9 @@ Image-loop and media-merge tasks do not require an AI model. `MediaCompositionSe
 
 ### Subtitle Generation
 
-The subtitle workflow accepts video or audio, uses the bundled `ffprobe` to inspect its tracks, and normalizes the selected audio through the bundled `ffmpeg` to 16 kHz mono PCM before `SubtitleGenerationRouter` selects a native Core ML ASR adapter. It preserves segment timing and exports SRT or WebVTT. Supported ASR profiles are multilingual Whisper Large v3 Turbo, Chinese Paraformer Large, and Japanese Parakeet 0.6B; the source language can be detected automatically or selected by the profile.
+The subtitle workflow accepts video or audio, uses the bundled `ffprobe` to inspect its tracks, and normalizes the selected audio through the bundled `ffmpeg` to 16 kHz mono PCM before `SubtitleGenerationRouter` selects a native Core ML ASR adapter. It preserves segment timing and exports SRT or WebVTT. The faster, lower-memory multilingual Whisper Small is recommended by default; Whisper Large v3 Turbo remains available when higher recognition quality is preferred, alongside Chinese Paraformer Large and Japanese Parakeet 0.6B. The source language can be detected automatically or selected by the profile.
+
+Whisper Small and Large v3 Turbo can both be downloaded from Model Center using `argmaxinc/whisperkit-coreml@small` and `argmaxinc/whisperkit-coreml@large-v3-turbo`. Small requires about 216 MB of model data and 8 GB of memory; Large requires about 954 MB and 16 GB. Both use the same native WhisperKit/Core ML runtime.
 
 After transcription, an optional local Qwen3.5 or Qwen3.8 MLX text model can translate the unchanged timeline into 25 target languages: Traditional Chinese, Simplified Chinese, English, Japanese, Korean, Spanish, French, German, Italian, Portuguese, Russian, Arabic, Hindi, Bengali, Indonesian, Vietnamese, Thai, Turkish, Polish, Dutch, Swedish, Czech, Ukrainian, Malay, and Filipino. The result is stored in the active workspace as a `generatedSubtitle` asset whose parent is the source video or audio asset.
 
