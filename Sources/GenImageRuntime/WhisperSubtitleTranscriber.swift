@@ -4,6 +4,9 @@ import WhisperKit
 
 public actor WhisperSubtitleTranscriber: MediaTranscribing {
     public static let modelID = "argmaxinc/whisperkit-coreml@large-v3-turbo"
+    public static let smallModelID = "argmaxinc/whisperkit-coreml@small"
+    public static let defaultModelID = smallModelID
+    public static let supportedModelIDs: Set<String> = [modelID, smallModelID]
 
     private var loadedModelURL: URL?
     private var runtime: WhisperKit?
@@ -11,7 +14,7 @@ public actor WhisperSubtitleTranscriber: MediaTranscribing {
     public init() {}
 
     public nonisolated func supports(profile: InferenceProfile) -> Bool {
-        profile.modelID == Self.modelID
+        Self.supportedModelIDs.contains(profile.modelID)
     }
 
     public func transcribe(
@@ -45,17 +48,30 @@ public actor WhisperSubtitleTranscriber: MediaTranscribing {
             chunkingStrategy: .vad
         )
         decodeOptions.verbose = false
-        let results = try await whisperKit.transcribe(
-            audioPath: prepared.audioURL.path,
-            audioInputOptions: AudioInputOptions(
-                channelMode: .sumChannels(nil),
-                audioLoadingMode: .incremental(
-                    chunkDurationSeconds: 120,
-                    maxBufferedChunks: 2
-                )
-            ),
-            decodeOptions: decodeOptions
+        let progressReporter = WhisperTimelineProgressReporter(
+            durationSeconds: prepared.durationSeconds,
+            progress: progress
         )
+        whisperKit.segmentDiscoveryCallback = { segments in
+            progressReporter.report(segments)
+        }
+        defer { whisperKit.segmentDiscoveryCallback = nil }
+        let results = try await withTaskCancellationHandler {
+            try await whisperKit.transcribe(
+                audioPath: prepared.audioURL.path,
+                audioInputOptions: AudioInputOptions(
+                    channelMode: .sumChannels(nil),
+                    audioLoadingMode: .incremental(
+                        chunkDurationSeconds: 120,
+                        maxBufferedChunks: 2
+                    )
+                ),
+                decodeOptions: decodeOptions,
+                callback: { _ in progressReporter.shouldContinue }
+            )
+        } onCancel: {
+            progressReporter.cancel()
+        }
         try Task.checkCancellation()
         progress(0.94)
 
@@ -110,5 +126,56 @@ public actor WhisperSubtitleTranscriber: MediaTranscribing {
         runtime = loaded
         loadedModelURL = modelURL
         return loaded
+    }
+}
+
+private final class WhisperTimelineProgressReporter: @unchecked Sendable {
+    private let durationSeconds: Double
+    private let progress: @Sendable (Double) -> Void
+    private let lock = NSLock()
+    private var furthestRecognizedTime = 0.0
+    private var isCancelled = false
+
+    init(
+        durationSeconds: Double,
+        progress: @escaping @Sendable (Double) -> Void
+    ) {
+        self.durationSeconds = durationSeconds
+        self.progress = progress
+    }
+
+    var shouldContinue: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !isCancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        isCancelled = true
+        lock.unlock()
+    }
+
+    func report(_ segments: [TranscriptionSegment]) {
+        guard durationSeconds.isFinite, durationSeconds > 0,
+              let recognizedTime = segments.map({ Double($0.end) }).max(),
+              recognizedTime.isFinite else {
+            return
+        }
+
+        let reportedProgress: Double?
+        lock.lock()
+        if isCancelled || recognizedTime <= furthestRecognizedTime {
+            reportedProgress = nil
+        } else {
+            furthestRecognizedTime = recognizedTime
+            let fraction = min(1, max(0, recognizedTime / durationSeconds))
+            reportedProgress = min(0.92, 0.18 + fraction * 0.74)
+        }
+        lock.unlock()
+
+        if let reportedProgress {
+            progress(reportedProgress)
+        }
     }
 }

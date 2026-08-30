@@ -484,6 +484,19 @@ public enum ModelCatalog {
             recommendedMemoryGB: 16,
             licenseName: "MIT / Apache-2.0",
             sourceURL: URL(string: "https://huggingface.co/argmaxinc/whisperkit-coreml"),
+            isRecommended: false
+        ),
+        ModelDescriptor(
+            id: "argmaxinc/whisperkit-coreml@small",
+            displayName: "Whisper Small Core ML",
+            publisher: "Argmax / OpenAI",
+            summary: "較輕量的多語 Whisper Small Core ML 模型，使用較少記憶體並提升字幕辨識速度。",
+            capabilities: [.videoToText],
+            quantization: .coreML,
+            approximateDownloadGB: 0.216,
+            recommendedMemoryGB: 8,
+            licenseName: "MIT / Apache-2.0",
+            sourceURL: URL(string: "https://huggingface.co/argmaxinc/whisperkit-coreml"),
             isRecommended: true
         ),
         ModelDescriptor(
@@ -977,6 +990,16 @@ public enum ModelCatalog {
             architecture: .coreML,
             defaults: ProfileDefaults(languageCode: "auto"),
             notes: "多語言 Core ML Profile；自動偵測來源語言並輸出字幕時間軸。",
+            isBuiltIn: true
+        ),
+        InferenceProfile(
+            name: "多語字幕 · Whisper Small",
+            capability: .videoToText,
+            modelID: "argmaxinc/whisperkit-coreml@small",
+            modelRevision: "0f63a7800b00dd0226abd051b906c246e1907482",
+            architecture: .coreML,
+            defaults: ProfileDefaults(languageCode: "auto"),
+            notes: "較輕量的多語言 Core ML Profile；以較低記憶體需求換取更快的字幕辨識速度。",
             isBuiltIn: true
         ),
         InferenceProfile(

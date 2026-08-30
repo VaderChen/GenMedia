@@ -366,7 +366,11 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
         case "installModel":
             guard let model = model(from: params) else { throw BridgeError.invalidParameters }
-            store.installModel(model, civitaiToken: params["civitaiToken"] as? String)
+            store.installModel(
+                model,
+                civitaiToken: params["civitaiToken"] as? String,
+                huggingFaceToken: params["huggingFaceToken"] as? String
+            )
 
         case "installProfileModels":
             guard let id = uuid(params["profileID"]) else {
@@ -384,7 +388,11 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
         case "repairModel":
             guard let model = model(from: params) else { throw BridgeError.invalidParameters }
-            store.repairModel(model, civitaiToken: params["civitaiToken"] as? String)
+            store.repairModel(
+                model,
+                civitaiToken: params["civitaiToken"] as? String,
+                huggingFaceToken: params["huggingFaceToken"] as? String
+            )
 
         case "duplicateProfile":
             guard let id = uuid(params["profileID"]),

@@ -1324,8 +1324,7 @@ button:disabled {
   background: linear-gradient(145deg, #18324d, #2f6a78 55%, #5673c7);
 }
 
-.subtitle-placeholder,
-.subtitle-document-icon {
+.subtitle-placeholder {
   align-items: center;
   border: 2px solid currentColor;
   border-radius: 7px;
@@ -1341,11 +1340,8 @@ button:disabled {
 }
 
 .subtitle-document-preview {
-  align-items: center;
   color: white;
-  display: grid;
-  gap: 16px;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
   height: 100%;
   padding: 24px;
   width: 100%;

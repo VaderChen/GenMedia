@@ -7,12 +7,14 @@ struct SystemMetricsSnapshot: Encodable, Sendable {
     let ramTotalBytes: UInt64
     let ramUsage: Double?
     let gpuUsage: Double?
+    let npuUsage: Double?
 
     static let unavailable = SystemMetricsSnapshot(
         ramUsedBytes: 0,
         ramTotalBytes: 0,
         ramUsage: nil,
-        gpuUsage: nil
+        gpuUsage: nil,
+        npuUsage: nil
     )
 }
 
@@ -23,7 +25,8 @@ enum SystemMetricsReader {
             ramUsedBytes: memory.used,
             ramTotalBytes: memory.total,
             ramUsage: memory.ratio,
-            gpuUsage: readGPUUsage()
+            gpuUsage: readGPUUsage(),
+            npuUsage: readNPUUsage()
         )
     }
 
@@ -85,6 +88,51 @@ enum SystemMetricsReader {
             }
             IOObjectRelease(currentService)
             service = IOIteratorNext(iterator)
+        }
+        return readings.max()
+    }
+
+    private static func readNPUUsage() -> Double? {
+        let serviceClasses = [
+            "ANEDriver",
+            "ANEHWDevice",
+            "H1xANELoadBalancer",
+            "H11ANEIn"
+        ]
+        let utilizationKeys = [
+            "ANE Utilization %",
+            "Neural Engine Utilization %",
+            "Device Utilization %",
+            "Utilization %",
+            "Activity(%)"
+        ]
+
+        var readings: [Double] = []
+        for serviceClass in serviceClasses {
+            guard let matching = IOServiceMatching(serviceClass) else { continue }
+            var iterator: io_iterator_t = 0
+            guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS else {
+                continue
+            }
+
+            var service = IOIteratorNext(iterator)
+            while service != 0 {
+                let currentService = service
+                var properties: Unmanaged<CFMutableDictionary>?
+                if IORegistryEntryCreateCFProperties(currentService, &properties, kCFAllocatorDefault, 0) == KERN_SUCCESS,
+                   let dictionary = properties?.takeRetainedValue() as? [String: Any],
+                   let statistics = dictionary["PerformanceStatistics"] as? [String: Any] {
+                    for key in utilizationKeys {
+                        if let number = statistics[key] as? NSNumber {
+                            readings.append(min(1, max(0, number.doubleValue / 100)))
+                            break
+                        }
+                    }
+                }
+                IOObjectRelease(currentService)
+                service = IOIteratorNext(iterator)
+            }
+            IOObjectRelease(iterator)
         }
         return readings.max()
     }

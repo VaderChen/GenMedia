@@ -110,12 +110,14 @@ function renderSystemMetrics(state) {
   return `<section class="sidebar-system-metrics" aria-label="${t("metrics.title")}">
     ${metricRow("ram", t("metrics.ram"), metrics.ramUsage)}
     ${metricRow("gpu", t("metrics.gpu"), metrics.gpuUsage)}
+    ${metricRow("npu", t("metrics.npu"), metrics.npuUsage, t("metrics.npuNote"))}
   </section>`;
 }
 
-function metricRow(key, label, value) {
+function metricRow(key, label, value, note = "") {
   const metric = metricDisplay(value);
-  return `<div class="metric-row metric-level-${metric.level}" data-metric-key="${key}">
+  const title = note ? ` title="${escapeHTML(note)}"` : "";
+  return `<div class="metric-row metric-level-${metric.level}" data-metric-key="${key}"${title}>
     <div class="metric-label"><span>${label}</span><strong>${metric.label}</strong></div>
     <progress value="${metric.percent}" max="100" aria-label="${label}"></progress>
   </div>`;
@@ -130,7 +132,7 @@ function metricDisplay(value) {
 
 export function updateSystemMetricsDOM(state, root) {
   const metrics = state.systemMetrics || {};
-  [["ram", metrics.ramUsage], ["gpu", metrics.gpuUsage]].forEach(([key, value]) => {
+  [["ram", metrics.ramUsage], ["gpu", metrics.gpuUsage], ["npu", metrics.npuUsage]].forEach(([key, value]) => {
     const row = root.querySelector(`[data-metric-key="${key}"]`);
     if (!row) return;
     const metric = metricDisplay(value);
@@ -313,6 +315,36 @@ export function renderCivitaiTokenDialog(state, ui) {
       <div class="dialog-actions">
         <button class="secondary-button" data-action="civitaiTokenCancel">${t("common.cancel")}</button>
         <button class="primary-button" data-action="civitaiTokenConfirm" ${ui.civitaiTokenValue.trim() ? "" : "disabled"}>${t("civitai.startDownload")}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
+export function renderHuggingFaceTokenDialog(state, ui) {
+  const prompt = ui.huggingFaceTokenDialog;
+  if (!prompt) return "";
+  const item = state.models.find(({ descriptor }) => descriptor.id === prompt.modelID);
+  const modelName = item?.descriptor.displayName || prompt.modelID;
+  return `<div class="dialog-backdrop">
+    <section class="paste-dialog" role="dialog" aria-modal="true" aria-labelledby="huggingface-token-dialog-title">
+      <h2 id="huggingface-token-dialog-title">${t("huggingface.downloadTokenTitle")}</h2>
+      <p>${t("huggingface.downloadTokenMessage", { name: escapeHTML(modelName) })}</p>
+      <label class="dialog-field">${t("huggingface.tokenLabel")}
+        <input
+          class="field"
+          type="password"
+          value="${escapeHTML(ui.huggingFaceTokenValue)}"
+          placeholder="${t("huggingface.tokenPlaceholder")}"
+          data-huggingface-token-prompt
+          data-preserve-focus="huggingface-download-token"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </label>
+      <p class="dialog-note">${t("huggingface.downloadTokenNote")}</p>
+      <div class="dialog-actions">
+        <button class="secondary-button" data-action="huggingFaceTokenCancel">${t("common.cancel")}</button>
+        <button class="primary-button" data-action="huggingFaceTokenConfirm" ${ui.huggingFaceTokenValue.trim() ? "" : "disabled"}>${t("huggingface.startDownload")}</button>
       </div>
     </section>
   </div>`;

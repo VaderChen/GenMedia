@@ -57,4 +57,22 @@ struct SubtitleDocumentTests {
         #expect(document.contains("00:00:00,000 --> 00:00:00,000"))
         #expect(document.contains("00:00:01,000 --> 00:00:01,000"))
     }
+
+    @Test func previewTextPrefixesEachCueWithStartTime() {
+        let preview = SubtitleDocument.previewText(
+            format: .srt,
+            content: "1\n00:00:01,250 --> 00:00:02,500\n第一行\n\n2\n00:01:02,000 --> 00:01:03,000\n第二行\n"
+        )
+
+        #expect(preview == "[00:00:01.250] 第一行\n[00:01:02.000] 第二行")
+    }
+
+    @Test func previewTextSupportsWebVTTAndCueIdentifiers() {
+        let preview = SubtitleDocument.previewText(
+            format: .vtt,
+            content: "WEBVTT\n\nintro\n00:00.500 --> 00:01.500\nHello\n"
+        )
+
+        #expect(preview == "[00:00:00.500] Hello")
+    }
 }

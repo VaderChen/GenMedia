@@ -54,6 +54,7 @@ public actor HuggingFaceModelInstaller {
     public static let miniMaxMusic3GGUFModelID = "audio-cpp/MiniMax-Music3-GGUF@Q4_K-LM-Q4_K-DiT-Q8_0-depth"
     public static let miniMaxMusic3ComposerModelID = "Mothersuperior/minimax-music3-composer-5.7b-distilled"
     public static let whisperLargeV3TurboCoreMLModelID = "argmaxinc/whisperkit-coreml@large-v3-turbo"
+    public static let whisperSmallCoreMLModelID = "argmaxinc/whisperkit-coreml@small"
     public static let paraformerChineseCoreMLModelID = "FluidInference/paraformer-large-zh-coreml"
     public static let parakeetJapaneseCoreMLModelID = "FluidInference/parakeet-0.6b-ja-coreml"
     public static let realESRGAN4xModelID = "realesrgan-x4@coreml"
@@ -210,6 +211,7 @@ public actor HuggingFaceModelInstaller {
         modelID: String,
         rootURL: URL,
         civitaiToken: String? = nil,
+        huggingFaceToken: String? = nil,
         progress: @escaping @Sendable (ModelInstallProgress) -> Void
     ) async throws -> URL {
         guard let plan = Self.plan(for: modelID) else {
@@ -221,7 +223,7 @@ public actor HuggingFaceModelInstaller {
         let destination = rootURL.appendingPathComponent(plan.directoryName, isDirectory: true)
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
 
-        let files = try await resolveFiles(plan: plan)
+        let files = try await resolveFiles(plan: plan, huggingFaceToken: huggingFaceToken)
         guard !files.isEmpty else { throw ModelInstallerError.emptyRepository(modelID) }
         let totalBytes = files.reduce(Int64(0)) { $0 + $1.size }
         let completedBytes = files.reduce(Int64(0)) { result, file in
@@ -286,6 +288,7 @@ public actor HuggingFaceModelInstaller {
                         file,
                         destination: destination,
                         civitaiToken: civitaiToken,
+                        huggingFaceToken: huggingFaceToken,
                         progressTracker: progressTracker
                     )
                 }
@@ -299,6 +302,7 @@ public actor HuggingFaceModelInstaller {
                         file,
                         destination: destination,
                         civitaiToken: civitaiToken,
+                        huggingFaceToken: huggingFaceToken,
                         progressTracker: progressTracker
                     )
                 }
@@ -337,6 +341,7 @@ public actor HuggingFaceModelInstaller {
         _ file: ResolvedFile,
         destination: URL,
         civitaiToken: String?,
+        huggingFaceToken: String?,
         progressTracker: DownloadProgressTracker
     ) async throws {
         try Task.checkCancellation()
@@ -353,6 +358,7 @@ public actor HuggingFaceModelInstaller {
                     file,
                     fileURL: fileURL,
                     civitaiToken: civitaiToken,
+                    huggingFaceToken: huggingFaceToken,
                     progressTracker: progressTracker,
                     segmentKeys: segmentKeys
                 )
@@ -369,7 +375,11 @@ public actor HuggingFaceModelInstaller {
             }
         }
 
-        let request = try Self.downloadRequest(for: file, civitaiToken: civitaiToken)
+        let request = try Self.downloadRequest(
+            for: file,
+            civitaiToken: civitaiToken,
+            huggingFaceToken: huggingFaceToken
+        )
         let downloader = FileDownloadDelegate(
             destination: fileURL,
             expectedBytes: file.size,
@@ -398,6 +408,7 @@ public actor HuggingFaceModelInstaller {
         _ file: ResolvedFile,
         fileURL: URL,
         civitaiToken: String?,
+        huggingFaceToken: String?,
         progressTracker: DownloadProgressTracker,
         segmentKeys: [String]
     ) async throws {
@@ -431,7 +442,11 @@ public actor HuggingFaceModelInstaller {
                         progressTracker.report(key, received: expectedBytes)
                         return
                     }
-                    var request = try Self.downloadRequest(for: file, civitaiToken: civitaiToken)
+                    var request = try Self.downloadRequest(
+                        for: file,
+                        civitaiToken: civitaiToken,
+                        huggingFaceToken: huggingFaceToken
+                    )
                     request.setValue(
                         "bytes=\(range.start)-\(range.end)",
                         forHTTPHeaderField: "Range"
@@ -535,7 +550,10 @@ public actor HuggingFaceModelInstaller {
         try FileManager.default.removeItem(at: destination)
     }
 
-    private func resolveFiles(plan: InstallPlan) async throws -> [ResolvedFile] {
+    private func resolveFiles(
+        plan: InstallPlan,
+        huggingFaceToken: String?
+    ) async throws -> [ResolvedFile] {
         var result: [ResolvedFile] = []
         for source in plan.sources {
             if let directURL = source.directURL {
@@ -558,7 +576,11 @@ public actor HuggingFaceModelInstaller {
                 )
                 continue
             }
-            let tree = try await Self.fetchTree(repository: source.repository, revision: source.revision)
+            let tree = try await Self.fetchTree(
+                repository: source.repository,
+                revision: source.revision,
+                huggingFaceToken: huggingFaceToken
+            )
             let selected = tree.filter {
                 $0.type == "file"
                     && $0.size >= 0
@@ -587,7 +609,8 @@ public actor HuggingFaceModelInstaller {
 
     private nonisolated static func fetchTree(
         repository: String,
-        revision: String
+        revision: String,
+        huggingFaceToken: String?
     ) async throws -> [HubTreeEntry] {
         guard let encodedRevision = revision.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(
@@ -598,7 +621,7 @@ public actor HuggingFaceModelInstaller {
         var request = URLRequest(url: url)
         request.timeoutInterval = 60
         request.setValue("GenImage/1.0", forHTTPHeaderField: "User-Agent")
-        Self.applyAuthorization(to: &request)
+        Self.applyAuthorization(to: &request, token: huggingFaceToken)
         let (data, response) = try await URLSession.shared.data(for: request)
         try Self.validate(response: response, data: data)
         return try JSONDecoder().decode([HubTreeEntry].self, from: data)
@@ -606,7 +629,8 @@ public actor HuggingFaceModelInstaller {
 
     private nonisolated static func downloadRequest(
         for file: ResolvedFile,
-        civitaiToken: String? = nil
+        civitaiToken: String? = nil,
+        huggingFaceToken: String? = nil
     ) throws -> URLRequest {
         if let downloadURL = file.downloadURL {
             var request = URLRequest(url: downloadURL)
@@ -626,12 +650,17 @@ public actor HuggingFaceModelInstaller {
         var request = URLRequest(url: url)
         request.timeoutInterval = 60 * 60 * 24
         request.setValue("GenImage/1.0", forHTTPHeaderField: "User-Agent")
-        applyAuthorization(to: &request)
+        applyAuthorization(to: &request, token: huggingFaceToken)
         return request
     }
 
-    private nonisolated static func applyAuthorization(to request: inout URLRequest) {
-        guard let token = huggingFaceToken() else { return }
+    private nonisolated static func applyAuthorization(
+        to request: inout URLRequest,
+        token: String? = nil
+    ) {
+        let token = token?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? huggingFaceToken()
+        guard let token, !token.isEmpty else { return }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
@@ -1389,6 +1418,43 @@ public actor HuggingFaceModelInstaller {
                     )
                 ]
             )
+        case whisperSmallCoreMLModelID:
+            return InstallPlan(
+                directoryName: "whisper-small-coreml",
+                runtimeRelativePath: "openai_whisper-small_216MB",
+                sources: [
+                    SourcePlan(
+                        repository: "argmaxinc/whisperkit-coreml",
+                        revision: "0f63a7800b00dd0226abd051b906c246e1907482",
+                        destinationSubdirectory: "",
+                        prefixes: [
+                            "openai_whisper-small_216MB/MelSpectrogram.mlmodelc/",
+                            "openai_whisper-small_216MB/AudioEncoder.mlmodelc/",
+                            "openai_whisper-small_216MB/TextDecoder.mlmodelc/"
+                        ],
+                        exactFiles: [
+                            "openai_whisper-small_216MB/config.json",
+                            "openai_whisper-small_216MB/generation_config.json"
+                        ]
+                    ),
+                    SourcePlan(
+                        repository: "openai/whisper-small",
+                        revision: "973afd24965f72e36ca33b3055d56a652f456b4d",
+                        destinationSubdirectory: "openai_whisper-small_216MB",
+                        prefixes: [],
+                        exactFiles: [
+                            "added_tokens.json",
+                            "merges.txt",
+                            "normalizer.json",
+                            "preprocessor_config.json",
+                            "special_tokens_map.json",
+                            "tokenizer.json",
+                            "tokenizer_config.json",
+                            "vocab.json"
+                        ]
+                    )
+                ]
+            )
         case paraformerChineseCoreMLModelID:
             return InstallPlan(
                 directoryName: "paraformer-large-zh-coreml-int8",
@@ -2051,7 +2117,7 @@ public enum ModelInstallerError: LocalizedError, Sendable {
             "模型伺服器回傳了無效回應。"
         case let .httpStatus(status, message):
             status == 401
-                ? "模型下載需要登入或 API Token（HTTP 401）：\(message)"
+                ? "模型下載需要 Hugging Face API Token（HTTP 401），請輸入金鑰後重試。"
                 : "模型伺服器回傳 HTTP \(status)：\(message)"
         case let .authenticationRequired(_, message):
             "Civitai 下載需要登入或 API Token（HTTP 401）：\(message)"

@@ -7,6 +7,7 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
     private struct AssetReference: Sendable {
         let fileURL: URL
         let isTimedMedia: Bool
+        let subtitleSidecar: SubtitleSidecar?
     }
 
     private final class State: @unchecked Sendable {
@@ -32,7 +33,11 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
                 (asset.playbackURL ?? asset.fileURL).map {
                     (
                         asset.id.uuidString.lowercased(),
-                        AssetReference(fileURL: $0, isTimedMedia: asset.kind.isTimedMedia)
+                        AssetReference(
+                            fileURL: $0,
+                            isTimedMedia: asset.kind.isTimedMedia,
+                            subtitleSidecar: Self.subtitleSidecar(for: asset, among: assets)
+                        )
                     )
                 }
             }
@@ -43,6 +48,10 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
     func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
         guard let requestURL = urlSchemeTask.request.url,
               let host = requestURL.host?.lowercased() else {
+            urlSchemeTask.didFailWithError(URLError(.badURL))
+            return
+        }
+        guard requestURL.path.isEmpty || requestURL.path == "/" || requestURL.path == "/subtitle" else {
             urlSchemeTask.didFailWithError(URLError(.badURL))
             return
         }
@@ -63,7 +72,7 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
             self?.serve(
                 reference: reference,
                 requestURL: requestURL,
-                task: taskReference.task,
+                task: taskReference,
                 taskID: taskID
             )
         }
@@ -79,7 +88,7 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
     nonisolated private func serve(
         reference: AssetReference,
         requestURL: URL,
-        task: any WKURLSchemeTask,
+        task: URLSchemeTaskReference,
         taskID: ObjectIdentifier
     ) {
         defer {
@@ -89,52 +98,130 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
         }
 
         do {
-            let didAccess = reference.fileURL.startAccessingSecurityScopedResource()
+            let resourceURL: URL
+            if requestURL.path == "/subtitle" {
+                guard let subtitleSidecar = reference.subtitleSidecar else {
+                    throw URLError(.fileDoesNotExist)
+                }
+                resourceURL = subtitleSidecar.fileURL
+            } else {
+                resourceURL = reference.fileURL
+            }
+            let didAccess = resourceURL.startAccessingSecurityScopedResource()
             defer {
-                if didAccess { reference.fileURL.stopAccessingSecurityScopedResource() }
+                if didAccess { resourceURL.stopAccessingSecurityScopedResource() }
             }
 
             guard !isStopped(taskID) else { return }
-            let fileSize = try fileSize(of: reference.fileURL)
-            if reference.isTimedMedia {
-                try serveMedia(
-                    reference: reference,
+            if requestURL.path == "/subtitle" {
+                try serveSubtitle(
+                    sidecar: reference.subtitleSidecar!,
                     requestURL: requestURL,
-                    fileSize: fileSize,
                     task: task,
                     taskID: taskID
                 )
             } else {
-                let data = try Data(contentsOf: reference.fileURL)
-                guard !isStopped(taskID) else { return }
-                let contentType = contentType(for: reference.fileURL)
-                let response = URLResponse(
-                    url: requestURL,
-                    mimeType: contentType,
-                    expectedContentLength: data.count,
-                    textEncodingName: nil
-                )
-                task.didReceive(response)
-                guard !isStopped(taskID) else { return }
-                task.didReceive(data)
-                guard !isStopped(taskID) else { return }
-                task.didFinish()
+                let fileSize = try fileSize(of: reference.fileURL)
+                if reference.isTimedMedia {
+                    try serveMedia(
+                        reference: reference,
+                        requestURL: requestURL,
+                        fileSize: fileSize,
+                        task: task,
+                        taskID: taskID
+                    )
+                } else {
+                    let data = try Data(contentsOf: reference.fileURL)
+                    guard !isStopped(taskID) else { return }
+                    let contentType = contentType(for: reference.fileURL)
+                    let response = URLResponse(
+                        url: requestURL,
+                        mimeType: contentType,
+                        expectedContentLength: data.count,
+                        textEncodingName: nil
+                    )
+                    guard deliverIfActive(taskID, task: task, {
+                        $0.didReceive(response)
+                    }) else { return }
+                    guard deliverIfActive(taskID, task: task, {
+                        $0.didReceive(data)
+                    }) else { return }
+                    _ = deliverIfActive(taskID, task: task, {
+                        $0.didFinish()
+                    })
+                }
             }
         } catch {
-            guard !isStopped(taskID) else { return }
-            task.didFailWithError(error)
+            _ = deliverIfActive(taskID, task: task, {
+                $0.didFailWithError(error)
+            })
         }
+    }
+
+    nonisolated private func serveSubtitle(
+        sidecar: SubtitleSidecar,
+        requestURL: URL,
+        task: URLSchemeTaskReference,
+        taskID: ObjectIdentifier
+    ) throws {
+        let sourceData = try Data(contentsOf: sidecar.fileURL)
+        guard let data = SubtitleSidecarResolver.webVTTData(
+            from: sourceData,
+            format: sidecar.format
+        ) else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        let response = HTTPURLResponse(
+            url: requestURL,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: [
+                "Content-Length": String(data.count),
+                "Content-Type": "text/vtt; charset=utf-8"
+            ]
+        )!
+        guard deliverIfActive(taskID, task: task, {
+            $0.didReceive(response)
+        }) else { return }
+        guard deliverIfActive(taskID, task: task, {
+            $0.didReceive(data)
+        }) else { return }
+        _ = deliverIfActive(taskID, task: task, {
+            $0.didFinish()
+        })
+    }
+
+    nonisolated private static func subtitleSidecar(
+        for asset: GenImageCore.MediaAsset,
+        among assets: [GenImageCore.MediaAsset]
+    ) -> SubtitleSidecar? {
+        guard asset.kind == .importedVideo
+            || asset.kind == .generatedVideo
+            || asset.kind == .generatedSubtitle else {
+            return nil
+        }
+        let mediaURLs = [asset.fileURL, asset.playbackURL].compactMap { $0 }
+        let didAccess = mediaURLs.first?.startAccessingSecurityScopedResource() == true
+        defer {
+            if didAccess, let mediaURL = mediaURLs.first {
+                mediaURL.stopAccessingSecurityScopedResource()
+            }
+        }
+        if asset.kind == .generatedSubtitle {
+            return SubtitleSidecarResolver.subtitle(for: asset)
+        }
+        return SubtitleSidecarResolver.locate(for: asset, among: assets)
     }
 
     nonisolated private func serveMedia(
         reference: AssetReference,
         requestURL: URL,
         fileSize: Int64,
-        task: any WKURLSchemeTask,
+        task: URLSchemeTaskReference,
         taskID: ObjectIdentifier
     ) throws {
         let byteRange = try requestedRange(
-            from: task.request.value(forHTTPHeaderField: "Range"),
+            from: task.task.request.value(forHTTPHeaderField: "Range"),
             fileSize: fileSize
         )
         let range = byteRange ?? 0..<fileSize
@@ -158,12 +245,14 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
             httpVersion: "HTTP/1.1",
             headerFields: headers
         )!
-        guard !isStopped(taskID) else { return }
-        task.didReceive(response)
+        guard deliverIfActive(taskID, task: task, {
+            $0.didReceive(response)
+        }) else { return }
 
         guard contentLength > 0 else {
-            guard !isStopped(taskID) else { return }
-            task.didFinish()
+            _ = deliverIfActive(taskID, task: task, {
+                $0.didFinish()
+            })
             return
         }
 
@@ -172,16 +261,32 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
         try handle.seek(toOffset: UInt64(range.lowerBound))
         var remaining = contentLength
         while remaining > 0 {
-            guard !isStopped(taskID) else { return }
             let chunkSize = Int(min(Int64(512 * 1024), remaining))
             guard let data = try handle.read(upToCount: chunkSize), !data.isEmpty else {
                 throw URLError(.cannotLoadFromNetwork)
             }
-            task.didReceive(data)
+            guard deliverIfActive(taskID, task: task, {
+                $0.didReceive(data)
+            }) else { return }
             remaining -= Int64(data.count)
         }
-        guard !isStopped(taskID) else { return }
-        task.didFinish()
+        _ = deliverIfActive(taskID, task: task, {
+            $0.didFinish()
+        })
+    }
+
+    @discardableResult
+    nonisolated private func deliverIfActive(
+        _ taskID: ObjectIdentifier,
+        task: URLSchemeTaskReference,
+        _ delivery: @escaping @Sendable (any WKURLSchemeTask) -> Void
+    ) -> Bool {
+        guard !isStopped(taskID) else { return false }
+        DispatchQueue.main.async { [weak self, task, delivery] in
+            guard let self, !self.isStopped(taskID) else { return }
+            delivery(task.task)
+        }
+        return true
     }
 
     nonisolated private func requestedRange(

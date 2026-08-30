@@ -24,8 +24,10 @@ struct WebAsset: Encodable {
     let textContent: String?
     let createdAt: Date
     let previewURL: String?
+    let subtitleURL: String?
+    let sidecarSubtitleFormat: SubtitleFormat?
 
-    init(asset: MediaAsset) {
+    init(asset: MediaAsset, subtitleAssets: [MediaAsset] = []) {
         id = asset.id
         parentAssetID = asset.parentAssetID
         kind = asset.kind
@@ -39,11 +41,51 @@ struct WebAsset: Encodable {
         audioFormat = asset.audioFormat
         subtitleFormat = asset.subtitleFormat
         languageCode = asset.languageCode
-        textContent = asset.textContent
+        textContent = Self.subtitlePreview(for: asset)
         createdAt = asset.createdAt
         previewURL = asset.playbackURL == nil && asset.fileURL == nil
             ? nil
             : "genimage-asset://\(asset.id.uuidString)"
+        let sidecar = Self.sidecar(for: asset, subtitleAssets: subtitleAssets)
+        subtitleURL = sidecar == nil
+            ? nil
+            : "genimage-asset://\((sidecar?.assetID ?? asset.id).uuidString)/subtitle"
+        sidecarSubtitleFormat = sidecar?.format
+    }
+
+    private static func sidecar(
+        for asset: MediaAsset,
+        subtitleAssets: [MediaAsset]
+    ) -> SubtitleSidecar? {
+        guard asset.kind == .importedVideo || asset.kind == .generatedVideo else {
+            return nil
+        }
+        let mediaURLs = [asset.fileURL, asset.playbackURL].compactMap { $0 }
+        let didAccess = mediaURLs.first?.startAccessingSecurityScopedResource() == true
+        defer {
+            if didAccess, let mediaURL = mediaURLs.first {
+                mediaURL.stopAccessingSecurityScopedResource()
+            }
+        }
+        return SubtitleSidecarResolver.locate(for: asset, among: subtitleAssets)
+    }
+
+    private static func subtitlePreview(for asset: MediaAsset) -> String? {
+        guard asset.kind == .generatedSubtitle,
+              let contentURL = asset.fileURL,
+              let format = asset.subtitleFormat else {
+            return asset.textContent
+        }
+        let didAccess = contentURL.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess { contentURL.stopAccessingSecurityScopedResource() }
+        }
+        guard let data = try? Data(contentsOf: contentURL),
+              let content = String(data: data, encoding: .utf8),
+              let preview = SubtitleDocument.previewText(format: format, content: content) else {
+            return asset.textContent
+        }
+        return preview
     }
 }
 
@@ -187,7 +229,10 @@ struct WebAppState: Encodable {
         modelRootPath = store.modelRootPath
         outputDirectoryPath = store.outputDirectoryPath
         civitaiTokenConfigured = CivitaiTokenStore.isConfigured()
-        assets = store.projectAssets.map(WebAsset.init)
+        let projectAssets = store.projectAssets
+        assets = projectAssets.map { asset in
+            WebAsset(asset: asset, subtitleAssets: projectAssets)
+        }
         selectedAssetID = store.selectedAssetID
         comparisonAssetID = store.comparisonAssetID
         recipe = WebRecipe(recipe: store.recipe)

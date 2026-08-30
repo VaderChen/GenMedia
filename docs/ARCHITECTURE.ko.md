@@ -162,4 +162,4 @@ Web UI는 Bridge를 통해서만 로컬 기능을 사용할 수 있으며 임의
 
 `scripts/build-ffmpeg-macos.sh`는 Apple Silicon용 LGPL-only 동적 링크 및 교체 가능한 FFmpeg 배포물을 생성합니다. `build.command`는 GPL/nonfree Encoder를 거부하고 `ffmpeg`, `ffprobe`, dylib, 라이선스를 복사하며 install name을 `@rpath`로 바꾼 뒤 dylib, 도구, App 순서로 서명해 기존 DMG 공증 흐름으로 전달합니다. 동일한 Team ID로 서명한 Developer ID FFmpeg dylib와 도구는 별도 library-validation entitlement 없이 동작함을 확인했으며, 로컬 ad-hoc 빌드에서는 FFmpeg에 hardened runtime을 적용하지 않습니다. 사전 빌드 바이너리는 Git에서 제외되는 `third_party/ffmpeg/`에 있으며 GitHub Source archive에 포함되지 않습니다.
 
-MLX metallib은 `RuntimeSupport/mlx.metallib`에서 `build.command`를 통해 Release 실행 디렉터리로 복사됩니다. 모델 라이선스 검토와 16/24/32 GB 부하 테스트는 계속해서 릴리스 요구 사항입니다.
+MLX metallib은 MLX Swift 버전별로 관리합니다. 메인 앱, Qwen Image Edit, MiniMax Music 3, LTX는 `RuntimeSupport/mlx-swift-0.31.6.metallib`를 사용하고, 독립 Z-Image Worker는 `RuntimeSupport/mlx-swift-0.30.6-zimage.metallib`를 사용합니다. `build.command`는 각 `Package.resolved`에서 버전을 읽고 호환성을 확인한 뒤 Release 실행 디렉터리로 복사합니다. 모델 라이선스 검토와 16/24/32 GB 부하 테스트는 계속해서 릴리스 요구 사항입니다.
