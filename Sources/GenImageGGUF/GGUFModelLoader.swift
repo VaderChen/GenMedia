@@ -141,17 +141,31 @@ public struct GGUFLoadOptions: Sendable {
     public var computeDType: GGUFComputeDType
     public var quantizationProfile: GGUFQuantizationProfile
     public var groupSize: Int
+    /// Logical shapes that override the shape implied by the GGUF tensor
+    /// dimensions, keyed by tensor name.
+    ///
+    /// Some converters (notably ComfyUI, via `comfy.gguf.orig_shape.*`
+    /// metadata) reshape a tensor before quantizing it and record the original
+    /// shape separately. The stored dimensions then have the correct element
+    /// count but the wrong rank/extents, so loading them verbatim yields a
+    /// silently mis-shaped weight rather than an error. Supplying the true
+    /// shape here restores it. An override must preserve the element count.
+    ///
+    /// Empty by default, so existing callers are unaffected.
+    public var shapeOverrides: [String: [Int]]
 
     public init(
         materialization: GGUFMaterialization = .mlxQuantized,
         computeDType: GGUFComputeDType = .source,
         quantizationProfile: GGUFQuantizationProfile = .quality,
-        groupSize: Int = 64
+        groupSize: Int = 64,
+        shapeOverrides: [String: [Int]] = [:]
     ) {
         self.materialization = materialization
         self.computeDType = computeDType
         self.quantizationProfile = quantizationProfile
         self.groupSize = groupSize
+        self.shapeOverrides = shapeOverrides
     }
 }
 
@@ -177,6 +191,16 @@ public struct GGUFLoadedWeights {
         self.denseTensorCount = denseTensorCount
         self.skippedQuantizationTensorCount = skippedQuantizationTensorCount
         self.sourceQuantizationCounts = sourceQuantizationCounts
+    }
+}
+
+public struct GGUFLoadedTensor {
+    public let descriptor: GGUFTensorDescriptor
+    public let value: MLXArray
+
+    public init(descriptor: GGUFTensorDescriptor, value: MLXArray) {
+        self.descriptor = descriptor
+        self.value = value
     }
 }
 
@@ -243,6 +267,7 @@ public enum GGUFLoaderError: LocalizedError, Sendable {
     case invalidTensor(String)
     case duplicateWeight(String)
     case invalidGroupSize(Int)
+    case shapeOverrideMismatch(String, stored: [Int], override: [Int])
 
     public var errorDescription: String? {
         switch self {
@@ -272,6 +297,11 @@ public enum GGUFLoaderError: LocalizedError, Sendable {
             "GGUF 權重名稱重複：\(name)。"
         case let .invalidGroupSize(groupSize):
             "GGUF MLX 量化 group size 只支援 32 或 64，實際為 \(groupSize)。"
+        case let .shapeOverrideMismatch(name, stored, override):
+            """
+            GGUF 權重「\(name)」的 shape override 元素數與實際資料不符：\
+            儲存形狀 \(stored)，override \(override)。
+            """
         }
     }
 }
@@ -360,6 +390,55 @@ public enum GGUFModelLoader {
         )
     }
 
+    public static func loadTensor(
+        fileURL: URL,
+        named tensorName: String,
+        computeDType: GGUFComputeDType = .source
+    ) throws -> GGUFLoadedTensor {
+        let data = try mappedData(fileURL: fileURL)
+        let layout = try parse(data)
+        guard let tensor = layout.tensors.first(where: { $0.name == tensorName }) else {
+            throw GGUFLoaderError.invalidTensor(tensorName)
+        }
+        let shape = Array(tensor.dimensions.reversed())
+        let elementCount = try checkedProduct(shape)
+        let byteCount = try GGUFDequantizer.byteCount(
+            typeCode: tensor.typeCode,
+            elementCount: elementCount
+        )
+        let raw = try dataSlice(
+            data,
+            tensor: tensor,
+            dataOffset: layout.tensorDataOffset,
+            byteCount: byteCount
+        )
+        var value = try GGUFDequantizer.array(
+            raw: raw,
+            typeCode: tensor.typeCode,
+            shape: shape,
+            name: tensor.name
+        )
+        if let dtype = computeDType.mlxDType, value.dtype.isFloatingPoint {
+            value = value.asType(dtype)
+        }
+        let descriptor = GGUFTensorDescriptor(
+            name: tensor.name,
+            shape: shape,
+            typeCode: tensor.typeCode,
+            type: GGUFDequantizer.typeName(typeCode: tensor.typeCode),
+            offset: tensor.offset,
+            byteSize: UInt64(byteCount),
+            storageType: GGUFStoragePolicy.storageType(
+                for: GGUFDequantizer.typeName(typeCode: tensor.typeCode)
+            ),
+            isMaterializable: true,
+            requiresRequantization: GGUFDequantizer.isQuantized(
+                typeName: GGUFDequantizer.typeName(typeCode: tensor.typeCode)
+            )
+        )
+        return GGUFLoadedTensor(descriptor: descriptor, value: value)
+    }
+
     public static func loadWeights(
         fileURL: URL,
         options: GGUFLoadOptions = GGUFLoadOptions()
@@ -376,8 +455,23 @@ public enum GGUFModelLoader {
         var sourceQuantizationCounts = [String: Int]()
 
         for tensor in layout.tensors {
-            let shape = Array(tensor.dimensions.reversed())
-            let elementCount = try checkedProduct(shape)
+            let storedShape = Array(tensor.dimensions.reversed())
+            let storedElementCount = try checkedProduct(storedShape)
+            let shape: [Int]
+            if let override = options.shapeOverrides[tensor.name] {
+                let overrideElementCount = try checkedProduct(override)
+                guard overrideElementCount == storedElementCount else {
+                    throw GGUFLoaderError.shapeOverrideMismatch(
+                        tensor.name,
+                        stored: storedShape,
+                        override: override
+                    )
+                }
+                shape = override
+            } else {
+                shape = storedShape
+            }
+            let elementCount = storedElementCount
             let typeName = GGUFDequantizer.typeName(typeCode: tensor.typeCode)
             sourceQuantizationCounts[typeName, default: 0] += 1
             let byteCount: Int

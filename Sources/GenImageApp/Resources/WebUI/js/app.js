@@ -9,6 +9,7 @@ import {
   renderHuggingFaceTokenDialog,
   renderInfoDialog,
   renderModelRemovalDialog,
+  renderProfileDisableDialog,
   renderPasteDialog,
   renderRoute,
   renderSidebar,
@@ -152,6 +153,7 @@ const ui = {
   assetRenameDialog: null,
   assetRenameValue: "",
   modelRemovalDialog: null,
+  profileDisableDialog: null,
   civitaiTokenDialog: null,
   civitaiTokenValue: "",
   huggingFaceTokenDialog: null,
@@ -490,6 +492,34 @@ root.addEventListener("click", async (event) => {
         await invoke("removeModel", { modelID: dialog.modelID });
         break;
       }
+      case "requestDeactivateProfile": {
+        const profile = state.profiles.find(
+          (candidate) => candidate.id === target.dataset.profileId
+            && candidate.capability === target.dataset.capability,
+        );
+        if (!profile || profile.supportsGeneration === false) break;
+        ui.profileDisableDialog = {
+          profileID: profile.id,
+          capability: profile.capability,
+        };
+        render();
+        break;
+      }
+      case "profileDisableCancel":
+        ui.profileDisableDialog = null;
+        render();
+        break;
+      case "profileDisableConfirm": {
+        const dialog = ui.profileDisableDialog;
+        if (!dialog) break;
+        ui.profileDisableDialog = null;
+        render();
+        await invoke("deactivateProfile", {
+          profileID: dialog.profileID,
+          capability: dialog.capability,
+        });
+        break;
+      }
       case "civitaiTokenCancel":
         ui.civitaiTokenDialog = null;
         ui.civitaiTokenValue = "";
@@ -710,6 +740,18 @@ root.addEventListener("click", async (event) => {
       case "clearCivitaiToken":
         await invoke("clearCivitaiToken");
         break;
+      case "saveHuggingFaceToken": {
+        const input = root.querySelector("[data-huggingface-token]");
+        const token = input?.value.trim() || "";
+        if (!token) break;
+        target.disabled = true;
+        await invoke("setHuggingFaceToken", { token });
+        if (input) input.value = "";
+        break;
+      }
+      case "clearHuggingFaceToken":
+        await invoke("clearHuggingFaceToken");
+        break;
       case "installModel":
       case "repairModel":
         if (isCivitaiModel(target.dataset.modelId)) {
@@ -812,6 +854,7 @@ document.addEventListener("keydown", (event) => {
     || ui.assetRemovalDialog
     || ui.assetRenameDialog
     || ui.modelRemovalDialog
+    || ui.profileDisableDialog
     || ui.civitaiTokenDialog
     || ui.huggingFaceTokenDialog
   ) {
@@ -822,6 +865,7 @@ document.addEventListener("keydown", (event) => {
     ui.assetRenameDialog = null;
     ui.assetRenameValue = "";
     ui.modelRemovalDialog = null;
+    ui.profileDisableDialog = null;
     ui.civitaiTokenDialog = null;
     ui.civitaiTokenValue = "";
     ui.huggingFaceTokenDialog = null;
@@ -1326,6 +1370,7 @@ function render() {
       ${renderAssetRemovalDialog(state, ui)}
       ${renderAssetRenameDialog(state, ui)}
       ${renderModelRemovalDialog(state, ui)}
+      ${renderProfileDisableDialog(state, ui)}
       ${renderCivitaiTokenDialog(state, ui)}
       ${renderHuggingFaceTokenDialog(state, ui)}
       ${renderPasteDialog(state, ui, pasteState)}
@@ -1442,6 +1487,7 @@ function isCivitaiModel(modelID) {
 }
 
 function modelNeedsHuggingFaceToken(modelID) {
+  if (state?.huggingFaceTokenConfigured) return false;
   const item = state?.models?.find(({ descriptor }) => descriptor.id === modelID);
   const message = item?.installation?.errorMessage || "";
   return message.includes("HTTP 401") || message.includes("Hugging Face API Token");

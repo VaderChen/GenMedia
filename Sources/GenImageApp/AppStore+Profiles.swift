@@ -218,16 +218,23 @@ extension AppStore {
     }
 
     func deactivateProfile(_ profileID: UUID, for capability: ModelCapability) {
-        guard activeProfileIDs[capability] == profileID,
-              let profile = profiles.first(where: { $0.id == profileID && $0.capability == capability }) else {
+        guard let profile = profiles.first(where: { $0.id == profileID && $0.capability == capability }),
+              profile.supportsGeneration else {
             return
         }
+        let wasActive = activeProfileIDs[capability] == profileID
         disabledProfileIDs.insert(profileID)
         Self.persistDisabledProfiles(disabledProfileIDs, in: profiles)
-        activeProfileIDs[capability] = nil
-        Self.persistActiveProfiles(activeProfileIDs, in: profiles)
-        if capability == .textToImage {
-            recipe.profileID = nil
+        if wasActive {
+            activeProfileIDs[capability] = nil
+            Self.persistActiveProfiles(activeProfileIDs, in: profiles)
+            if capability == .textToImage {
+                recipe.profileID = nil
+            }
+        }
+        guard wasActive else {
+            statusMessage = "已暫時停用「\(profile.name)」；可到 Profiles 頁重新啟用。"
+            return
         }
         let hasAvailableProfile = profiles.contains {
             $0.capability == capability && !disabledProfileIDs.contains($0.id)

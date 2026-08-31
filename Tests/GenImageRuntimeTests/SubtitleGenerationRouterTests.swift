@@ -153,6 +153,65 @@ struct SubtitleGenerationRouterTests {
         #expect(!originalDocument.contains("Translated subtitle"))
     }
 
+    @Test func translationRetriesOnlyMissingItemsFromAnIncompleteBatch() async throws {
+        let outputDirectory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+        let segments = (0..<12).map { index in
+            TimedTranscriptSegment(
+                start: Double(index),
+                end: Double(index + 1),
+                text: "字幕 \(index)"
+            )
+        }
+        let transcript = TranscriptResult(
+            text: segments.map(\.text).joined(separator: "\n"),
+            languageCode: "zh",
+            durationSeconds: 12,
+            segments: segments
+        )
+        let initialItems = (0..<11).map {
+            SubtitleTranslationItem(index: $0, text: "Translation \($0)")
+        }
+        let recoveryItems = [
+            SubtitleTranslationItem(index: 11, text: "Translation 11")
+        ]
+        let translator = StubTextGenerator(outputs: [
+            String(decoding: try JSONEncoder().encode(initialItems), as: UTF8.self),
+            String(decoding: try JSONEncoder().encode(recoveryItems), as: UTF8.self)
+        ])
+        let router = SubtitleGenerationRouter(
+            outputDirectory: outputDirectory,
+            adapters: [
+                StubTranscriber(
+                    supportedModelIDs: ["test-model"],
+                    transcript: transcript
+                )
+            ],
+            translator: translator
+        )
+        var translationRequest = request()
+        translationRequest.translation = SubtitleTranslationConfiguration(
+            targetLanguage: .english,
+            profile: InferenceProfile(
+                name: "測試翻譯 Profile",
+                capability: .textToText,
+                modelID: "translation-model",
+                architecture: .coreML
+            ),
+            modelURL: URL(fileURLWithPath: "/tmp/translation-model", isDirectory: true)
+        )
+
+        let result = try await router.generate(request: translationRequest) { _ in }
+        let prompts = await translator.prompts
+
+        #expect(await translator.generationCount == 2)
+        #expect(prompts.count == 2)
+        #expect(prompts[1].contains("\"index\":11"))
+        #expect(result.transcript.segments.count == 12)
+        #expect(result.transcript.segments[0].text == "字幕 0\nTranslation 0")
+        #expect(result.transcript.segments[11].text == "字幕 11\nTranslation 11")
+    }
+
     private func temporaryDirectory() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(
             "genimage-subtitle-router-test-\(UUID().uuidString)",
@@ -189,10 +248,15 @@ struct SubtitleGenerationRouterTests {
 
 private actor StubTranscriber: MediaTranscribing {
     private nonisolated let supportedModelIDs: Set<String>
+    private let transcript: TranscriptResult?
     private(set) var transcriptionCount = 0
 
-    init(supportedModelIDs: Set<String>) {
+    init(
+        supportedModelIDs: Set<String>,
+        transcript: TranscriptResult? = nil
+    ) {
         self.supportedModelIDs = supportedModelIDs
+        self.transcript = transcript
     }
 
     nonisolated func supports(profile: InferenceProfile) -> Bool {
@@ -205,6 +269,9 @@ private actor StubTranscriber: MediaTranscribing {
     ) async throws -> TranscriptResult {
         transcriptionCount += 1
         progress(1)
+        if let transcript {
+            return transcript
+        }
         let segments = [
             TimedTranscriptSegment(start: 0, end: 1.25, text: "測試字幕")
         ]
@@ -220,19 +287,30 @@ private actor StubTranscriber: MediaTranscribing {
 }
 
 private actor StubTextGenerator: TextGenerating {
-    private let output: String?
+    private let outputs: [String]
+    private var nextOutputIndex = 0
+    private(set) var generationCount = 0
+    private(set) var prompts: [String] = []
 
     init(output: String? = nil) {
-        self.output = output
+        outputs = output.map { [$0] } ?? []
+    }
+
+    init(outputs: [String]) {
+        self.outputs = outputs
     }
 
     func generateText(
         request: TextGenerationRequest,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> String {
-        guard let output else {
+        generationCount += 1
+        prompts.append(request.prompt)
+        guard nextOutputIndex < outputs.count else {
             throw StubTextGeneratorError.unexpectedCall
         }
+        let output = outputs[nextOutputIndex]
+        nextOutputIndex += 1
         progress(1)
         return output
     }

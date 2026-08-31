@@ -951,6 +951,86 @@ for (const [locale, additions] of Object.entries({
   Object.assign(messages[locale], additions);
 }
 
+Object.assign(messages["zh-Hant"], {
+  "settings.huggingFace": "Hugging Face",
+  "settings.huggingFaceNote": "設定 Hugging Face API Token 後，模型中心可以直接下載需要授權的模型與相關檔案。",
+  "settings.huggingFaceWebsite": "開啟 Hugging Face 取得 Token",
+  "settings.huggingFaceToken": "API Token",
+  "settings.huggingFaceTokenPlaceholder": "貼上 Hugging Face API Token",
+  "settings.huggingFaceSave": "儲存 Token",
+  "settings.huggingFaceClear": "清除 Token",
+  "settings.huggingFaceConfigured": "已設定；Token 不會顯示在畫面上。",
+  "settings.huggingFaceNotConfigured": "尚未設定；公開模型仍可直接下載。",
+  "settings.huggingFaceTokenNote": "Token 只儲存在 macOS Keychain，下載時以 HTTPS Authorization Bearer 標頭傳送；也支援 HF_TOKEN 與 ~/.cache/huggingface/token。",
+});
+
+Object.assign(messages.en, {
+  "settings.huggingFace": "Hugging Face",
+  "settings.huggingFaceNote": "Set a Hugging Face API token so Model Center can download gated models and their related files directly.",
+  "settings.huggingFaceWebsite": "Open Hugging Face to get a token",
+  "settings.huggingFaceToken": "API Token",
+  "settings.huggingFaceTokenPlaceholder": "Paste a Hugging Face API token",
+  "settings.huggingFaceSave": "Save Token",
+  "settings.huggingFaceClear": "Clear Token",
+  "settings.huggingFaceConfigured": "Configured; the token is never shown on screen.",
+  "settings.huggingFaceNotConfigured": "Not configured; public models can still be downloaded directly.",
+  "settings.huggingFaceTokenNote": "The token is stored only in macOS Keychain and sent over HTTPS as an Authorization Bearer header. HF_TOKEN and ~/.cache/huggingface/token remain supported.",
+});
+
+Object.assign(messages.ja, {
+  "settings.huggingFace": "Hugging Face",
+  "settings.huggingFaceNote": "Hugging Face API Token を設定すると、モデルセンターからアクセス制限のあるモデルや関連ファイルを直接ダウンロードできます。",
+  "settings.huggingFaceWebsite": "Hugging Face で Token を取得",
+  "settings.huggingFaceToken": "API Token",
+  "settings.huggingFaceTokenPlaceholder": "Hugging Face API Token を貼り付け",
+  "settings.huggingFaceSave": "Token を保存",
+  "settings.huggingFaceClear": "Token を消去",
+  "settings.huggingFaceConfigured": "設定済みです。Token は画面に表示されません。",
+  "settings.huggingFaceNotConfigured": "未設定です。公開モデルはそのまま直接ダウンロードできます。",
+  "settings.huggingFaceTokenNote": "Token は macOS Keychain にのみ保存し、HTTPS の Authorization Bearer ヘッダーで送信します。HF_TOKEN と ~/.cache/huggingface/token も引き続き使用できます。",
+});
+
+Object.assign(messages.ko, {
+  "settings.huggingFace": "Hugging Face",
+  "settings.huggingFaceNote": "Hugging Face API Token을 설정하면 모델 센터에서 접근 제한 모델과 관련 파일을 직접 다운로드할 수 있습니다.",
+  "settings.huggingFaceWebsite": "Hugging Face에서 Token 받기",
+  "settings.huggingFaceToken": "API Token",
+  "settings.huggingFaceTokenPlaceholder": "Hugging Face API Token 붙여넣기",
+  "settings.huggingFaceSave": "Token 저장",
+  "settings.huggingFaceClear": "Token 지우기",
+  "settings.huggingFaceConfigured": "설정됨. Token은 화면에 표시되지 않습니다.",
+  "settings.huggingFaceNotConfigured": "설정되지 않음. 공개 모델은 계속 직접 다운로드할 수 있습니다.",
+  "settings.huggingFaceTokenNote": "Token은 macOS Keychain에만 저장하고 HTTPS Authorization Bearer 헤더로 전송합니다. HF_TOKEN과 ~/.cache/huggingface/token도 계속 지원합니다.",
+});
+
+Object.assign(messages["zh-Hant"], {
+  "profile.disableHint": "暫時停用此 Profile",
+  "profile.disableTitle": "暫時停用 Profile？",
+  "profile.disableMessage": "確定要暫時停用「{name}」嗎？停用後它會從工作區的 Profile 選單隱藏；你可以在 Profiles 頁重新啟用。",
+  "profile.disableConfirm": "暫時停用",
+});
+
+Object.assign(messages.en, {
+  "profile.disableHint": "Temporarily disable this Profile",
+  "profile.disableTitle": "Temporarily disable Profile?",
+  "profile.disableMessage": "Temporarily disable “{name}”? It will be hidden from workspace Profile selectors; you can enable it again on the Profiles page.",
+  "profile.disableConfirm": "Temporarily Disable",
+});
+
+Object.assign(messages.ja, {
+  "profile.disableHint": "この Profile を一時無効化",
+  "profile.disableTitle": "Profile を一時無効化しますか？",
+  "profile.disableMessage": "「{name}」を一時的に無効化しますか？ワークスペースの Profile 選択肢から非表示になりますが、Profiles ページから再び有効化できます。",
+  "profile.disableConfirm": "一時的に無効化",
+});
+
+Object.assign(messages.ko, {
+  "profile.disableHint": "이 Profile 임시 비활성화",
+  "profile.disableTitle": "Profile을 임시 비활성화할까요?",
+  "profile.disableMessage": "‘{name}’을(를) 임시로 비활성화할까요? 워크스페이스 Profile 선택기에서 숨겨지지만 Profiles 페이지에서 다시 활성화할 수 있습니다.",
+  "profile.disableConfirm": "임시 비활성화",
+});
+
 let currentLocale = localStorage.getItem("genimage.locale") || "zh-Hant";
 
 export function getLocale() {

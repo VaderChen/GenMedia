@@ -37,7 +37,7 @@ enum RuntimeExecutable {
         }
     }
 
-    /// 子行程的環境：PATH 補上常見安裝位置，並關閉 Python 的輸出緩衝，讓進度能即時進 log。
+    /// 子行程的環境：PATH 補上常見安裝位置，讓內建 Swift Worker 與媒體工具可被找到。
     static func environment() -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         let commonPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
@@ -47,7 +47,6 @@ enum RuntimeExecutable {
                 if !paths.contains(path) { paths.append(path) }
             }
             .joined(separator: ":")
-        environment["PYTHONUNBUFFERED"] = "1"
         return environment
     }
 }

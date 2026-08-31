@@ -375,8 +375,8 @@ public enum ModelCatalog {
             id: "pipenetwork/MiniMax-H3-MLX-8bit",
             displayName: "MiniMax H3 MLX Q8",
             publisher: "PipeNetwork / MiniMaxAI",
-            summary: "Apple Silicon 原生 MLX 8-bit 圖生影模型，可同步生成影片與立體聲音訊；安裝內容包含量化 Transformer 與官方 FL2VA 文字編碼器、Video/Audio VAE、Tokenizer。",
-            capabilities: [.imageToVideo],
+            summary: "Apple Silicon 原生 MLX 8-bit 權重；安裝內容包含量化 Transformer 與官方 FL2VA 文字編碼器、Video/Audio VAE、Tokenizer。GenMedia 目前僅提供下載管理，尚未接入 H3 Swift 生成 Runtime。",
+            capabilities: [.imageToVideo, .textToVideo],
             quantization: .eightBit,
             approximateDownloadGB: 105.3,
             recommendedMemoryGB: 128,
@@ -387,8 +387,8 @@ public enum ModelCatalog {
             id: "pipenetwork/MiniMax-H3-MLX-4bit",
             displayName: "MiniMax H3 MLX Q4",
             publisher: "PipeNetwork / MiniMaxAI",
-            summary: "Apple Silicon 原生 MLX 4-bit 圖生影模型，可同步生成影片與立體聲音訊；安裝內容包含量化 Transformer 與官方 FL2VA 文字編碼器、Video/Audio VAE、Tokenizer。",
-            capabilities: [.imageToVideo],
+            summary: "Apple Silicon 原生 MLX 4-bit 權重；安裝內容包含量化 Transformer 與官方 FL2VA 文字編碼器、Video/Audio VAE、Tokenizer。GenMedia 目前僅提供下載管理，尚未接入 H3 Swift 生成 Runtime。",
+            capabilities: [.imageToVideo, .textToVideo],
             quantization: .fourBit,
             approximateDownloadGB: 96.0,
             recommendedMemoryGB: 96,
@@ -400,13 +400,91 @@ public enum ModelCatalog {
             id: "unsloth/MiniMax-H3-GGUF@fl2va-pruned-Q4_K",
             displayName: "MiniMax H3 GGUF FL2VA Pruned Q4_K",
             publisher: "Unsloth / MiniMaxAI",
-            summary: "MiniMax H3 FL2VA Pruned GGUF Q4_K 主權重，約 10.64 GiB；此下載卡只包含去噪主權重，Qwen3-VL 文字編碼器與 Video/Audio VAE 需另行配套，尚未接入 H3 生成功能。",
+            summary: "MiniMax H3 FL2VA Pruned GGUF Q4_K；下載此 Profile 時會一併取得相容的 Qwen3-VL Q4_K_M 文字編碼器、Video/Audio VAE，以及 MiniMax 上游的 tokenizer 與影像前處理設定（ComfyUI 轉檔的文字編碼器本身不含 tokenizer）。",
             capabilities: [.imageToVideo, .textToVideo],
             quantization: .fourBit,
-            approximateDownloadGB: 11.42,
+            approximateDownloadGB: 35.45,
             recommendedMemoryGB: 48,
             licenseName: "MiniMax H3 Community License",
             sourceURL: URL(string: "https://huggingface.co/unsloth/MiniMax-H3-GGUF"),
+            isRecommended: false
+        ),
+        ModelDescriptor(
+            id: "Abiray/MiniMax-H3-GGUF@fl2va-Q4_0",
+            displayName: "MiniMax H3 GGUF FL2VA Q4_0",
+            publisher: "Abiray / MiniMaxAI",
+            summary: "MiniMax H3 FL2VA GGUF Q4_0；下載此模型時會一併取得同倉庫的 Qwen3-VL Q4_K_M、Video VAE 與 Audio VAE，以及 MiniMax 上游的 tokenizer 與影像前處理設定（ComfyUI 轉檔的文字編碼器本身不含 tokenizer）。",
+            capabilities: [.imageToVideo, .textToVideo],
+            quantization: .fourBit,
+            approximateDownloadGB: 39.03,
+            recommendedMemoryGB: 64,
+            licenseName: "MiniMax H3 Community License",
+            sourceURL: URL(string: "https://huggingface.co/Abiray/MiniMax-H3-GGUF"),
+            isRecommended: false
+        ),
+        ModelDescriptor(
+            id: "Abiray/MiniMax-H3-GGUF@fl2va-Q4_K_M",
+            displayName: "MiniMax H3 GGUF FL2VA Q4_K_M",
+            publisher: "Abiray / MiniMaxAI",
+            summary: "MiniMax H3 FL2VA GGUF Q4_K_M；下載此模型時會一併取得同倉庫的 Qwen3-VL Q4_K_M、Video VAE 與 Audio VAE，以及 MiniMax 上游的 tokenizer 與影像前處理設定（ComfyUI 轉檔的文字編碼器本身不含 tokenizer）。",
+            capabilities: [.imageToVideo, .textToVideo],
+            quantization: .fourBit,
+            approximateDownloadGB: 40.25,
+            recommendedMemoryGB: 64,
+            licenseName: "MiniMax H3 Community License",
+            sourceURL: URL(string: "https://huggingface.co/Abiray/MiniMax-H3-GGUF"),
+            isRecommended: true
+        ),
+        ModelDescriptor(
+            id: "Abiray/MiniMax-H3-GGUF@fl2va-Q4_K_S",
+            displayName: "MiniMax H3 GGUF FL2VA Q4_K_S",
+            publisher: "Abiray / MiniMaxAI",
+            summary: "MiniMax H3 FL2VA GGUF Q4_K_S；下載此模型時會一併取得同倉庫的 Qwen3-VL Q4_K_M、Video VAE 與 Audio VAE，以及 MiniMax 上游的 tokenizer 與影像前處理設定（ComfyUI 轉檔的文字編碼器本身不含 tokenizer）。",
+            capabilities: [.imageToVideo, .textToVideo],
+            quantization: .fourBit,
+            approximateDownloadGB: 40.24,
+            recommendedMemoryGB: 64,
+            licenseName: "MiniMax H3 Community License",
+            sourceURL: URL(string: "https://huggingface.co/Abiray/MiniMax-H3-GGUF"),
+            isRecommended: false
+        ),
+        ModelDescriptor(
+            id: "Abiray/MiniMax-H3-GGUF@ref2va-Q4_0",
+            displayName: "MiniMax H3 GGUF Ref2VA Q4_0",
+            publisher: "Abiray / MiniMaxAI",
+            summary: "MiniMax H3 Ref2VA GGUF Q4_0；支援多模態參考輸入，下載時會一併取得同倉庫的 Qwen3-VL Q4_K_M、Video VAE、Audio VAE，以及 MiniMax 上游的 tokenizer 與影像前處理設定（ComfyUI 轉檔的文字編碼器本身不含 tokenizer）。",
+            capabilities: [.imageToVideo, .textToVideo],
+            quantization: .fourBit,
+            approximateDownloadGB: 39.03,
+            recommendedMemoryGB: 64,
+            licenseName: "MiniMax H3 Community License",
+            sourceURL: URL(string: "https://huggingface.co/Abiray/MiniMax-H3-GGUF"),
+            isRecommended: false
+        ),
+        ModelDescriptor(
+            id: "Abiray/MiniMax-H3-GGUF@ref2va-Q4_K_M",
+            displayName: "MiniMax H3 GGUF Ref2VA Q4_K_M",
+            publisher: "Abiray / MiniMaxAI",
+            summary: "MiniMax H3 Ref2VA GGUF Q4_K_M；支援多模態參考輸入，下載時會一併取得同倉庫的 Qwen3-VL Q4_K_M、Video VAE、Audio VAE，以及 MiniMax 上游的 tokenizer 與影像前處理設定（ComfyUI 轉檔的文字編碼器本身不含 tokenizer）。",
+            capabilities: [.imageToVideo, .textToVideo],
+            quantization: .fourBit,
+            approximateDownloadGB: 40.24,
+            recommendedMemoryGB: 64,
+            licenseName: "MiniMax H3 Community License",
+            sourceURL: URL(string: "https://huggingface.co/Abiray/MiniMax-H3-GGUF"),
+            isRecommended: false
+        ),
+        ModelDescriptor(
+            id: "Abiray/MiniMax-H3-GGUF@ref2va-Q4_K_S",
+            displayName: "MiniMax H3 GGUF Ref2VA Q4_K_S",
+            publisher: "Abiray / MiniMaxAI",
+            summary: "MiniMax H3 Ref2VA GGUF Q4_K_S；支援多模態參考輸入，下載時會一併取得同倉庫的 Qwen3-VL Q4_K_M、Video VAE、Audio VAE，以及 MiniMax 上游的 tokenizer 與影像前處理設定（ComfyUI 轉檔的文字編碼器本身不含 tokenizer）。",
+            capabilities: [.imageToVideo, .textToVideo],
+            quantization: .fourBit,
+            approximateDownloadGB: 40.24,
+            recommendedMemoryGB: 64,
+            licenseName: "MiniMax H3 Community License",
+            sourceURL: URL(string: "https://huggingface.co/Abiray/MiniMax-H3-GGUF"),
             isRecommended: false
         ),
         ModelDescriptor(
@@ -866,8 +944,9 @@ public enum ModelCatalog {
                 frameCount: 124,
                 frameRate: 24
             ),
-            notes: "PipeNetwork MiniMax H3 原生 MLX 8-bit Profile；預設約 5 秒、24 FPS、768p，支援首幀或首尾幀圖生影與同步音訊。推論需 pipenetwork/minimax-h3-mlx Python Runtime。",
-            isBuiltIn: true
+            notes: "PipeNetwork MiniMax H3 原生 MLX 8-bit 權重下載 Profile；GenMedia 尚未接入 H3 Swift 生成 Runtime，目前僅供下載。",
+            isBuiltIn: true,
+            supportsGeneration: false
         ),
         InferenceProfile(
             name: "圖生影 · MiniMax H3 MLX Q4",
@@ -883,8 +962,9 @@ public enum ModelCatalog {
                 frameCount: 124,
                 frameRate: 24
             ),
-            notes: "PipeNetwork MiniMax H3 原生 MLX 4-bit Profile；預設約 5 秒、24 FPS、768p，支援首幀或首尾幀圖生影與同步音訊。推論需 pipenetwork/minimax-h3-mlx Python Runtime。",
-            isBuiltIn: true
+            notes: "PipeNetwork MiniMax H3 原生 MLX 4-bit 權重下載 Profile；GenMedia 尚未接入 H3 Swift 生成 Runtime，目前僅供下載。",
+            isBuiltIn: true,
+            supportsGeneration: false
         ),
         InferenceProfile(
             name: "圖生影 · MiniMax H3 GGUF Q4_K",
@@ -900,9 +980,9 @@ public enum ModelCatalog {
                 frameCount: 124,
                 frameRate: 24
             ),
-            notes: "MiniMax H3 GGUF Q4_K 下載 Profile；目前僅供下載，完整文字編碼器、Video/Audio VAE 與生成 Runtime 尚未接入。",
+            notes: "MiniMax H3 GGUF FL2VA Pruned Q4_K；安裝時會一併下載相容的 Qwen3-VL Q4_K_M、Video VAE、Audio VAE 與 tokenizer；由 H3 Swift Runtime 支援文生影與單一圖片圖生影。",
             isBuiltIn: true,
-            supportsGeneration: false
+            supportsGeneration: true
         ),
         InferenceProfile(
             name: "文生影 · MiniMax H3 GGUF Q4_K",
@@ -918,9 +998,9 @@ public enum ModelCatalog {
                 frameCount: 124,
                 frameRate: 24
             ),
-            notes: "MiniMax H3 GGUF Q4_K 下載 Profile；目前僅供下載，完整文字編碼器、Video/Audio VAE 與生成 Runtime 尚未接入。",
+            notes: "MiniMax H3 GGUF FL2VA Pruned Q4_K；安裝時會一併下載相容的 Qwen3-VL Q4_K_M、Video VAE、Audio VAE 與 tokenizer；由 H3 Swift Runtime 支援文生影與單一圖片圖生影。",
             isBuiltIn: true,
-            supportsGeneration: false
+            supportsGeneration: true
         ),
         InferenceProfile(
             name: "文生音樂 · ACE-Step 1.5 Turbo MLX",
@@ -1042,5 +1122,74 @@ public enum ModelCatalog {
             notes: "先以 Real-ESRGAN 4× 修復，再以 Lanczos 縮放為 2×。",
             isBuiltIn: true
         )
-    ]
+    ] + miniMaxH3GGUFProfiles
+
+    private static var miniMaxH3GGUFProfiles: [InferenceProfile] {
+        let variants: [(modelID: String, displayName: String)] = [
+            (
+                "Abiray/MiniMax-H3-GGUF@fl2va-Q4_0",
+                "MiniMax H3 GGUF FL2VA Q4_0"
+            ),
+            (
+                "Abiray/MiniMax-H3-GGUF@fl2va-Q4_K_M",
+                "MiniMax H3 GGUF FL2VA Q4_K_M"
+            ),
+            (
+                "Abiray/MiniMax-H3-GGUF@fl2va-Q4_K_S",
+                "MiniMax H3 GGUF FL2VA Q4_K_S"
+            ),
+            (
+                "Abiray/MiniMax-H3-GGUF@ref2va-Q4_0",
+                "MiniMax H3 GGUF Ref2VA Q4_0"
+            ),
+            (
+                "Abiray/MiniMax-H3-GGUF@ref2va-Q4_K_M",
+                "MiniMax H3 GGUF Ref2VA Q4_K_M"
+            ),
+            (
+                "Abiray/MiniMax-H3-GGUF@ref2va-Q4_K_S",
+                "MiniMax H3 GGUF Ref2VA Q4_K_S"
+            )
+        ]
+        let revision = "9fc3454d3ebe1be1bade862cd4a5011f325a22cb"
+        let defaults = ProfileDefaults(
+            width: 1280,
+            height: 720,
+            steps: 16,
+            outputCount: 1,
+            frameCount: 124,
+            frameRate: 24
+        )
+
+        return variants.flatMap { variant in
+            let isFL2VA = variant.modelID.lowercased().contains("@fl2va-")
+            let notes = isFL2VA
+                ? "\(variant.displayName)；安裝時會一併下載同倉庫的 Qwen3-VL Q4_K_M、Video VAE 與 Audio VAE；目前可用 H3 Swift Runtime 進行文生影與單一圖片圖生影。"
+                : "\(variant.displayName)；安裝時會一併下載同倉庫的 Qwen3-VL Q4_K_M、Video VAE 與 Audio VAE；H3 Swift Runtime 支援文生影，Ref2VA 的圖片參考條件尚未接入。"
+            return [
+                InferenceProfile(
+                    name: "圖生影 · \(variant.displayName)",
+                    capability: .imageToVideo,
+                    modelID: variant.modelID,
+                    modelRevision: revision,
+                    architecture: .externalCLI,
+                    defaults: defaults,
+                    notes: notes,
+                    isBuiltIn: true,
+                    supportsGeneration: isFL2VA
+                ),
+                InferenceProfile(
+                    name: "文生影 · \(variant.displayName)",
+                    capability: .textToVideo,
+                    modelID: variant.modelID,
+                    modelRevision: revision,
+                    architecture: .externalCLI,
+                    defaults: defaults,
+                    notes: notes,
+                    isBuiltIn: true,
+                    supportsGeneration: true
+                )
+            ]
+        }
+    }
 }

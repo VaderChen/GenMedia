@@ -65,6 +65,53 @@ struct WorkflowGraphTests {
         #expect(ModelCatalog.builtIn.allSatisfy { $0.recommendedMemoryGB > 0 })
     }
 
+    @Test func miniMaxH3ProfilesExposeOnlyImplementedGenerationPaths() {
+        let h3Profiles = ModelCatalog.builtInProfiles.filter {
+            $0.modelID.lowercased().contains("minimax-h3")
+        }
+
+        #expect(h3Profiles.allSatisfy { !$0.notes.localizedCaseInsensitiveContains("python") })
+
+        let mlxProfiles = h3Profiles.filter { $0.modelID.lowercased().contains("pipenetwork") }
+        #expect(mlxProfiles.count == 2)
+        #expect(mlxProfiles.allSatisfy { $0.notes.localizedCaseInsensitiveContains("swift") })
+
+        let expectedGGUFModelIDs: Set<String> = [
+            "unsloth/MiniMax-H3-GGUF@fl2va-pruned-Q4_K",
+            "Abiray/MiniMax-H3-GGUF@fl2va-Q4_0",
+            "Abiray/MiniMax-H3-GGUF@fl2va-Q4_K_M",
+            "Abiray/MiniMax-H3-GGUF@fl2va-Q4_K_S",
+            "Abiray/MiniMax-H3-GGUF@ref2va-Q4_0",
+            "Abiray/MiniMax-H3-GGUF@ref2va-Q4_K_M",
+            "Abiray/MiniMax-H3-GGUF@ref2va-Q4_K_S"
+        ]
+        let ggufProfiles = h3Profiles.filter {
+            expectedGGUFModelIDs.contains($0.modelID)
+        }
+        #expect(Set(ggufProfiles.map(\.modelID)) == expectedGGUFModelIDs)
+        #expect(ggufProfiles.count == expectedGGUFModelIDs.count * 2)
+        for modelID in expectedGGUFModelIDs {
+            let capabilities = Set(
+                ggufProfiles.filter { $0.modelID == modelID }.map(\.capability)
+            )
+            #expect(capabilities == [.imageToVideo, .textToVideo])
+        }
+
+        let fl2vaProfiles = ggufProfiles.filter {
+            $0.modelID.lowercased().contains("@fl2va-")
+        }
+        #expect(fl2vaProfiles.allSatisfy { $0.supportsGeneration })
+
+        let ref2vaProfiles = ggufProfiles.filter {
+            $0.modelID.lowercased().contains("@ref2va-")
+        }
+        #expect(ref2vaProfiles.filter { $0.capability == .textToVideo }
+            .allSatisfy { $0.supportsGeneration })
+        #expect(ref2vaProfiles.filter { $0.capability == .imageToVideo }
+            .allSatisfy { !$0.supportsGeneration })
+        #expect(mlxProfiles.allSatisfy { !$0.supportsGeneration })
+    }
+
     @Test func recipeSizePresetChangesBothDimensions() {
         var recipe = GenerationRecipe(modelID: "test")
 

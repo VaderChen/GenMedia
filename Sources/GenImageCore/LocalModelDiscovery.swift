@@ -839,8 +839,8 @@ public enum LocalModelDiscovery {
                     id: candidate.id,
                     displayName: candidate.name,
                     publisher: "PipeNetwork / MiniMaxAI",
-                    summary: "已安裝 MiniMax H3 MLX 量化 Transformer 與完整 FL2VA 文字編碼器、Video/Audio VAE、Tokenizer。",
-                    capabilities: [.imageToVideo],
+                    summary: "已安裝 MiniMax H3 MLX 量化 Transformer 與完整 FL2VA 文字編碼器、Video/Audio VAE、Tokenizer；GenMedia H3 Swift Runtime 目前僅接入 GGUF，MLX Profile 保留下載管理。",
+                    capabilities: [.imageToVideo, .textToVideo],
                     quantization: candidate.quantization,
                     approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
                     recommendedMemoryGB: candidate.memory,
@@ -865,8 +865,9 @@ public enum LocalModelDiscovery {
                         frameCount: 124,
                         frameRate: 24
                     ),
-                    notes: "從 \(directory.path) 自動偵測；推論需 pipenetwork/minimax-h3-mlx Python Runtime。",
-                    isBuiltIn: true
+                    notes: "從 \(directory.path) 自動偵測；H3 Swift Runtime 目前僅接入 GGUF，MLX Profile 保留下載管理。",
+                    isBuiltIn: true,
+                    supportsGeneration: false
                 )
             )
         }
@@ -877,38 +878,174 @@ public enum LocalModelDiscovery {
         fileManager: FileManager,
         result: inout DiscoveredModelCatalog
     ) {
-        let modelID = "unsloth/MiniMax-H3-GGUF@fl2va-pruned-Q4_K"
-        let directory = root.appendingPathComponent(
-            "minimax-h3-gguf-fl2va-pruned-q4-k",
-            isDirectory: true
-        )
-        let weightURL = directory.appendingPathComponent(
-            "minimax_h3_fl2va_pruned-Q4_K.gguf"
-        )
-        guard let values = try? weightURL.resourceValues(
-            forKeys: [.isRegularFileKey, .fileSizeKey]
-        ),
-        values.isRegularFile == true,
-        values.fileSize == 11_420_663_904 else {
-            return
-        }
-
-        result.models.append(
-            ModelDescriptor(
-                id: modelID,
-                displayName: "MiniMax H3 GGUF FL2VA Pruned Q4_K（本機）",
-                publisher: "Local / Unsloth / MiniMaxAI",
-                summary: "已偵測 MiniMax H3 FL2VA Pruned GGUF Q4_K 主權重，約 10.64 GiB；Qwen3-VL 文字編碼器與 Video/Audio VAE 需另行配套，尚未接入 H3 生成功能。",
-                capabilities: [.imageToVideo, .textToVideo],
-                quantization: .fourBit,
-                approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
-                recommendedMemoryGB: 48,
-                licenseName: "MiniMax H3 Community License",
-                sourceURL: URL(string: "https://huggingface.co/unsloth/MiniMax-H3-GGUF"),
-                localURL: directory,
-                isRecommended: false
+        let candidates: [(
+            modelID: String,
+            directoryName: String,
+            weightRelativePath: String,
+            weightSize: Int64,
+            displayName: String,
+            publisher: String,
+            companionPaths: [String],
+            recommendedMemoryGB: Int,
+            isRecommended: Bool
+        )] = [
+            (
+                "unsloth/MiniMax-H3-GGUF@fl2va-pruned-Q4_K",
+                "minimax-h3-gguf-fl2va-pruned-q4-k",
+                "minimax_h3_fl2va_pruned-Q4_K.gguf",
+                11_420_663_904,
+                "MiniMax H3 GGUF FL2VA Pruned Q4_K",
+                "Local / Unsloth / MiniMaxAI",
+                [
+                    "qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
+                    "vae/minimax_h3_audio_vae_fp32.safetensors",
+                    "vae/minimax_h3_video_vae_fp16.safetensors"
+                ],
+                48,
+                false
+            ),
+            (
+                "Abiray/MiniMax-H3-GGUF@fl2va-Q4_0",
+                "minimax-h3-gguf-fl2va-q4-0",
+                "unet/MiniMax-H3-FL2VA-Q4_0.gguf",
+                18_639_605_024,
+                "MiniMax H3 GGUF FL2VA Q4_0",
+                "Local / Abiray / MiniMaxAI",
+                [
+                    "text_encoders/qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
+                    "vae/minimax_h3_audio_vae_fp32.safetensors",
+                    "vae/minimax_h3_video_vae_fp16.safetensors"
+                ],
+                64,
+                false
+            ),
+            (
+                "Abiray/MiniMax-H3-GGUF@fl2va-Q4_K_M",
+                "minimax-h3-gguf-fl2va-q4-k-m",
+                "unet/MiniMax-H3-FL2VA-Q4_K_M.gguf",
+                19_864_208_217,
+                "MiniMax H3 GGUF FL2VA Q4_K_M",
+                "Local / Abiray / MiniMaxAI",
+                [
+                    "text_encoders/qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
+                    "vae/minimax_h3_audio_vae_fp32.safetensors",
+                    "vae/minimax_h3_video_vae_fp16.safetensors"
+                ],
+                64,
+                true
+            ),
+            (
+                "Abiray/MiniMax-H3-GGUF@fl2va-Q4_K_S",
+                "minimax-h3-gguf-fl2va-q4-k-s",
+                "unet/MiniMax-H3-FL2VA-Q4_K_S.gguf",
+                19_853_333_792,
+                "MiniMax H3 GGUF FL2VA Q4_K_S",
+                "Local / Abiray / MiniMaxAI",
+                [
+                    "text_encoders/qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
+                    "vae/minimax_h3_audio_vae_fp32.safetensors",
+                    "vae/minimax_h3_video_vae_fp16.safetensors"
+                ],
+                64,
+                false
+            ),
+            (
+                "Abiray/MiniMax-H3-GGUF@ref2va-Q4_0",
+                "minimax-h3-gguf-ref2va-q4-0",
+                "unet/MiniMax-H3-Ref2VA-Q4_0.gguf",
+                18_639_605_024,
+                "MiniMax H3 GGUF Ref2VA Q4_0",
+                "Local / Abiray / MiniMaxAI",
+                [
+                    "text_encoders/qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
+                    "vae/minimax_h3_audio_vae_fp32.safetensors",
+                    "vae/minimax_h3_video_vae_fp16.safetensors"
+                ],
+                64,
+                false
+            ),
+            (
+                "Abiray/MiniMax-H3-GGUF@ref2va-Q4_K_M",
+                "minimax-h3-gguf-ref2va-q4-k-m",
+                "unet/MiniMax-H3-Ref2VA-Q4_K_M.gguf",
+                19_853_333_792,
+                "MiniMax H3 GGUF Ref2VA Q4_K_M",
+                "Local / Abiray / MiniMaxAI",
+                [
+                    "text_encoders/qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
+                    "vae/minimax_h3_audio_vae_fp32.safetensors",
+                    "vae/minimax_h3_video_vae_fp16.safetensors"
+                ],
+                64,
+                false
+            ),
+            (
+                "Abiray/MiniMax-H3-GGUF@ref2va-Q4_K_S",
+                "minimax-h3-gguf-ref2va-q4-k-s",
+                "unet/MiniMax-H3-Ref2VA-Q4_K_S.gguf",
+                19_853_333_792,
+                "MiniMax H3 GGUF Ref2VA Q4_K_S",
+                "Local / Abiray / MiniMaxAI",
+                [
+                    "text_encoders/qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
+                    "vae/minimax_h3_audio_vae_fp32.safetensors",
+                    "vae/minimax_h3_video_vae_fp16.safetensors"
+                ],
+                64,
+                false
             )
-        )
+        ]
+
+        for candidate in candidates {
+            let directory = root.appendingPathComponent(candidate.directoryName, isDirectory: true)
+            let weightURL = directory.appendingPathComponent(candidate.weightRelativePath)
+            let hasProcessor = [
+                "upstream/FL2VA/processor",
+                "upstream/FL2VA/tokenizer"
+            ].contains { relativePath in
+                let processor = directory.appendingPathComponent(relativePath, isDirectory: true)
+                return fileManager.fileExists(
+                    atPath: processor.appendingPathComponent("tokenizer.json").path
+                ) && fileManager.fileExists(
+                    atPath: processor.appendingPathComponent("tokenizer_config.json").path
+                )
+            }
+            guard let values = try? weightURL.resourceValues(
+                forKeys: [.isRegularFileKey, .fileSizeKey]
+            ),
+            values.isRegularFile == true,
+            Int64(values.fileSize ?? -1) == candidate.weightSize,
+            hasProcessor,
+            candidate.companionPaths.allSatisfy({
+                fileManager.fileExists(atPath: directory.appendingPathComponent($0).path)
+            }),
+            managedManifestMatches(
+                modelID: candidate.modelID,
+                directory: directory,
+                fileManager: fileManager
+            ) else {
+                continue
+            }
+
+            result.models.append(
+                ModelDescriptor(
+                    id: candidate.modelID,
+                    displayName: "\(candidate.displayName)（本機）",
+                    publisher: candidate.publisher,
+                    summary: candidate.modelID.lowercased().contains("@fl2va-")
+                        ? "已偵測 \(candidate.displayName)、Qwen3-VL Q4_K_M 與 Video/Audio VAE 配套；可用 H3 Swift Runtime 進行文生影與單一圖片圖生影。"
+                        : "已偵測 \(candidate.displayName)、Qwen3-VL Q4_K_M 與 Video/Audio VAE 配套；可用 H3 Swift Runtime 進行文生影，圖片參考條件尚未接入。",
+                    capabilities: [.imageToVideo, .textToVideo],
+                    quantization: .fourBit,
+                    approximateDownloadGB: sizeInGB(of: directory, fileManager: fileManager),
+                    recommendedMemoryGB: candidate.recommendedMemoryGB,
+                    licenseName: "MiniMax H3 Community License",
+                    sourceURL: URL(string: "https://huggingface.co/\(candidate.modelID.split(separator: "@").first ?? "")"),
+                    localURL: directory,
+                    isRecommended: candidate.isRecommended
+                )
+            )
+        }
     }
 
     private static func discoverLTX23MLXQ4(

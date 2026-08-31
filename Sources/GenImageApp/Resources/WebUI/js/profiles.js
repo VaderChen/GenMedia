@@ -129,6 +129,17 @@ function renderProfileCard(profile, isActive, isDisabled, models) {
           ${isDisabled ? `<span class="badge">${t("profile.disabled")}</span>` : ""}
           ${profile.supportsGeneration === false ? `<span class="badge">${t("profile.downloadOnly")}</span>` : ""}
           ${profile.isBuiltIn ? `<span class="badge">${t("common.builtIn")}</span>` : ""}
+          ${profile.supportsGeneration !== false && !isDisabled ? `
+            <button
+              type="button"
+              class="icon-button profile-disable-button"
+              data-action="requestDeactivateProfile"
+              data-profile-id="${profile.id}"
+              data-capability="${profile.capability}"
+              title="${escapeHTML(t("profile.disableHint"))}"
+              aria-label="${escapeHTML(t("profile.disableHint"))}"
+            >×</button>
+          ` : ""}
           <button
             class="icon-button card-info-button"
             data-action="openProfileInfo"
@@ -178,7 +189,7 @@ function renderActivationButton(profile, isActive, models = []) {
     return `<button class="secondary-button compact" disabled title="${escapeHTML(t("profile.downloadOnlyNote"))}">${t("profile.downloadOnly")}</button>`;
   }
   if (isActive) {
-    return `<button class="danger-button compact" data-action="deactivateProfile" data-profile-id="${profile.id}" data-capability="${profile.capability}">${t("profile.deactivate")}</button>`;
+    return `<button class="danger-button compact" data-action="requestDeactivateProfile" data-profile-id="${profile.id}" data-capability="${profile.capability}">${t("profile.deactivate")}</button>`;
   }
   const isInstalled = isProfileAvailable(profile, models);
   return `<button class="primary-button compact" data-action="activateProfile" data-profile-id="${profile.id}" data-capability="${profile.capability}" ${isInstalled ? "" : `disabled title="${escapeHTML(t("profile.installRequired"))}"`}>${t("profile.activate")}</button>`;

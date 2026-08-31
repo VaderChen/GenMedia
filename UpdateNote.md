@@ -2,6 +2,16 @@
 
 本文件採「最新內容在上」的方式維護。開發期間先更新 `Unreleased`；建立 GitHub Release 時，將標題改為正式版本與日期，再新增下一個空白的 `Unreleased` 區段。
 
+## 1.26.0831 — 2026-08-31
+
+Release 狀態：已完成 Developer ID 簽章、Apple Notarization、Staple 與 Gatekeeper 驗證。
+
+- 新增 MiniMax H3 GGUF 純 Swift／MLX 影片 Runtime 與主系統分派，支援 H3 文生影及部分單圖生影 Profile；H3 目前處於測試階段，不保證生成結果或所有模型變體在不同硬體上的正確性。
+- App 內的 Qwen、MiniMax Music 3、LTX 與 MiniMax H3 Worker 共用同版本 `mlx.metallib`；`Contents/Helpers/mlx.metallib` 使用指向 `Contents/MacOS/mlx.metallib` 的相對 symlink，Z-Image 的 `mlx-swift 0.30.6` 版本仍保留獨立檔案。
+- 補齊 MiniMax H3 Worker 的 Developer ID 簽章、secure timestamp 與 hardened runtime，避免 Apple Notary Service 將 H3 可執行檔判定為無效。
+- 新增 Profile 卡片的 `×` 暫時停用操作，點擊後使用自訂確認對話框，停用狀態可持久化並可重新啟用。
+- 系統已移除絕大多數 Python 依賴，最終目標仍是完全移除；若遷移後仍有功能問題，會持續修正原生 Swift Runtime。
+
 ## Unreleased
 
 - `build.command` 在第一次建立 App 或內建 FFmpeg 不完整時，會自動呼叫 `scripts/build-ffmpeg-macos.sh` 下載來源、建立 LGPL `ffmpeg`／`ffprobe` 與必要 dylib，不再要求使用者手動先執行建立腳本或安裝 `pkg-config`。

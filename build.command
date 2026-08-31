@@ -216,6 +216,7 @@ ensure_metal_toolchain
 QWEN_WORKER_PACKAGE="$SCRIPT_DIR/RuntimeSupport/Qwen2511Worker"
 MINIMAX_WORKER_PACKAGE="$SCRIPT_DIR/RuntimeSupport/MiniMaxMusic3Worker"
 LTX_WORKER_PACKAGE="$SCRIPT_DIR/RuntimeSupport/LTXVideoWorker"
+H3_WORKER_PACKAGE="$SCRIPT_DIR/RuntimeSupport/MiniMaxH3Worker"
 ZIMAGE_WORKER_PACKAGE="$SCRIPT_DIR/RuntimeSupport/ZImageWorker"
 
 print "正在準備 Swift 套件依賴…"
@@ -223,6 +224,7 @@ swift package resolve
 swift package --package-path "$QWEN_WORKER_PACKAGE" resolve
 swift package --package-path "$MINIMAX_WORKER_PACKAGE" resolve
 swift package --package-path "$LTX_WORKER_PACKAGE" resolve
+swift package --package-path "$H3_WORKER_PACKAGE" resolve
 swift package --package-path "$ZIMAGE_WORKER_PACKAGE" resolve
 
 # 相依套件的原始碼修正貼在 .build/checkouts/ 內，每次 resolve 之後都要重跑。
@@ -252,10 +254,12 @@ ROOT_MLX_SWIFT_VERSION="$(resolved_package_version "$SCRIPT_DIR/Package.resolved
 QWEN_MLX_SWIFT_VERSION="$(resolved_package_version "$QWEN_WORKER_PACKAGE/Package.resolved" "mlx-swift")"
 MINIMAX_MLX_SWIFT_VERSION="$(resolved_package_version "$MINIMAX_WORKER_PACKAGE/Package.resolved" "mlx-swift")"
 LTX_MLX_SWIFT_VERSION="$(resolved_package_version "$LTX_WORKER_PACKAGE/Package.resolved" "mlx-swift")"
+H3_MLX_SWIFT_VERSION="$(resolved_package_version "$H3_WORKER_PACKAGE/Package.resolved" "mlx-swift")"
 ZIMAGE_MLX_SWIFT_VERSION="$(resolved_package_version "$ZIMAGE_WORKER_PACKAGE/Package.resolved" "mlx-swift")"
 
 if [[ -z "$ROOT_MLX_SWIFT_VERSION" || -z "$QWEN_MLX_SWIFT_VERSION" \
       || -z "$MINIMAX_MLX_SWIFT_VERSION" || -z "$LTX_MLX_SWIFT_VERSION" \
+      || -z "$H3_MLX_SWIFT_VERSION" \
       || -z "$ZIMAGE_MLX_SWIFT_VERSION" ]]; then
   print -u2 "錯誤：無法從 Package.resolved 讀取 mlx-swift 版本，拒絕使用未標版本的 metallib。"
   exit 1
@@ -263,14 +267,16 @@ fi
 
 if [[ "$ROOT_MLX_SWIFT_VERSION" != "$QWEN_MLX_SWIFT_VERSION" \
       || "$ROOT_MLX_SWIFT_VERSION" != "$MINIMAX_MLX_SWIFT_VERSION" \
-      || "$ROOT_MLX_SWIFT_VERSION" != "$LTX_MLX_SWIFT_VERSION" ]]; then
+      || "$ROOT_MLX_SWIFT_VERSION" != "$LTX_MLX_SWIFT_VERSION" \
+      || "$ROOT_MLX_SWIFT_VERSION" != "$H3_MLX_SWIFT_VERSION" ]]; then
   print -u2 "錯誤：主套件與新版 Worker 的 mlx-swift 版本不一致："
-  print -u2 "  root=$ROOT_MLX_SWIFT_VERSION qwen=$QWEN_MLX_SWIFT_VERSION miniMax=$MINIMAX_MLX_SWIFT_VERSION ltx=$LTX_MLX_SWIFT_VERSION"
+  print -u2 "  root=$ROOT_MLX_SWIFT_VERSION qwen=$QWEN_MLX_SWIFT_VERSION miniMax=$MINIMAX_MLX_SWIFT_VERSION ltx=$LTX_MLX_SWIFT_VERSION h3=$H3_MLX_SWIFT_VERSION"
   exit 1
 fi
 
 print "MLX metallib 版本：主路徑 mlx-swift $ROOT_MLX_SWIFT_VERSION；Z-Image mlx-swift $ZIMAGE_MLX_SWIFT_VERSION"
 
+touch "$SCRIPT_DIR/Sources/GenImageApp/Resources/WebUI"
 print "正在編譯 GenImage Release 版本（僅出貨產品）…"
 swift build -c release \
   --product GenImage \
@@ -344,9 +350,10 @@ worker_metallib_fingerprint() {
 WORKER_METALLIB_FINGERPRINT="$(worker_metallib_fingerprint \
   "$WORKER_MLX_SWIFT" \
   "$WORKER_METALLIB_VERSION" \
-  "$QWEN_WORKER_PACKAGE/Package.resolved" \
-  "$MINIMAX_WORKER_PACKAGE/Package.resolved" \
-  "$LTX_WORKER_PACKAGE/Package.resolved")"
+      "$QWEN_WORKER_PACKAGE/Package.resolved" \
+      "$MINIMAX_WORKER_PACKAGE/Package.resolved" \
+      "$LTX_WORKER_PACKAGE/Package.resolved" \
+      "$H3_WORKER_PACKAGE/Package.resolved")"
 if [[ -s "$WORKER_METALLIB_CACHE" \
       && -s "$WORKER_METALLIB_STAMP" \
       && "$(cat "$WORKER_METALLIB_STAMP")" == "$WORKER_METALLIB_FINGERPRINT" ]]; then
@@ -407,18 +414,11 @@ fi
 
 print "正在編譯 LTX-2 Swift Runtime Worker…"
 swift build --package-path "$LTX_WORKER_PACKAGE" -c release \
-  --product GenImageLTXVideoWorker \
-  --product GenImageLTXVideoGGUFWorker
+  --product GenImageLTXVideoWorker
 LTX_WORKER_BIN_DIR="$(swift build --package-path "$LTX_WORKER_PACKAGE" -c release --show-bin-path)"
 LTX_WORKER="$LTX_WORKER_BIN_DIR/GenImageLTXVideoWorker"
 if [[ ! -x "$LTX_WORKER" ]]; then
   print -u2 "錯誤：找不到 LTX-2 Swift Runtime Worker：$LTX_WORKER"
-  exit 1
-fi
-
-LTX_GGUF_WORKER="$LTX_WORKER_BIN_DIR/GenImageLTXVideoGGUFWorker"
-if [[ ! -x "$LTX_GGUF_WORKER" ]]; then
-  print -u2 "錯誤：找不到 LTX GGUF Runtime Worker：$LTX_GGUF_WORKER"
   exit 1
 fi
 
@@ -429,12 +429,37 @@ if ! /usr/bin/cmp -s "$QWEN_METALLIB" "$LTX_METALLIB"; then
   exit 1
 fi
 
+print "正在編譯 MiniMax H3 Runtime Worker（mlx-swift ${H3_MLX_SWIFT_VERSION}）…"
+swift build --package-path "$H3_WORKER_PACKAGE" -c release \
+  --product GenImageMiniMaxH3Worker
+H3_WORKER_BIN_DIR="$(swift build --package-path "$H3_WORKER_PACKAGE" -c release --show-bin-path)"
+H3_WORKER="$H3_WORKER_BIN_DIR/GenImageMiniMaxH3Worker"
+if [[ ! -x "$H3_WORKER" ]]; then
+  print -u2 "錯誤：找不到 MiniMax H3 Runtime Worker：$H3_WORKER"
+  exit 1
+fi
+
+H3_METALLIB="$H3_WORKER_BIN_DIR/mlx.metallib"
+cp "$WORKER_METALLIB_CACHE" "$H3_METALLIB"
+if ! /usr/bin/cmp -s "$QWEN_METALLIB" "$H3_METALLIB"; then
+  print -u2 "錯誤：Qwen 與 MiniMax H3 Worker 的 mlx.metallib 不一致，不能共用 Helpers Runtime。"
+  exit 1
+fi
+
 BIN_DIR="$(swift build -c release --show-bin-path)"
 METALLIB_SOURCE="$SCRIPT_DIR/RuntimeSupport/mlx-swift-${WORKER_METALLIB_VERSION}.metallib"
 METALLIB_TARGET="$BIN_DIR/mlx.metallib"
 
 if [[ ! -f "$METALLIB_SOURCE" ]]; then
   print -u2 "錯誤：找不到 MLX Metal Runtime：$METALLIB_SOURCE"
+  exit 1
+fi
+
+METALLIB_SOURCE_SHA256="$(/usr/bin/shasum -a 256 "$METALLIB_SOURCE" | /usr/bin/awk '{print $1}')"
+MINIMAX_METALLIB_SHA256="$(/usr/bin/shasum -a 256 "$MINIMAX_METALLIB" | /usr/bin/awk '{print $1}')"
+print "mlx.metallib SHA-256：主程式=$METALLIB_SOURCE_SHA256 Helpers=$MINIMAX_METALLIB_SHA256"
+if [[ "$METALLIB_SOURCE_SHA256" != "$MINIMAX_METALLIB_SHA256" ]]; then
+  print -u2 "錯誤：主程式與 Helpers 的 mlx.metallib checksum 不一致，兩者必須使用同一版本才能共用。"
   exit 1
 fi
 
@@ -539,39 +564,29 @@ if [[ "$PACKAGE_APP" == true ]]; then
   # previous SwiftPM build cannot be treated as an App subcomponent.
   /bin/cp "$BIN_DIR/GenImage" "$MACOS_DIR/GenImage"
   /bin/cp "$BIN_DIR/GenImageMCP" "$HELPERS_DIR/GenImageMCP"
-  /bin/cp "$BIN_DIR/GenImageDoctor" "$HELPERS_DIR/GenImageDoctor"
   /bin/cp "$QWEN_WORKER" "$HELPERS_DIR/GenImageQwen2511Worker"
   /bin/cp "$MINIMAX_WORKER" "$HELPERS_DIR/GenImageMiniMaxMusic3Worker"
   /bin/cp "$LTX_WORKER" "$HELPERS_DIR/GenImageLTXVideoWorker"
-  /bin/cp "$LTX_GGUF_WORKER" "$HELPERS_DIR/GenImageLTXVideoGGUFWorker"
+  /bin/cp "$H3_WORKER" "$HELPERS_DIR/GenImageMiniMaxH3Worker"
   /bin/cp "$ZIMAGE_WORKER" "$ZIMAGE_HELPERS_DIR/GenImageZImageWorker"
   /bin/cp "$METALLIB_SOURCE" "$MACOS_DIR/mlx.metallib"
   # Qwen and MiniMax Workers both use mlx-swift 0.31.6, so they share one
   # helper metallib. Build both independently above to catch version drift.
-  /bin/cp "$MINIMAX_METALLIB" "$HELPERS_DIR/mlx.metallib"
+  /bin/ln -s "../MacOS/mlx.metallib" "$HELPERS_DIR/mlx.metallib"
   /bin/cp "$ZIMAGE_METALLIB_CACHE" "$ZIMAGE_HELPERS_DIR/mlx.metallib"
   chmod 755 \
     "$MACOS_DIR/GenImage" \
     "$HELPERS_DIR/GenImageMCP" \
-    "$HELPERS_DIR/GenImageDoctor" \
     "$HELPERS_DIR/GenImageQwen2511Worker" \
     "$HELPERS_DIR/GenImageMiniMaxMusic3Worker" \
     "$HELPERS_DIR/GenImageLTXVideoWorker" \
-    "$HELPERS_DIR/GenImageLTXVideoGGUFWorker" \
+    "$HELPERS_DIR/GenImageMiniMaxH3Worker" \
     "$ZIMAGE_HELPERS_DIR/GenImageZImageWorker"
 
   APP_RESOURCE_BUNDLE="$BIN_DIR/GenImage_GenImageApp.bundle"
-  WEBUI_SOURCE=""
-  for webui_candidate in \
-    "$APP_RESOURCE_BUNDLE/Contents/Resources/WebUI" \
-    "$APP_RESOURCE_BUNDLE/WebUI"; do
-    if [[ -s "$webui_candidate/index.html" ]]; then
-      WEBUI_SOURCE="$webui_candidate"
-      break
-    fi
-  done
-  if [[ -z "$WEBUI_SOURCE" ]]; then
-    print -u2 "錯誤：找不到 WebUI 資源：$APP_RESOURCE_BUNDLE"
+  WEBUI_SOURCE="$SCRIPT_DIR/Sources/GenImageApp/Resources/WebUI"
+  if [[ ! -s "$WEBUI_SOURCE/index.html" ]]; then
+    print -u2 "錯誤：找不到 WebUI 資源：$WEBUI_SOURCE"
     exit 1
   fi
   /usr/bin/ditto --norsrc --noqtn "$WEBUI_SOURCE" "$RESOURCES_DIR/WebUI"
@@ -605,6 +620,11 @@ if [[ "$PACKAGE_APP" == true ]]; then
   typeset -a LTX_RESOURCE_BUNDLES
   LTX_RESOURCE_BUNDLES=("$LTX_WORKER_BIN_DIR"/*.bundle(N))
   for resource_bundle in "${LTX_RESOURCE_BUNDLES[@]}"; do
+    /usr/bin/ditto --norsrc --noqtn "$resource_bundle" "$HELPERS_DIR/${resource_bundle:t}"
+  done
+  typeset -a H3_RESOURCE_BUNDLES
+  H3_RESOURCE_BUNDLES=("$H3_WORKER_BIN_DIR"/*.bundle(N))
+  for resource_bundle in "${H3_RESOURCE_BUNDLES[@]}"; do
     /usr/bin/ditto --norsrc --noqtn "$resource_bundle" "$HELPERS_DIR/${resource_bundle:t}"
   done
   typeset -a ZIMAGE_RESOURCE_BUNDLES
@@ -696,14 +716,12 @@ if [[ "$PACKAGE_APP" == true ]]; then
 
   for code_object in \
     "$MACOS_DIR/mlx.metallib" \
-    "$HELPERS_DIR/mlx.metallib" \
     "$ZIMAGE_HELPERS_DIR/mlx.metallib" \
     "$HELPERS_DIR/GenImageMCP" \
-    "$HELPERS_DIR/GenImageDoctor" \
     "$HELPERS_DIR/GenImageQwen2511Worker" \
     "$HELPERS_DIR/GenImageMiniMaxMusic3Worker" \
     "$HELPERS_DIR/GenImageLTXVideoWorker" \
-    "$HELPERS_DIR/GenImageLTXVideoGGUFWorker" \
+    "$HELPERS_DIR/GenImageMiniMaxH3Worker" \
     "$ZIMAGE_HELPERS_DIR/GenImageZImageWorker" \
     "$MACOS_DIR/GenImage"; do
     /usr/bin/codesign "${SIGNING_ARGUMENTS[@]}" "$code_object"
@@ -725,7 +743,7 @@ print "模型診斷工具：$BIN_DIR/GenImageDoctor"
 print "Qwen 2511 Runtime：$QWEN_WORKER"
 print "MiniMax Music 3 Runtime：$MINIMAX_WORKER"
 print "LTX-2 Runtime：$LTX_WORKER"
-print "LTX GGUF Runtime：$LTX_GGUF_WORKER"
+print "MiniMax H3 Runtime：$H3_WORKER"
 print "Z-Image Runtime：$ZIMAGE_WORKER（mlx-swift ${ZIMAGE_MLX_SWIFT_VERSION}）"
 print "MLX Metal Runtime（mlx-swift ${WORKER_METALLIB_VERSION}）：$METALLIB_TARGET"
 print "Worker MLX Metal Runtime（mlx-swift ${WORKER_METALLIB_VERSION}）：$WORKER_METALLIB_CACHE"

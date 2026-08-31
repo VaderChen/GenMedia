@@ -37,7 +37,7 @@ extension AppStore {
             await upscaleService.setOutputDirectory(outputURL)
             await subtitleGenerationService.setOutputDirectory(outputURL)
         }
-        videoGenerationService = LTXVideoGenerationService(outputDirectory: outputURL)
+        videoGenerationService = VideoGenerationRouter(outputDirectory: outputURL)
         musicGenerationService = Self.makeMusicGenerationService(outputDirectory: outputURL)
         statusMessage = "輸出目錄已更新：\(outputURL.path)"
         return true

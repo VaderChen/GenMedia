@@ -2046,13 +2046,19 @@ button:disabled {
   max-width: 52%;
 }
 
-.card-info-button {
+.card-info-button,
+.profile-disable-button {
   border-radius: 50%;
   flex: 0 0 27px;
   height: 27px;
   min-height: 27px;
   padding: 4px;
   width: 27px;
+}
+
+.profile-disable-button:hover {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-muted));
+  color: var(--danger);
 }
 
 .card-info-button svg {

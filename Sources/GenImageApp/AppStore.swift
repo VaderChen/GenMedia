@@ -255,7 +255,7 @@ final class AppStore: ObservableObject {
     let imageToTextService: QwenVLImageDescriptionService
     var imageToImageService: Qwen2511ImageToImageService
     var upscaleService: CoreMLUpscaleService
-    var videoGenerationService: LTXVideoGenerationService
+    var videoGenerationService: any VideoGenerating
     var musicGenerationService: MusicGenerationRouter
     var subtitleGenerationService: SubtitleGenerationRouter
     var mediaCompositionService: MediaCompositionService
@@ -324,7 +324,7 @@ final class AppStore: ObservableObject {
         upscaleService = CoreMLUpscaleService(
             outputDirectory: generatedDirectory
         )
-        videoGenerationService = LTXVideoGenerationService(outputDirectory: generatedDirectory)
+        videoGenerationService = VideoGenerationRouter(outputDirectory: generatedDirectory)
         musicGenerationService = Self.makeMusicGenerationService(outputDirectory: generatedDirectory)
         subtitleGenerationService = SubtitleGenerationRouter(outputDirectory: generatedDirectory)
         mediaCompositionService = MediaCompositionService(outputDirectory: generatedDirectory)

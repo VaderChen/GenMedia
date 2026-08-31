@@ -143,7 +143,6 @@ struct SubprocessRuntimeTests {
         let environment = RuntimeExecutable.environment()
         let paths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
 
-        #expect(environment["PYTHONUNBUFFERED"] == "1")
         #expect(paths.contains("/usr/bin"))
         #expect(Set(paths).count == paths.count)
     }
