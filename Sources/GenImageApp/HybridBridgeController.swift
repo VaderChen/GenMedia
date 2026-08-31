@@ -355,6 +355,17 @@ final class HybridBridgeController: NSObject, ObservableObject {
                 throw BridgeError.assetActionFailed("無法清除 Civitai API Token。")
             }
 
+        case "setHuggingFaceToken":
+            guard let token = params["token"] as? String,
+                  store.setHuggingFaceToken(token) else {
+                throw BridgeError.assetActionFailed("無法儲存 Hugging Face API Token。")
+            }
+
+        case "clearHuggingFaceToken":
+            guard store.clearHuggingFaceToken() else {
+                throw BridgeError.assetActionFailed("無法清除 Hugging Face API Token。")
+            }
+
         case "setMCPServiceEnabled":
             guard let enabled = params["enabled"] as? Bool else {
                 throw BridgeError.invalidParameters
@@ -376,7 +387,11 @@ final class HybridBridgeController: NSObject, ObservableObject {
             guard let id = uuid(params["profileID"]) else {
                 throw BridgeError.invalidParameters
             }
-            store.installProfileModels(id)
+            store.installProfileModels(
+                id,
+                civitaiToken: params["civitaiToken"] as? String,
+                huggingFaceToken: params["huggingFaceToken"] as? String
+            )
 
         case "pauseModel":
             guard let model = model(from: params) else { throw BridgeError.invalidParameters }

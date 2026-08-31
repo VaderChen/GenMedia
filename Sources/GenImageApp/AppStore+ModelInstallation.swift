@@ -8,7 +8,11 @@ extension AppStore {
         installations[modelID] ?? ModelInstallation()
     }
 
-    func installProfileModels(_ profileID: UUID) {
+    func installProfileModels(
+        _ profileID: UUID,
+        civitaiToken: String? = nil,
+        huggingFaceToken: String? = nil
+    ) {
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return }
         let requiredModels = profile.requiredModelIDs.compactMap { requiredModelID in
             models.first { $0.id == requiredModelID }
@@ -22,7 +26,11 @@ extension AppStore {
 
         var startedCount = 0
         for model in requiredModels where installation(for: model.id).phase != .installed {
-            installModel(model)
+            installModel(
+                model,
+                civitaiToken: civitaiToken,
+                huggingFaceToken: huggingFaceToken
+            )
             startedCount += 1
         }
         statusMessage = startedCount > 0
@@ -35,6 +43,7 @@ extension AppStore {
         civitaiToken: String? = nil,
         huggingFaceToken: String? = nil
     ) {
+        let resolvedHuggingFaceToken = huggingFaceToken ?? HuggingFaceTokenStore.token()
         if model.localURL != nil {
             installations[model.id] = ModelInstallation(
                 phase: .installed,
@@ -77,7 +86,7 @@ extension AppStore {
                     modelID: model.id,
                     rootURL: rootURL,
                     civitaiToken: civitaiToken,
-                    huggingFaceToken: huggingFaceToken,
+                    huggingFaceToken: resolvedHuggingFaceToken,
                     progress: { [weak self] update in
                         guard progressGate.shouldEmit(update) else { return }
                         Task { @MainActor [weak self] in
@@ -138,7 +147,9 @@ extension AppStore {
                     statusMessage = "Civitai LoRA 下載需要有效的 API Token，請至設定輸入後重試。"
                 } else if let installerError = error as? ModelInstallerError,
                           case .httpStatus(401, _) = installerError {
-                    statusMessage = "模型需要 Hugging Face API Token，請點選下載並輸入金鑰後重試。"
+                    statusMessage = HuggingFaceTokenStore.isConfigured()
+                        ? "Hugging Face Token 已設定，但模型伺服器仍回傳 HTTP 401；請重新儲存 Token 後重試。"
+                        : "模型需要 Hugging Face API Token，請點選下載並輸入金鑰後重試。"
                 } else {
                     statusMessage = "模型下載失敗：\(error.localizedDescription)"
                 }

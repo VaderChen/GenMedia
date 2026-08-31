@@ -12,10 +12,6 @@ let package = Package(
             name: "GenImageLTXVideoWorker",
             targets: ["GenImageLTXVideoWorker"]
         ),
-        .executable(
-            name: "GenImageLTXVideoGGUFWorker",
-            targets: ["GenImageLTXVideoGGUFWorker"]
-        )
     ],
     dependencies: [
         .package(
@@ -50,14 +46,6 @@ let package = Package(
         ),
         .executableTarget(
             name: "GenImageLTXVideoWorker",
-            dependencies: [
-                "LTXVideoSwiftRuntime",
-                .product(name: "MLX", package: "mlx-swift"),
-                .product(name: "Tokenizers", package: "swift-transformers")
-            ]
-        ),
-        .executableTarget(
-            name: "GenImageLTXVideoGGUFWorker",
             dependencies: [
                 "LTXVideoSwiftRuntime",
                 .product(name: "MLX", package: "mlx-swift"),

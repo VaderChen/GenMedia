@@ -68,6 +68,8 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
         var outputs: [MediaAsset] = []
         var generatedOutputURLs: [URL] = []
         var completed = false
+        let legacyWorkerOverride = ProcessInfo.processInfo.environment["GENIMAGE_LTX_GGUF_WORKER"]
+        var didWarnLegacyWorkerOverride = false
         defer {
             if !completed {
                 for outputURL in generatedOutputURLs {
@@ -109,12 +111,24 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
 
             let log = try RuntimeLog(at: logURL)
             defer { log.close() }
+            if !didWarnLegacyWorkerOverride,
+               let legacyWorkerOverride,
+               !legacyWorkerOverride.isEmpty {
+                let warning = "[warning] GENIMAGE_LTX_GGUF_WORKER 已失效；合併後請改用 GENIMAGE_LTX_WORKER。已忽略：\(legacyWorkerOverride)\n"
+                try? log.handle.write(contentsOf: Data(warning.utf8))
+                log.flush()
+                didWarnLegacyWorkerOverride = true
+            }
             var activity = RuntimeLogActivity(log: log)
             let generationSpan = 1.0 / Double(request.options.outputCount)
             let completedFraction = Double(index) * generationSpan
             let status = try await RuntimeProcess.run(
                 executable: executable,
-                arguments: ["--request", requestURL.path],
+                arguments: [
+                    "--request", requestURL.path,
+                    "--format", workerKind.formatArgument,
+                    "--variant", workerKind.variantArgument
+                ],
                 environment: RuntimeExecutable.environment(),
                 log: log,
                 pollInterval: .milliseconds(300)
@@ -219,23 +233,20 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
 
     private enum WorkerKind {
         case mlx
-        case gguf
+        case gguf096
+        case gguf23
 
-        var executableName: String {
+        var formatArgument: String {
             switch self {
-            case .mlx:
-                "GenImageLTXVideoWorker"
-            case .gguf:
-                "GenImageLTXVideoGGUFWorker"
+            case .mlx: "mlx"
+            case .gguf096, .gguf23: "gguf"
             }
         }
 
-        var environmentKey: String {
+        var variantArgument: String {
             switch self {
-            case .mlx:
-                "GENIMAGE_LTX_WORKER"
-            case .gguf:
-                "GENIMAGE_LTX_GGUF_WORKER"
+            case .mlx, .gguf23: "ltx-2.3"
+            case .gguf096: "ltx-0.9.6"
             }
         }
     }
@@ -244,19 +255,20 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
         switch modelID.lowercased() {
         case "dgrauet/ltx-2.3-mlx-q4":
             .mlx
-        case "city96/ltx-video-0.9.6-distilled-gguf@q4_k_m",
-             "unsloth/ltx-2.3-gguf@distilled-1.1-q3_k_m":
-            .gguf
+        case "city96/ltx-video-0.9.6-distilled-gguf@q4_k_m":
+            .gguf096
+        case "unsloth/ltx-2.3-gguf@distilled-1.1-q3_k_m":
+            .gguf23
         default:
             nil
         }
     }
 
     private static func workerExecutable(for kind: WorkerKind) throws -> URL {
-        let name = kind.executableName
+        let name = "GenImageLTXVideoWorker"
         let environment = ProcessInfo.processInfo.environment
         var candidates: [URL] = []
-        if let configured = environment[kind.environmentKey], !configured.isEmpty {
+        if let configured = environment["GENIMAGE_LTX_WORKER"], !configured.isEmpty {
             candidates.append(URL(fileURLWithPath: configured))
         }
         if let executableDirectory = Bundle.main.executableURL?.deletingLastPathComponent() {
@@ -419,7 +431,7 @@ public enum LTXVideoRuntimeError: LocalizedError, Sendable {
         case .unsupportedLoRA:
             "目前 LTX Swift Worker 尚未提供 LoRA fusion；未退回其他 Runtime。"
         case let .workerNotFound(paths):
-            "找不到 LTX Swift Runtime Worker。請重新建置 App，或設定 GENIMAGE_LTX_WORKER／GENIMAGE_LTX_GGUF_WORKER；已檢查：\(paths.joined(separator: "、"))"
+            "找不到 LTX Swift Runtime Worker。請重新建置 App，或設定 GENIMAGE_LTX_WORKER；已檢查：\(paths.joined(separator: "、"))"
         case let .runtimeFailed(status, message):
             "LTX Swift Worker 結束（\(status)）：\(message)"
         case let .runtimeStalled(details):

@@ -290,6 +290,26 @@ export function renderModelRemovalDialog(state, ui) {
   </div>`;
 }
 
+export function renderProfileDisableDialog(state, ui) {
+  const dialog = ui.profileDisableDialog;
+  if (!dialog) return "";
+  const profile = state.profiles.find(
+    (candidate) => candidate.id === dialog.profileID
+      && candidate.capability === dialog.capability,
+  );
+  if (!profile) return "";
+  return `<div class="dialog-backdrop">
+    <section class="paste-dialog" role="alertdialog" aria-modal="true" aria-labelledby="profile-disable-dialog-title">
+      <h2 id="profile-disable-dialog-title">${t("profile.disableTitle")}</h2>
+      <p>${t("profile.disableMessage", { name: escapeHTML(profile.name) })}</p>
+      <div class="dialog-actions">
+        <button class="secondary-button" data-action="profileDisableCancel">${t("common.cancel")}</button>
+        <button class="danger-button" data-action="profileDisableConfirm">${t("profile.disableConfirm")}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
 export function renderCivitaiTokenDialog(state, ui) {
   const prompt = ui.civitaiTokenDialog;
   if (!prompt) return "";

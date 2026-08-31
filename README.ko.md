@@ -57,6 +57,12 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 
 LTX Worker는 JSON request와 단계별 진행률 이벤트로 앱과 통신하며 모델 파일은 앱에 포함하지 않습니다. 이전 버전의 Runtime 데이터는 자동으로 삭제하지 않으므로 더 이상 필요하지 않은지 확인한 뒤 `~/Library/Application Support/GenImage/Runtime/ltx-2-mlx/`를 수동으로 삭제할 수 있습니다.
 
+### MiniMax H3 Runtime
+
+앱은 MiniMax H3 GGUF용 네이티브 Swift／MLX 비디오 Runtime을 연결하며 텍스트→비디오와 일부 단일 이미지→비디오 Profile을 지원합니다. H3 Worker, Qwen 3 VL 텍스트 인코더, Video／Audio VAE 및 GGUF 가중치는 Profile 다운로드 계획으로 관리되며 앱에 포함되지 않습니다.
+
+MiniMax H3는 현재 **테스트 단계이며 생성 결과, 모든 H3 GGUF 변형 및 하드웨어별 정확성을 보장하지 않습니다**. 안정적인 프로덕션 기능으로 취급하지 마세요. 출력에 문제가 있으면 Profile, 모델 변형 및 Runtime log를 보존해 후속 수정에 사용하세요.
+
 ### 호환 미디어 가져오기
 
 가져온 비디오와 오디오는 내장 `ffprobe`가 컨테이너, Codec, 트랙, 길이, 회전이 반영된 표시 크기를 검사하며, 긴 변환은 진행률이 표시되는 취소 가능한 작업으로 실행됩니다. WebKit에서 직접 재생할 수 있으면 원본을 유지하고, H.264/HEVC에서 컨테이너나 오디오만 호환되지 않으면 MP4로 무손실 재다중화합니다. 그 밖의 비디오는 VideoToolbox H.264/AAC, 호환되지 않는 오디오는 M4A AAC 재생 프록시를 생성합니다. 재생 프록시는 `AssetSchemeHandler`가 백그라운드 HTTP Range 청크 스트림으로 제공하므로 점진 재생과 탐색을 지원합니다. 원본 경로는 자막 소스로 유지되므로 자막 출력 폴더와 이름은 원본 파일을 따릅니다. 시작 시 대응 에셋이 없는 MediaCache 고아 파일을 삭제하며, 프로젝트를 닫거나 에셋을 제거할 때도 App이 관리하는 호환 캐시만 삭제합니다.
@@ -215,7 +221,7 @@ scripts/
 
 ## 현재 상태
 
-앱은 Z-Image Turbo 텍스트→이미지, Qwen3-VL/Qwen3.5/Qwen3.8 멀티모달 이미지→텍스트 및 텍스트→텍스트, Qwen 2511 이미지→이미지, LTX-2.3 MLX 텍스트→비디오 및 이미지→비디오, ACE-Step 1.5 Turbo MLX와 MiniMax Music 3 MLX 8-bit/4-bit 텍스트→음악, Whisper/Paraformer/Parakeet 자막 생성, Core ML Real-ESRGAN 업스케일의 로컬 추론에 연결되어 있습니다. 비디오는 MP4, 음악은 MP3/M4A/AAC/FLAC, 자막은 SRT/WebVTT로 추가되며 언어, 타임라인, 프로필 스냅샷, 계보를 보존합니다.
+앱은 Z-Image Turbo 텍스트→이미지, Qwen3-VL/Qwen3.5/Qwen3.8 멀티모달 이미지→텍스트 및 텍스트→텍스트, Qwen 2511 이미지→이미지, LTX-2.3 MLX 텍스트→비디오 및 이미지→비디오, MiniMax H3 GGUF 텍스트→비디오 및 일부 이미지→비디오 Profile(테스트 단계), ACE-Step 1.5 Turbo MLX와 MiniMax Music 3 MLX 8-bit/4-bit 텍스트→음악, Whisper/Paraformer/Parakeet 자막 생성, Core ML Real-ESRGAN 업스케일의 로컬 추론에 연결되어 있습니다. 비디오는 MP4, 음악은 MP3/M4A/AAC/FLAC, 자막은 SRT/WebVTT로 추가되며 언어, 타임라인, 프로필 스냅샷, 계보를 보존합니다.
 
 추가 정보:
 

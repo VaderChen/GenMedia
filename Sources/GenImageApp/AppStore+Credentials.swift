@@ -25,4 +25,28 @@ extension AppStore {
             return false
         }
     }
+
+    @discardableResult
+    func setHuggingFaceToken(_ rawToken: String) -> Bool {
+        do {
+            try HuggingFaceTokenStore.save(rawToken)
+            statusMessage = "Hugging Face API Token 已安全儲存；模型中心會自動用於下載。"
+            return true
+        } catch {
+            statusMessage = "Hugging Face API Token 儲存失敗：\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    @discardableResult
+    func clearHuggingFaceToken() -> Bool {
+        do {
+            try HuggingFaceTokenStore.delete()
+            statusMessage = "已清除 Hugging Face API Token。"
+            return true
+        } catch {
+            statusMessage = "Hugging Face API Token 清除失敗：\(error.localizedDescription)"
+            return false
+        }
+    }
 }

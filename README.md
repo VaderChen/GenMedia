@@ -51,11 +51,17 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 
 影片生成由 App 隨附的 `GenImageLTXVideoWorker` Swift 子行程執行；Swift App 負責 Profile、參數驗證、工作佇列、取消、進度、資產與影片播放，不需要額外安裝影片 Runtime。
 
-模型中心的 `dgrauet/ltx-2.3-mlx-q4` 下載方案會一併取得原生 MLX INT4 Transformer、影片／音訊 VAE、vocoder、空間升頻器，以及 `google/gemma-3-12b-it-qat-q4_0-unquantized` 的 Gemma 3 12B 文字編碼器；完整下載量約 42 GiB，建議使用 48 GB 以上記憶體。
+模型中心的 `dgrauet/ltx-2.3-mlx-q4` 下載方案會一併取得原生 MLX INT4 Transformer、影片／音訊 VAE、vocoder、空間升頻器，以及公開的 `Lightricks/gemma-3-12b-it-qat-q4_0-unquantized` Gemma 3 12B 文字編碼器鏡像；完整下載量約 42 GiB，建議使用 48 GB 以上記憶體。LTX 的 Gemma 權重仍受 Gemma 授權條款約束，但不再依賴 Hugging Face gated `google/...` 儲存庫。
 
 開發建置可透過 `GENIMAGE_LTX_WORKER` 指定自訂 Worker；正式 App 會使用 Bundle `Contents/Helpers/GenImageLTXVideoWorker`。`GENIMAGE_LTX_GEMMA_MODEL` 可覆寫 Gemma 目錄，未設定時優先使用 LTX 模型目錄內的 `gemma-3-12b`。
 
 LTX Worker 透過 JSON request 與逐階段事件和 App 通訊；模型檔案不會打包進 App。現有舊版資料目錄不會自動刪除，確認不再使用後可手動移除 `~/Library/Application Support/GenImage/Runtime/ltx-2-mlx/`。
+
+### MiniMax H3 Runtime
+
+App 已接入 MiniMax H3 GGUF 的純 Swift／MLX 影片 Runtime，支援文生影與部分單圖生影 Profile。H3 Worker、Qwen 3 VL 文字編碼器、影片／音訊 VAE 與 GGUF 權重會依 Profile 的下載方案分開管理，不會打包進 App。
+
+MiniMax H3 目前仍處於測試階段，**不保證生成結果或所有 H3 GGUF 變體在不同硬體上的正確性**，不應視為穩定的生產功能。若輸出異常，請保留 Profile、模型變體與 Runtime log 供後續修正。
 
 ### 媒體相容匯入
 
@@ -215,7 +221,7 @@ scripts/
 
 ## 目前狀態
 
-App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL／Qwen3.5／Qwen3.8 多模態圖生文與文生文、Qwen 2511 圖生圖、LTX-2.3 MLX 文生影／圖生影、ACE-Step 1.5 Turbo MLX 與 MiniMax Music 3 MLX 8-bit／4-bit 文生音樂、Whisper／Paraformer／Parakeet 字幕生成，以及 Core ML Real-ESRGAN Upscale。影片以 MP4 加入工作區；音樂可輸出 MP3、M4A、AAC 或 FLAC；字幕可輸出 SRT 或 WebVTT，並保存語言、時間軸、Profile 快照與 lineage。
+App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL／Qwen3.5／Qwen3.8 多模態圖生文與文生文、Qwen 2511 圖生圖、LTX-2.3 MLX 文生影／圖生影、MiniMax H3 GGUF 文生影／部分圖生影（測試階段）、ACE-Step 1.5 Turbo MLX 與 MiniMax Music 3 MLX 8-bit／4-bit 文生音樂、Whisper／Paraformer／Parakeet 字幕生成，以及 Core ML Real-ESRGAN Upscale。影片以 MP4 加入工作區；音樂可輸出 MP3、M4A、AAC 或 FLAC；字幕可輸出 SRT 或 WebVTT，並保存語言、時間軸、Profile 快照與 lineage。
 
 更多資訊：
 

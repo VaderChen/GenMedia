@@ -57,6 +57,12 @@ Development builds can use `GENIMAGE_LTX_WORKER` to select a custom Worker. Rele
 
 The LTX Worker communicates with the app through a JSON request and stage-specific progress events; model files are not bundled in the app. Legacy runtime data is not removed automatically; after confirming it is no longer needed, the old directory `~/Library/Application Support/GenImage/Runtime/ltx-2-mlx/` can be removed manually.
 
+### MiniMax H3 Runtime
+
+The app now includes a native Swift/MLX video Runtime for MiniMax H3 GGUF, supporting text-to-video and selected single-image-to-video profiles. The H3 Worker, Qwen 3 VL text encoder, video/audio VAEs, and GGUF weights are managed by each profile's download plan and are not bundled in the app.
+
+MiniMax H3 is currently in a **testing phase; correctness is not guaranteed for generated results or every H3 GGUF variant on every hardware configuration**. It should not be treated as a stable production feature. If an output is incorrect, retain the Profile, model variant, and Runtime log for follow-up fixes.
+
 ### Compatible Media Import
 
 Imported video and audio are inspected by bundled `ffprobe` for container, codecs, tracks, duration, and display-oriented dimensions; long conversions run as cancellable jobs with progress. WebKit-playable sources remain untouched; H.264 or HEVC with only container or audio incompatibilities is remuxed losslessly to MP4; other video receives a VideoToolbox H.264/AAC playback proxy, while incompatible audio receives an M4A AAC proxy. Playback proxies are streamed in background chunks through `AssetSchemeHandler` with HTTP Range support for progressive playback and seeking. The original path remains the subtitle source, so sidecar subtitles still use the source directory and filename. Startup removes MediaCache orphans without matching assets, while closing a project or removing an asset cleans only app-managed compatibility cache files.
@@ -215,7 +221,7 @@ scripts/
 
 ## Current Status
 
-The app is connected to local inference for Z-Image Turbo text-to-image, Qwen3-VL/Qwen3.5/Qwen3.8 multimodal image-to-text and text-to-text, Qwen 2511 image-to-image, LTX-2.3 MLX text-to-video and image-to-video, ACE-Step 1.5 Turbo MLX and MiniMax Music 3 MLX 8-bit/4-bit text-to-music, Whisper/Paraformer/Parakeet subtitle generation, and Core ML Real-ESRGAN upscaling. Videos are added as MP4 assets; music exports as MP3, M4A, AAC, or FLAC; subtitles export as SRT or WebVTT with language, timing, profile snapshots, and lineage.
+The app is connected to local inference for Z-Image Turbo text-to-image, Qwen3-VL/Qwen3.5/Qwen3.8 multimodal image-to-text and text-to-text, Qwen 2511 image-to-image, LTX-2.3 MLX text-to-video and image-to-video, MiniMax H3 GGUF text-to-video and selected image-to-video profiles (testing phase), ACE-Step 1.5 Turbo MLX and MiniMax Music 3 MLX 8-bit/4-bit text-to-music, Whisper/Paraformer/Parakeet subtitle generation, and Core ML Real-ESRGAN upscaling. Videos are added as MP4 assets; music exports as MP3, M4A, AAC, or FLAC; subtitles export as SRT or WebVTT with language, timing, profile snapshots, and lineage.
 
 More information:
 

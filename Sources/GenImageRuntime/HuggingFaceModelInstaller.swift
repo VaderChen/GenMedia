@@ -48,6 +48,12 @@ public actor HuggingFaceModelInstaller {
     public static let miniMaxH3MLX8BitModelID = "pipenetwork/MiniMax-H3-MLX-8bit"
     public static let miniMaxH3MLX4BitModelID = "pipenetwork/MiniMax-H3-MLX-4bit"
     public static let miniMaxH3GGUFFL2VAPrunedQ4KModelID = "unsloth/MiniMax-H3-GGUF@fl2va-pruned-Q4_K"
+    public static let miniMaxH3GGUFFL2VAQ40ModelID = "Abiray/MiniMax-H3-GGUF@fl2va-Q4_0"
+    public static let miniMaxH3GGUFFL2VAQ4KMModelID = "Abiray/MiniMax-H3-GGUF@fl2va-Q4_K_M"
+    public static let miniMaxH3GGUFFL2VAQ4KSModelID = "Abiray/MiniMax-H3-GGUF@fl2va-Q4_K_S"
+    public static let miniMaxH3GGUFRef2VAQ40ModelID = "Abiray/MiniMax-H3-GGUF@ref2va-Q4_0"
+    public static let miniMaxH3GGUFRef2VAQ4KMModelID = "Abiray/MiniMax-H3-GGUF@ref2va-Q4_K_M"
+    public static let miniMaxH3GGUFRef2VAQ4KSModelID = "Abiray/MiniMax-H3-GGUF@ref2va-Q4_K_S"
     public static let aceStep15TurboModelID = "ACE-Step/Ace-Step1.5"
     public static let miniMaxMusic3MLX8BitModelID = "vanch007/MiniMax-Music3-MLX-8bit"
     public static let miniMaxMusic3MLX4BitModelID = "mlx-community/MiniMax-Music3-4bit"
@@ -380,6 +386,8 @@ public actor HuggingFaceModelInstaller {
             civitaiToken: civitaiToken,
             huggingFaceToken: huggingFaceToken
         )
+        let resumeDataURL = fileURL.appendingPathExtension("resume")
+        let hasResumeData = (try? Data(contentsOf: resumeDataURL))?.isEmpty == false
         let downloader = FileDownloadDelegate(
             destination: fileURL,
             expectedBytes: file.size,
@@ -389,6 +397,20 @@ public actor HuggingFaceModelInstaller {
         )
         do {
             try await downloader.start(request: request)
+        } catch let error as ModelInstallerError {
+            try Task.checkCancellation()
+            guard case .httpStatus(401, _) = error else { throw error }
+            guard hasResumeData else { throw error }
+
+            try? FileManager.default.removeItem(at: resumeDataURL)
+            let retryDownloader = FileDownloadDelegate(
+                destination: fileURL,
+                expectedBytes: file.size,
+                progress: { received, _ in
+                    progressTracker.report(file.relativePath, received: received)
+                }
+            )
+            try await retryDownloader.start(request: request)
         } catch {
             try Task.checkCancellation()
             throw error
@@ -664,22 +686,12 @@ public actor HuggingFaceModelInstaller {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
-    /// Prefer the explicit environment variable, then reuse the token saved by
-    /// `huggingface-cli login` / `hf auth login` when it is available. This keeps
-    /// public model downloads authenticated so Hugging Face does not apply the
+    /// Prefer the token saved by the app, then reuse HF_TOKEN or the token saved
+    /// by `huggingface-cli login` / `hf auth login` when available. This keeps
+    /// model downloads authenticated so Hugging Face does not apply the
     /// anonymous throughput limit.
     private nonisolated static func huggingFaceToken() -> String? {
-        if let environmentToken = ProcessInfo.processInfo.environment["HF_TOKEN"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !environmentToken.isEmpty {
-            return environmentToken
-        }
-        let tokenURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".cache/huggingface/token")
-        guard let token = try? String(contentsOf: tokenURL, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !token.isEmpty else { return nil }
-        return token
+        HuggingFaceTokenStore.token()
     }
 
     private nonisolated static func validate(response: URLResponse, data: Data) throws {
@@ -979,7 +991,8 @@ public actor HuggingFaceModelInstaller {
                         ]
                     ),
                     SourcePlan(
-                        repository: "google/gemma-3-12b-it-qat-q4_0-unquantized",
+                        repository: "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
+                        revision: "d62fe4f1995ade703b49a0f3c0d0f161237ef437",
                         destinationSubdirectory: "gemma-3-12b",
                         prefixes: [],
                         exactFiles: [
@@ -1028,7 +1041,8 @@ public actor HuggingFaceModelInstaller {
                         ]
                     ),
                     SourcePlan(
-                        repository: "google/gemma-3-12b-it-qat-q4_0-unquantized",
+                        repository: "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
+                        revision: "d62fe4f1995ade703b49a0f3c0d0f161237ef437",
                         destinationSubdirectory: "gemma-3-12b",
                         prefixes: [],
                         exactFiles: [
@@ -1187,7 +1201,8 @@ public actor HuggingFaceModelInstaller {
                         exactFiles: ["ltx-2.3-spatial-upscaler-x2-1.1.safetensors"]
                     ),
                     SourcePlan(
-                        repository: "google/gemma-3-12b-it-qat-q4_0-unquantized",
+                        repository: "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
+                        revision: "d62fe4f1995ade703b49a0f3c0d0f161237ef437",
                         destinationSubdirectory: "gemma-3-12b",
                         prefixes: [],
                         exactFiles: [
@@ -1236,7 +1251,12 @@ public actor HuggingFaceModelInstaller {
             return InstallPlan(
                 directoryName: "minimax-h3-gguf-fl2va-pruned-q4-k",
                 requiredRuntimeFiles: [
-                    "minimax_h3_fl2va_pruned-Q4_K.gguf"
+                    "minimax_h3_fl2va_pruned-Q4_K.gguf",
+                    "qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
+                    "vae/minimax_h3_audio_vae_fp32.safetensors",
+                    "vae/minimax_h3_video_vae_fp16.safetensors",
+                    "upstream/FL2VA/processor/tokenizer.json",
+                    "upstream/FL2VA/processor/tokenizer_config.json"
                 ],
                 sources: [
                     SourcePlan(
@@ -1248,10 +1268,63 @@ public actor HuggingFaceModelInstaller {
                             "LICENSE",
                             "README.md",
                             "NOTICE",
-                            "minimax_h3_fl2va_pruned-Q4_K.gguf"
+                            "minimax_h3_fl2va_pruned-Q4_K.gguf",
+                            "qwen3vl_32b_minimax_h3-Q4_K_M.gguf"
                         ]
+                    ),
+                    SourcePlan(
+                        repository: "Comfy-Org/MiniMax-H3",
+                        revision: "4cc1d817b6184899b41293954329f576cb5ae86b",
+                        destinationSubdirectory: "",
+                        prefixes: [],
+                        exactFiles: [
+                            "vae/minimax_h3_audio_vae_fp32.safetensors",
+                            "vae/minimax_h3_video_vae_fp16.safetensors"
+                        ]
+                    ),
+                    // Same gap as `miniMaxH3GGUFPlan`: the ComfyUI-converted
+                    // Qwen3-VL encoder ships without tokenizer metadata, so the
+                    // tokenizer and vision preprocessor come from upstream.
+                    SourcePlan(
+                        repository: "MiniMaxAI/MiniMax-H3",
+                        destinationSubdirectory: "upstream",
+                        prefixes: [
+                            "FL2VA/processor/",
+                            "FL2VA/tokenizer/"
+                        ],
+                        exactFiles: ["FL2VA/model_index.json"]
                     )
                 ]
+            )
+        case miniMaxH3GGUFFL2VAQ40ModelID:
+            return miniMaxH3GGUFPlan(
+                variant: "FL2VA-Q4_0",
+                directoryName: "minimax-h3-gguf-fl2va-q4-0"
+            )
+        case miniMaxH3GGUFFL2VAQ4KMModelID:
+            return miniMaxH3GGUFPlan(
+                variant: "FL2VA-Q4_K_M",
+                directoryName: "minimax-h3-gguf-fl2va-q4-k-m"
+            )
+        case miniMaxH3GGUFFL2VAQ4KSModelID:
+            return miniMaxH3GGUFPlan(
+                variant: "FL2VA-Q4_K_S",
+                directoryName: "minimax-h3-gguf-fl2va-q4-k-s"
+            )
+        case miniMaxH3GGUFRef2VAQ40ModelID:
+            return miniMaxH3GGUFPlan(
+                variant: "Ref2VA-Q4_0",
+                directoryName: "minimax-h3-gguf-ref2va-q4-0"
+            )
+        case miniMaxH3GGUFRef2VAQ4KMModelID:
+            return miniMaxH3GGUFPlan(
+                variant: "Ref2VA-Q4_K_M",
+                directoryName: "minimax-h3-gguf-ref2va-q4-k-m"
+            )
+        case miniMaxH3GGUFRef2VAQ4KSModelID:
+            return miniMaxH3GGUFPlan(
+                variant: "Ref2VA-Q4_K_S",
+                directoryName: "minimax-h3-gguf-ref2va-q4-k-s"
             )
         case aceStep15TurboModelID:
             return InstallPlan(
@@ -1576,6 +1649,58 @@ public actor HuggingFaceModelInstaller {
         )
     }
 
+    private nonisolated static func miniMaxH3GGUFPlan(
+        variant: String,
+        directoryName: String
+    ) -> InstallPlan {
+        let weightPath = "unet/MiniMax-H3-\(variant).gguf"
+        let repositoryCompanionPaths = [
+            "text_encoders/qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
+            "vae/minimax_h3_audio_vae_fp32.safetensors",
+            "vae/minimax_h3_video_vae_fp16.safetensors"
+        ]
+        let processorPaths = [
+            "upstream/FL2VA/processor/tokenizer.json",
+            "upstream/FL2VA/processor/tokenizer_config.json"
+        ]
+        return InstallPlan(
+            directoryName: directoryName,
+            requiredRuntimeFiles: Set(
+                [weightPath] + repositoryCompanionPaths + processorPaths
+            ),
+            sources: [
+                SourcePlan(
+                    repository: "Abiray/MiniMax-H3-GGUF",
+                    revision: "9fc3454d3ebe1be1bade862cd4a5011f325a22cb",
+                    destinationSubdirectory: "",
+                    prefixes: [],
+                    exactFiles: Set([
+                        "LICENSE",
+                        "README.md",
+                        "NOTICE",
+                        weightPath
+                    ] + repositoryCompanionPaths)
+                ),
+                // The Qwen3-VL text encoder above is a ComfyUI conversion: it
+                // holds weights only and carries no `tokenizer.ggml.*`
+                // metadata, unlike a llama.cpp GGUF. Without the upstream
+                // tokenizer and vision preprocessor there is no way to turn a
+                // prompt into ids the encoder accepts, so the download is not
+                // runnable on its own. `miniMaxH3MLXPlan` sources these from
+                // the same place.
+                SourcePlan(
+                    repository: "MiniMaxAI/MiniMax-H3",
+                    destinationSubdirectory: "upstream",
+                    prefixes: [
+                        "FL2VA/processor/",
+                        "FL2VA/tokenizer/"
+                    ],
+                    exactFiles: ["FL2VA/model_index.json"]
+                )
+            ]
+        )
+    }
+
     private nonisolated static func qwenMultimodalPlan(
         repository: String,
         revision: String,
@@ -1759,10 +1884,18 @@ public actor HuggingFaceModelInstaller {
         modelID: String,
         at directory: URL
     ) throws {
-        guard let spec = GGUFDiagnosticPlan.all.first(where: { $0.modelID == modelID }) else {
+        let weightRelativePath: String
+        let expectedSourceType: String
+        if let spec = GGUFDiagnosticPlan.all.first(where: { $0.modelID == modelID }) {
+            weightRelativePath = spec.weightRelativePath
+            expectedSourceType = spec.expectedSourceType
+        } else if let spec = miniMaxH3GGUFValidationSpec(for: modelID) {
+            weightRelativePath = spec.weightRelativePath
+            expectedSourceType = spec.expectedSourceType
+        } else {
             return
         }
-        let weightURL = directory.appendingPathComponent(spec.weightRelativePath)
+        let weightURL = directory.appendingPathComponent(weightRelativePath)
         do {
             let inspection = try GGUFModelLoader.inspect(fileURL: weightURL)
             guard inspection.unsupportedTypes.isEmpty else {
@@ -1771,10 +1904,10 @@ public actor HuggingFaceModelInstaller {
                     "包含不支援的 tensor type：\(inspection.unsupportedTypes.joined(separator: ", "))。"
                 )
             }
-            guard inspection.quantizationCounts[spec.expectedSourceType, default: 0] > 0 else {
+            guard inspection.quantizationCounts[expectedSourceType, default: 0] > 0 else {
                 throw ModelInstallerError.invalidGGUF(
                     weightURL,
-                    "找不到預期的 \(spec.expectedSourceType) 量化 tensor。"
+                    "找不到預期的 \(expectedSourceType) 量化 tensor。"
                 )
             }
         } catch let error as ModelInstallerError {
@@ -1782,6 +1915,22 @@ public actor HuggingFaceModelInstaller {
         } catch {
             throw ModelInstallerError.invalidGGUF(weightURL, error.localizedDescription)
         }
+    }
+
+    private nonisolated static func miniMaxH3GGUFValidationSpec(
+        for modelID: String
+    ) -> (weightRelativePath: String, expectedSourceType: String)? {
+        let variants: [String: String] = [
+            miniMaxH3GGUFFL2VAQ40ModelID: "FL2VA-Q4_0",
+            miniMaxH3GGUFFL2VAQ4KMModelID: "FL2VA-Q4_K_M",
+            miniMaxH3GGUFFL2VAQ4KSModelID: "FL2VA-Q4_K_S",
+            miniMaxH3GGUFRef2VAQ40ModelID: "Ref2VA-Q4_0",
+            miniMaxH3GGUFRef2VAQ4KMModelID: "Ref2VA-Q4_K_M",
+            miniMaxH3GGUFRef2VAQ4KSModelID: "Ref2VA-Q4_K_S"
+        ]
+        guard let variant = variants[modelID] else { return nil }
+        let expectedSourceType = variant.contains("Q4_0") ? "Q4_0" : "Q4_K"
+        return ("unet/MiniMax-H3-\(variant).gguf", expectedSourceType)
     }
 
     private nonisolated static func isSafeRelativePath(_ path: String) -> Bool {
@@ -2118,7 +2267,11 @@ public enum ModelInstallerError: LocalizedError, Sendable {
         case let .httpStatus(status, message):
             status == 401
                 ? "模型下載需要 Hugging Face API Token（HTTP 401），請輸入金鑰後重試。"
-                : "模型伺服器回傳 HTTP \(status)：\(message)"
+                : status == 403
+                    && (message.localizedCaseInsensitiveContains("restricted")
+                        || message.localizedCaseInsensitiveContains("authorized list"))
+                    ? "模型需要 Hugging Face gated 授權（HTTP 403）；Token 已送出，但目前帳號尚未取得此模型權限。請先在模型頁接受授權條款後重試。"
+                    : "模型伺服器回傳 HTTP \(status)：\(message)"
         case let .authenticationRequired(_, message):
             "Civitai 下載需要登入或 API Token（HTTP 401）：\(message)"
         case let .invalidManifest(url):

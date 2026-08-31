@@ -199,6 +199,7 @@ struct WebAppState: Encodable {
     let modelRootPath: String
     let outputDirectoryPath: String
     let civitaiTokenConfigured: Bool
+    let huggingFaceTokenConfigured: Bool
     let assets: [WebAsset]
     let selectedAssetID: UUID?
     let comparisonAssetID: UUID?
@@ -229,6 +230,7 @@ struct WebAppState: Encodable {
         modelRootPath = store.modelRootPath
         outputDirectoryPath = store.outputDirectoryPath
         civitaiTokenConfigured = CivitaiTokenStore.isConfigured()
+        huggingFaceTokenConfigured = HuggingFaceTokenStore.isConfigured()
         let projectAssets = store.projectAssets
         assets = projectAssets.map { asset in
             WebAsset(asset: asset, subtitleAssets: projectAssets)

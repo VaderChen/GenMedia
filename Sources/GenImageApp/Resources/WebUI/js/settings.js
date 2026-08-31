@@ -109,6 +109,33 @@ export function renderSettings(state, ui) {
           <p>${t("settings.civitaiTokenNote")}</p>
         </section>
 
+        <section class="settings-card vertical huggingface-settings-card">
+          <div>
+            <h2>${t("settings.huggingFace")}</h2>
+            <p>${t("settings.huggingFaceNote")}</p>
+            <p><a class="settings-external-link" href="https://huggingface.co/settings/tokens" target="_blank" rel="noreferrer">${t("settings.huggingFaceWebsite")}</a></p>
+          </div>
+          <div class="settings-token-control">
+            <label class="settings-token-label" for="huggingface-api-token">${t("settings.huggingFaceToken")}</label>
+            <input
+              id="huggingface-api-token"
+              class="field"
+              type="password"
+              value=""
+              placeholder="${t("settings.huggingFaceTokenPlaceholder")}"
+              data-huggingface-token
+              autocomplete="new-password"
+              spellcheck="false"
+            />
+            <div class="button-row settings-token-actions">
+              <button class="primary-button compact" data-action="saveHuggingFaceToken">${t("settings.huggingFaceSave")}</button>
+              <button class="danger-button compact" data-action="clearHuggingFaceToken" ${state.huggingFaceTokenConfigured ? "" : "disabled"}>${t("settings.huggingFaceClear")}</button>
+            </div>
+          </div>
+          <p class="settings-token-status ${state.huggingFaceTokenConfigured ? "is-configured" : ""}">${state.huggingFaceTokenConfigured ? t("settings.huggingFaceConfigured") : t("settings.huggingFaceNotConfigured")}</p>
+          <p>${t("settings.huggingFaceTokenNote")}</p>
+        </section>
+
         <section class="settings-card vertical mcp-settings-card">
           <div class="mcp-setting-header">
             <div>

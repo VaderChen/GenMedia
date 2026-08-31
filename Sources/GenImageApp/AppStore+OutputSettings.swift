@@ -105,10 +105,13 @@ extension AppStore {
         for profile: InferenceProfile?
     ) -> Int {
         let clamped = min(max(frameCount, 1), 512)
-        guard profile?.modelID.lowercased().contains("ltx-2.3-mlx") == true else {
-            return clamped
+        if profile?.modelID.lowercased().contains("ltx-2.3-mlx") == true {
+            return LTXVideoGenerationService.normalizedFrameCount(clamped)
         }
-        return LTXVideoGenerationService.normalizedFrameCount(clamped)
+        if profile.map({ MiniMaxH3VideoGenerationService.isSupportedModelID($0.modelID) }) == true {
+            return MiniMaxH3VideoGenerationService.normalizedFrameCount(clamped)
+        }
+        return clamped
     }
 
     func chooseSize(width: Int, height: Int) {

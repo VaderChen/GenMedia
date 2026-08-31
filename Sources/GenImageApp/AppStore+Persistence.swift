@@ -156,6 +156,7 @@ extension AppStore {
                       let profile = profiles.first(where: {
                           $0.capability == capability && profileSignature($0) == signature
                       }),
+                      profile.supportsGeneration,
                       profile.requiredModelIDs.allSatisfy({ requiredModelID in
                           models.contains(where: {
                               $0.id == requiredModelID && $0.localURL != nil

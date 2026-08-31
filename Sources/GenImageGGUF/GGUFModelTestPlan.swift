@@ -106,7 +106,7 @@ public enum GGUFDiagnosticPlan {
                 "vae/minimax_h3_video_vae_fp16.safetensors",
                 "vae/minimax_h3_audio_vae_fp32.safetensors"
             ],
-            runtimeBlocker: "目前只有 FL2VA denoiser 主權重；Qwen3-VL text encoder 與 Video/Audio VAE 尚未安裝，H3 架構尚未接入 Swift Worker。"
+            runtimeBlocker: "Qwen3-VL GGUF 與 Video/Audio VAE 是必要配套；H3 架構尚未接入 Swift Worker。"
         )
     ]
 
