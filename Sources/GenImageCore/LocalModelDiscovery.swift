@@ -859,7 +859,7 @@ public enum LocalModelDiscovery {
                     architecture: .externalCLI,
                     defaults: ProfileDefaults(
                         width: 1280,
-                        height: 720,
+                        height: 704,
                         steps: 16,
                         outputCount: 1,
                         frameCount: 124,

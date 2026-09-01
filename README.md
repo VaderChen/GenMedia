@@ -61,6 +61,15 @@ LTX Worker 透過 JSON request 與逐階段事件和 App 通訊；模型檔案�
 
 App 已接入 MiniMax H3 GGUF 的純 Swift／MLX 影片 Runtime，支援文生影與部分單圖生影 Profile。H3 Worker、Qwen 3 VL 文字編碼器、影片／音訊 VAE 與 GGUF 權重會依 Profile 的下載方案分開管理，不會打包進 App。
 
+**H3 目前完整狀態**：模型層、工程接線與 App 出貨已完成，從提示詞到有聲影片的主要鏈路已打通：
+
+`Prompt → Qwen3-VL 文字編碼器 → Transformer（50 層 INT8）→ Video VAE decode → MP4（H.264 + AAC）`
+
+單圖條件鏈也已接通：`影像錨點 → Video VAE encode → keyframe conditioning`。
+目前剩餘工作為 Qwen3-VL 視覺塔（Ref2VA 圖生影）、Video VAE 的時間分塊／空間 tiling（長影片與大解析度），以及多幀 clip 錨點。
+
+本版也修正 H3 的空間尺寸防呆：服務在送入 Worker 前會將寬高向下對齊至 32 像素網格（例如 `1280×720` 會使用 `1280×704`），Worker 會在 patchify 前拒絕不合法的尺寸，避免 latent 空間維度造成 reshape 崩潰。已以真實 H3 GGUF 在 `640×384`、4 幀並含音訊的設定完成實跑驗證。
+
 MiniMax H3 目前仍處於測試階段，**不保證生成結果或所有 H3 GGUF 變體在不同硬體上的正確性**，不應視為穩定的生產功能。若輸出異常，請保留 Profile、模型變體與 Runtime log 供後續修正。
 
 ### 媒體相容匯入

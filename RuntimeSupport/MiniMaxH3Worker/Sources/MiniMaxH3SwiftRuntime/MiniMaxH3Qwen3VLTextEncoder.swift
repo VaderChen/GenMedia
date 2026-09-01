@@ -155,7 +155,8 @@ public final class MiniMaxH3Qwen3VLTextEncoder {
         tokenizerDirectory: URL,
         configuration: Configuration = .minimaxH3,
         layerCount: Int? = nil,
-        quantizeLinear: Bool = true
+        quantizeLinear: Bool = true,
+        useMetalQuantizer: Bool = MiniMaxH3GGUFQuantizedLoader.defaultUseMetalQuantizer
     ) throws -> MiniMaxH3Qwen3VLTextEncoder {
         let effectiveLayerCount = layerCount ?? configuration.layerCount
         guard effectiveLayerCount > 0, effectiveLayerCount <= configuration.layerCount else {
@@ -227,46 +228,76 @@ public final class MiniMaxH3Qwen3VLTextEncoder {
                 throw Error.invalidCheckpoint("\(name) 的 GGUF 資料範圍不正確")
             }
             let logicalShape = shapeOverrides[name] ?? descriptor.shape
-            let value = try GGUFDequantizer.array(
-                raw: data.subdata(in: dataStart ..< dataEnd),
-                typeCode: descriptor.typeCode,
-                shape: logicalShape,
-                name: name
-            )
-            guard value.shape == expected[name]! else {
+            guard logicalShape == expected[name]! else {
                 throw Error.invalidTensor(
                     name: name,
                     expected: expected[name]!,
-                    actual: value.shape
+                    actual: logicalShape
                 )
             }
+            let raw = data.subdata(in: dataStart ..< dataEnd)
 
             if isLinearWeight(name: name) {
-                let dense = value.asType(.float32)
                 if quantizeLinear {
-                    let quantized = MLX.quantized(
-                        dense,
-                        groupSize: 64,
-                        bits: 8
-                    )
-                    let prefix = String(name.dropLast(".weight".count))
-                    guard let biases = quantized.biases else {
-                        throw Error.invalidCheckpoint("\(name) 無法建立 affine INT8 biases")
+                    let quantized: MiniMaxH3GGUFQuantizedLoader.QuantizedTensor
+                    if useMetalQuantizer,
+                       MiniMaxH3GGUFMetalQuantizer.supports(typeCode: descriptor.typeCode) {
+                        let metal = try MiniMaxH3GGUFMetalQuantizer.quantize(
+                            raw: raw,
+                            sourceType: descriptor.typeCode,
+                            sourceShape: logicalShape,
+                            name: name
+                        )
+                        quantized = MiniMaxH3GGUFQuantizedLoader.QuantizedTensor(
+                            weights: metal.weights,
+                            scales: metal.scales,
+                            biases: metal.biases,
+                            backend: .metal
+                        )
+                    } else {
+                        let dense = try GGUFDequantizer.array(
+                            raw: raw,
+                            typeCode: descriptor.typeCode,
+                            shape: logicalShape,
+                            name: name
+                        ).asType(.float32)
+                        let cpu = MLX.quantized(dense, groupSize: 64, bits: 8)
+                        guard let biases = cpu.biases else {
+                            throw Error.invalidCheckpoint("\(name) 無法建立 affine INT8 biases")
+                        }
+                        MLX.eval(cpu.wq, cpu.scales, biases)
+                        quantized = MiniMaxH3GGUFQuantizedLoader.QuantizedTensor(
+                            weights: cpu.wq,
+                            scales: cpu.scales,
+                            biases: biases,
+                            backend: .cpu
+                        )
                     }
-                    MLX.eval(quantized.wq, quantized.scales, biases)
+                    let prefix = String(name.dropLast(".weight".count))
                     quantizedWeights[prefix] = QuantizedWeight(
-                        weights: quantized.wq,
+                        weights: quantized.weights,
                         scales: quantized.scales,
-                        biases: biases
+                        biases: quantized.biases
                     )
                     quantizedCount += 1
                 } else {
+                    let dense = try GGUFDequantizer.array(
+                        raw: raw,
+                        typeCode: descriptor.typeCode,
+                        shape: logicalShape,
+                        name: name
+                    ).asType(.float32)
                     MLX.eval(dense)
                     tensors[name] = dense
                     denseCount += 1
                 }
             } else {
-                let dense = value.asType(.float32)
+                let dense = try GGUFDequantizer.array(
+                    raw: raw,
+                    typeCode: descriptor.typeCode,
+                    shape: logicalShape,
+                    name: name
+                ).asType(.float32)
                 MLX.eval(dense)
                 tensors[name] = dense
                 denseCount += 1

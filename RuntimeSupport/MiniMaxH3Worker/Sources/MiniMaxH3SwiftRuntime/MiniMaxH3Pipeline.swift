@@ -10,11 +10,14 @@ import MLXRandom
 public struct MiniMaxH3Pipeline {
     public enum Error: LocalizedError, Sendable {
         case missingTextEncoder
+        case invalidLatentGeometry(height: Int, width: Int)
 
         public var errorDescription: String? {
             switch self {
             case .missingTextEncoder:
                 "H3 有條件生成需要 --text-encoder 與 --tokenizer；未提供時只能執行空文字的 unconditional smoke test。"
+            case let .invalidLatentGeometry(height, width):
+                "H3 latent 空間尺寸無效：\(height)x\(width)。Transformer 的 2x2 patch 需要 latent 寬高皆為偶數且至少 4。"
             }
         }
     }
@@ -107,6 +110,15 @@ public struct MiniMaxH3Pipeline {
         conditioning: MiniMaxH3Transformer.Conditioning? = nil,
         progress: (String, Double) -> Void = { _, _ in }
     ) throws -> Result {
+        guard request.latentHeight >= 4,
+              request.latentWidth >= 4,
+              request.latentHeight.isMultiple(of: 2),
+              request.latentWidth.isMultiple(of: 2) else {
+            throw Error.invalidLatentGeometry(
+                height: request.latentHeight,
+                width: request.latentWidth
+            )
+        }
         MLXRandom.seed(request.seed)
         let defaultConfiguration = MiniMaxH3Configuration.fl2va
 
@@ -190,8 +202,13 @@ public struct MiniMaxH3Pipeline {
         progress("videoDecoding", 0)
         let decoder = try MiniMaxH3VideoVAEDecoder.load(fileURL: videoVAEURL)
         let scaled = MiniMaxH3VideoVAEDecoder.denormalizeLatent(videoLatent)
-        let raw = try decoder.decode(latent: scaled)
-        let pixels = MiniMaxH3VideoVAEDecoder.finalizePixels(raw)
+        let pixels: MLXArray
+        if decoder.shouldUseTemporalTiling(for: scaled) {
+            pixels = try decoder.decodeTemporalTiledPixels(latent: scaled)
+        } else {
+            let raw = try decoder.decode(latent: scaled)
+            pixels = MiniMaxH3VideoVAEDecoder.finalizePixels(raw)
+        }
         MLX.eval(pixels)
         progress("videoDecoding", 1)
 

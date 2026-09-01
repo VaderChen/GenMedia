@@ -61,6 +61,15 @@ The LTX Worker communicates with the app through a JSON request and stage-specif
 
 The app now includes a native Swift/MLX video Runtime for MiniMax H3 GGUF, supporting text-to-video and selected single-image-to-video profiles. The H3 Worker, Qwen 3 VL text encoder, video/audio VAEs, and GGUF weights are managed by each profile's download plan and are not bundled in the app.
 
+**H3 current status**: The model layer, engineering integration, and app shipment are complete. The main prompt-to-audio-video path is connected end to end:
+
+`Prompt → Qwen3-VL text encoder → Transformer (50-layer INT8) → Video VAE decode → MP4 (H.264 + AAC)`
+
+The single-image conditioning path is also connected: `image anchor → Video VAE encode → keyframe conditioning`.
+Remaining work includes the Qwen3-VL vision tower (Ref2VA image-to-video), Video VAE temporal chunking/spatial tiling for long or high-resolution video, and multi-frame clip anchors.
+
+This release also adds H3 spatial-geometry validation: before dispatching to the Worker, width and height are rounded down to the 32-pixel grid (for example, `1280×720` becomes `1280×704`), and the Worker rejects invalid dimensions before patchification to prevent latent reshape crashes. A real H3 GGUF run was verified at `640×384`, 4 frames, with audio.
+
 MiniMax H3 is currently in a **testing phase; correctness is not guaranteed for generated results or every H3 GGUF variant on every hardware configuration**. It should not be treated as a stable production feature. If an output is incorrect, retain the Profile, model variant, and Runtime log for follow-up fixes.
 
 ### Compatible Media Import

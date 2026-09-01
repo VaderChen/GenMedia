@@ -2,10 +2,18 @@ import { capabilityLabel, escapeHTML, gigabytes, percent, phaseLabel } from "./f
 import { t } from "./i18n.js";
 
 export function renderModels(state, ui) {
+  const activeProfileIDs = new Set(Object.values(state.activeProfileIDs || {}));
+  const activeModelIDs = new Set(
+    (state.profiles || [])
+      .filter((profile) => activeProfileIDs.has(profile.id))
+      .flatMap((profile) => profile.requiredModelIDs || [profile.modelID]),
+  );
   const filtered = state.models.filter(({ descriptor, installation }) => {
     const matchesCapability =
       ui.modelFilter === "all" ||
-      (ui.modelFilter === "installed"
+      (ui.modelFilter === "active"
+        ? activeModelIDs.has(descriptor.id)
+        : ui.modelFilter === "installed"
         ? installation.phase === "installed"
         : descriptor.capabilities.includes(ui.modelFilter));
     const matchesFormat =
@@ -202,6 +210,7 @@ function renderModelCapabilityFilter(ui) {
   ];
   const standaloneOptions = [
     ["all", t("common.all")],
+    ["active", t("common.active")],
     ["installed", t("phase.installed")],
   ];
   const options = [...standaloneOptions, ...groups.flatMap(([, values]) => values)];

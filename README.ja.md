@@ -61,6 +61,15 @@ LTX Worker は JSON request と段階別進捗イベントでアプリと通信�
 
 アプリは MiniMax H3 GGUF のネイティブ Swift／MLX 動画 Runtime に接続され、テキストから動画と一部の単一画像から動画 Profile に対応します。H3 Worker、Qwen 3 VL テキストエンコーダー、Video／Audio VAE、GGUF 重みは Profile のダウンロード計画で管理され、アプリには同梱されません。
 
+**H3 の現在の状態**：モデル層、実装接続、アプリへの同梱は完了しています。プロンプトから音声付き動画までの主要経路が接続されています。
+
+`Prompt → Qwen3-VL テキストエンコーダー → Transformer（50 層 INT8）→ Video VAE decode → MP4（H.264 + AAC）`
+
+単一画像の条件付け経路も接続済みです：`画像アンカー → Video VAE encode → keyframe conditioning`。
+残っている作業は Qwen3-VL ビジョンタワー（Ref2VA 画像から動画）、長時間・高解像度動画向け Video VAE の時間分割／空間 tiling、複数フレームの clip アンカーです。
+
+本リリースでは H3 の空間ジオメトリ検証も追加しました。Worker に渡す前に幅と高さを 32 ピクセルグリッドへ切り下げ（たとえば `1280×720` は `1280×704`）、Worker は patchify 前に不正な寸法を拒否するため、latent の reshape クラッシュを防ぎます。実際の H3 GGUF で `640×384`、4 フレーム、音声付きの実行を検証済みです。
+
 MiniMax H3 は現在 **テスト段階であり、生成結果やすべての H3 GGUF バリアント、各ハードウェアでの正確性を保証しません**。安定した本番機能として扱わないでください。異常な出力がある場合は、Profile、モデルバリアント、Runtime log を保存して報告してください。
 
 ### 互換メディア読み込み

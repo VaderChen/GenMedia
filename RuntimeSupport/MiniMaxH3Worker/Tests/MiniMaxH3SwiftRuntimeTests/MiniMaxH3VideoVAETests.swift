@@ -22,6 +22,40 @@ struct MiniMaxH3VideoVAETests {
         #expect(configuration.suffixTokenCount == 5)
     }
 
+    @Test("Temporal tiling follows the H3 reference plan")
+    func temporalTilingPlan() {
+        let tiling = MiniMaxH3VideoVAETemporalTiling()
+        #expect(tiling.tokensPerChunk(temporalRatio: configuration.temporalRatio) == 5)
+        #expect(tiling.tokenOverlap(temporalRatio: configuration.temporalRatio) == 2)
+        #expect(tiling.framePrePadding(temporalRatio: configuration.temporalRatio) == 3)
+        #expect(tiling.frameOverlap(temporalRatio: configuration.temporalRatio) == 5)
+
+        let plan = tiling.plan(
+            latentFrameCount: 12,
+            temporalRatio: configuration.temporalRatio
+        )
+        #expect(plan.paddedTokenCount == 12)
+        #expect(plan.padTokenCount == 0)
+        #expect(plan.chunkCount == 2)
+        #expect(plan.ranges == [0 ..< 7, 5 ..< 12])
+    }
+
+    @Test("Temporal tiling preserves reference output frame counts")
+    func temporalOutputFrameCount() {
+        let tiling = MiniMaxH3VideoVAETemporalTiling()
+        #expect(tiling.outputFrameCount(latentFrameCount: 2, temporalRatio: 4) == 5)
+        #expect(tiling.outputFrameCount(latentFrameCount: 3, temporalRatio: 4) == 9)
+        #expect(tiling.outputFrameCount(latentFrameCount: 7, temporalRatio: 4) == 22)
+        #expect(tiling.outputFrameCount(latentFrameCount: 12, temporalRatio: 4) == 39)
+    }
+
+    @Test("Pipeline keeps short latent clips on the single-shot path")
+    func temporalTilingThreshold() {
+        let tiling = MiniMaxH3VideoVAETemporalTiling()
+        #expect(!tiling.shouldUse(for: 3))
+        #expect(tiling.shouldUse(for: 8))
+    }
+
     @Test("Expected shapes match the real checkpoint layout")
     func expectedShapes() {
         let expected = configuration.expectedDecoderShapes

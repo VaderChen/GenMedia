@@ -61,6 +61,15 @@ LTX Worker는 JSON request와 단계별 진행률 이벤트로 앱과 통신하�
 
 앱은 MiniMax H3 GGUF용 네이티브 Swift／MLX 비디오 Runtime을 연결하며 텍스트→비디오와 일부 단일 이미지→비디오 Profile을 지원합니다. H3 Worker, Qwen 3 VL 텍스트 인코더, Video／Audio VAE 및 GGUF 가중치는 Profile 다운로드 계획으로 관리되며 앱에 포함되지 않습니다.
 
+**H3 현재 상태**: 모델 계층, 엔지니어링 연결 및 앱 출하가 완료되었습니다. 프롬프트부터 오디오가 포함된 비디오까지의 주요 경로가 연결되어 있습니다.
+
+`Prompt → Qwen3-VL 텍스트 인코더 → Transformer (50층 INT8) → Video VAE decode → MP4 (H.264 + AAC)`
+
+단일 이미지 조건부 경로도 연결되었습니다: `이미지 앵커 → Video VAE encode → keyframe conditioning`.
+남은 작업은 Qwen3-VL 비전 타워(Ref2VA 이미지→비디오), 장시간·고해상도 비디오를 위한 Video VAE 시간 분할／공간 tiling, 다중 프레임 clip 앵커입니다.
+
+이번 릴리스에는 H3 공간 geometry 검증도 추가되었습니다. Worker로 전달하기 전에 너비와 높이를 32픽셀 그리드로 내림 정렬하고(예: `1280×720`은 `1280×704`), Worker가 patchify 전에 잘못된 치수를 거부하여 latent reshape 충돌을 방지합니다. 실제 H3 GGUF로 `640×384`, 4프레임, 오디오 포함 실행을 검증했습니다.
+
 MiniMax H3는 현재 **테스트 단계이며 생성 결과, 모든 H3 GGUF 변형 및 하드웨어별 정확성을 보장하지 않습니다**. 안정적인 프로덕션 기능으로 취급하지 마세요. 출력에 문제가 있으면 Profile, 모델 변형 및 Runtime log를 보존해 후속 수정에 사용하세요.
 
 ### 호환 미디어 가져오기

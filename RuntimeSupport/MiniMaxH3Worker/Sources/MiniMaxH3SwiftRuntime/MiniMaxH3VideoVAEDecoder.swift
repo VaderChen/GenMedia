@@ -259,6 +259,11 @@ public final class MiniMaxH3VideoVAEDecoder {
     /// - Returns: `[B, 3, T*temporalRatio, H*spatialRatio, W*spatialRatio]`,
     ///   raw decoder output before pixel de-normalization.
     public func decode(latent: MLXArray) throws -> MLXArray {
+        try validateDecodeInput(latent)
+        return try decodeSingle(latent: latent)
+    }
+
+    private func validateDecodeInput(_ latent: MLXArray) throws {
         guard latent.ndim == 5, latent.shape[1] == configuration.latentChannels else {
             throw MiniMaxH3WeightError.architectureMismatch(
                 expected: [-1, configuration.latentChannels, -1, -1, -1],
@@ -266,6 +271,9 @@ public final class MiniMaxH3VideoVAEDecoder {
                 detail: "video VAE decode input"
             )
         }
+    }
+
+    private func decodeSingle(latent: MLXArray) throws -> MLXArray {
         let batch = latent.shape[0]
         let frames = latent.shape[2]
         let height = latent.shape[3]
@@ -326,6 +334,197 @@ public final class MiniMaxH3VideoVAEDecoder {
                 height * ps,
                 width * ps
             )
+    }
+
+    /// Decode a long latent by temporal chunks and stitch the raw decoder output.
+    ///
+    /// Each chunk is evaluated before the next chunk is decoded. The completed
+    /// pieces are copied to a CPU buffer, so the decoder never needs to keep
+    /// the full video's attention activations on the GPU. The existing
+    /// ``decode(latent:)`` path remains single-shot and is unchanged.
+    public func decodeTemporalTiled(latent: MLXArray) throws -> MLXArray {
+        try decodeTemporalTiledImpl(latent: latent, finalizeOutput: false)
+    }
+
+    /// Decode a long latent by temporal chunks and return finalized pixels.
+    ///
+    /// This variant applies pixel denormalization to each completed stitched
+    /// piece before it is moved to the CPU output buffer.
+    public func decodeTemporalTiledPixels(latent: MLXArray) throws -> MLXArray {
+        try decodeTemporalTiledImpl(latent: latent, finalizeOutput: true)
+    }
+
+    /// Whether the pipeline should use temporal chunking for this latent.
+    public func shouldUseTemporalTiling(for latent: MLXArray) -> Bool {
+        guard latent.ndim == 5,
+              latent.shape[1] == configuration.latentChannels else {
+            return false
+        }
+        return temporalTiling.shouldUse(for: latent.shape[2])
+    }
+
+    public var temporalTiling: MiniMaxH3VideoVAETemporalTiling {
+        temporalConfiguration
+    }
+
+    private let temporalConfiguration = MiniMaxH3VideoVAETemporalTiling()
+
+    private func decodeTemporalTiledImpl(
+        latent: MLXArray,
+        finalizeOutput: Bool
+    ) throws -> MLXArray {
+        try validateDecodeInput(latent)
+
+        let batch = latent.shape[0]
+        let latentFrames = latent.shape[2]
+        let latentHeight = latent.shape[3]
+        let latentWidth = latent.shape[4]
+        guard latentFrames > 1 else {
+            let raw = try decodeSingle(latent: latent)
+            return finalizeOutput ? Self.finalizePixels(raw) : raw
+        }
+
+        let temporalPlan = temporalConfiguration.plan(
+            latentFrameCount: latentFrames,
+            temporalRatio: configuration.temporalRatio
+        )
+        let outputFrames = temporalConfiguration.outputFrameCount(
+            latentFrameCount: latentFrames,
+            temporalRatio: configuration.temporalRatio
+        )
+        let outputShape = [
+            batch,
+            configuration.outputChannels,
+            outputFrames,
+            latentHeight * configuration.spatialRatio,
+            latentWidth * configuration.spatialRatio
+        ]
+        let output = MLX.zeros(outputShape, dtype: .float32, stream: .cpu)
+        let paddedLatent: MLXArray
+        if temporalPlan.padTokenCount > 0 {
+            let last = latent[0..., 0..., (latentFrames - 1), 0..., 0...]
+                .expandedDimensions(axis: 2)
+            let padding = MLX.repeated(
+                last,
+                count: temporalPlan.padTokenCount,
+                axis: 2
+            )
+            paddedLatent = MLX.concatenated([latent, padding], axis: 2)
+        } else {
+            paddedLatent = latent
+        }
+
+        let chunkDecodedFrames = temporalConfiguration.tokensPerChunk(
+            temporalRatio: configuration.temporalRatio
+        ) * configuration.temporalRatio
+        let splitCount = temporalConfiguration.tokenDrop > 0 ? 2 : 1
+        let framePrePadding = temporalConfiguration.framePrePadding(
+            temporalRatio: configuration.temporalRatio
+        )
+        let frameOverlap = temporalConfiguration.frameOverlap(
+            temporalRatio: configuration.temporalRatio
+        )
+        var pendingOverlap: MLXArray?
+        var writePosition = 0
+
+        func writePart(_ part: MLXArray) {
+            guard part.shape[2] > 0, writePosition < outputFrames else { return }
+            let prepared = finalizeOutput ? Self.finalizePixels(part) : part
+            let cpuPart = prepared.asType(.float32, stream: .cpu)
+            MLX.eval(cpuPart)
+            let count = min(cpuPart.shape[2], outputFrames - writePosition)
+            guard count > 0 else { return }
+            let slice = cpuPart[0..., 0..., 0 ..< count, 0..., 0...]
+            output[
+                0..., 0..., writePosition ..< (writePosition + count), 0..., 0...,
+                stream: .cpu
+            ] = slice
+            MLX.eval(output)
+            writePosition += count
+        }
+
+        for (index, tokenRange) in temporalPlan.ranges.enumerated() {
+            let clipLatent = paddedLatent[
+                0..., 0..., tokenRange, 0..., 0...
+            ]
+            let decoded = try decodeSingle(latent: clipLatent)
+            MLX.eval(decoded)
+
+            for split in 0 ..< splitCount {
+                let start = split * chunkDecodedFrames
+                let end = min(start + chunkDecodedFrames, decoded.shape[2])
+                guard end > start else { continue }
+                let segment = decoded[0..., 0..., start ..< end, 0..., 0...]
+                guard segment.shape[2] > framePrePadding else { continue }
+                var part = segment[
+                    0..., 0..., framePrePadding ..< segment.shape[2], 0..., 0...
+                ]
+
+                if split == 0 {
+                    if let pendingOverlap {
+                        part = blend(
+                            pendingOverlap,
+                            part,
+                            blendExtent: frameOverlap,
+                            axis: 2
+                        )
+                    }
+                    writePart(part)
+                } else {
+                    pendingOverlap = part.contiguous()
+                    MLX.eval(pendingOverlap!)
+                }
+            }
+
+            if index == temporalPlan.ranges.count - 1,
+               let pendingOverlap {
+                writePart(pendingOverlap)
+            }
+            MLX.Memory.clearCache()
+        }
+
+        guard writePosition == outputFrames else {
+            throw MiniMaxH3WeightError.architectureMismatch(
+                expected: [outputFrames],
+                actual: [writePosition],
+                detail: "video VAE temporal tile output"
+            )
+        }
+        return output
+    }
+
+    private func blend(
+        _ first: MLXArray,
+        _ second: MLXArray,
+        blendExtent: Int,
+        axis: Int
+    ) -> MLXArray {
+        let extent = min(blendExtent, min(first.shape[axis], second.shape[axis]))
+        guard extent > 0 else { return second }
+
+        let firstFloat = first.asType(.float32)
+        let secondFloat = second.asType(.float32)
+        let positions = MLXArray(
+            (0 ..< extent).map { Float($0) },
+            [extent]
+        )
+        let weightFirst = (1.0 - positions / Float(extent))
+        let weightSecond = positions / Float(extent)
+        var weightShape = Array(repeating: 1, count: first.ndim)
+        weightShape[axis] = extent
+        let firstWeight = weightFirst.reshaped(weightShape)
+        let secondWeight = weightSecond.reshaped(weightShape)
+
+        let firstSlice = firstFloat[
+            0..., 0..., (first.shape[2] - extent) ..< first.shape[2], 0..., 0...
+        ]
+        let secondSlice = secondFloat[0..., 0..., 0 ..< extent, 0..., 0...]
+        let blended = firstSlice * firstWeight + secondSlice * secondWeight
+        guard extent < second.shape[axis] else { return blended }
+        let remainder = secondFloat[
+            0..., 0..., extent ..< second.shape[2], 0..., 0...
+        ]
+        return MLX.concatenated([blended, remainder], axis: axis)
     }
 
     /// Undo the per-channel latent normalization applied at encode time.
