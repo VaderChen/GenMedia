@@ -20,6 +20,22 @@ public enum MiniMaxH3GGUFQuantizedLoader {
     /// MLX group size used when re-quantizing.
     public static let groupSize = 64
 
+    public static var defaultUseMetalQuantizer: Bool {
+        MiniMaxH3GGUFMetalQuantizer.isEnabledByDefault
+    }
+
+    public enum QuantizationBackend: String, Sendable {
+        case metal
+        case cpu
+    }
+
+    public struct QuantizedTensor {
+        public let weights: MLXArray
+        public let scales: MLXArray
+        public let biases: MLXArray
+        public let backend: QuantizationBackend
+    }
+
     public struct Loaded {
         public let configuration: MiniMaxH3Configuration
         /// Dense tensors plus, for each quantized linear, `name` (packed
@@ -31,9 +47,21 @@ public enum MiniMaxH3GGUFQuantizedLoader {
         public let denseCount: Int
         /// Tensors whose shape could not be re-quantized and stayed dense.
         public let skippedQuantizationCount: Int
+        public let metalQuantizedCount: Int
+        public let cpuQuantizedCount: Int
     }
 
     public static func load(fileURL: URL) throws -> Loaded {
+        try load(
+            fileURL: fileURL,
+            useMetalQuantizer: MiniMaxH3GGUFMetalQuantizer.isEnabledByDefault
+        )
+    }
+
+    public static func load(
+        fileURL: URL,
+        useMetalQuantizer: Bool
+    ) throws -> Loaded {
         let inspection = try GGUFModelLoader.inspect(fileURL: fileURL)
         let inventory = try MiniMaxH3GGUFWeightLoader.inspectTransformer(fileURL: fileURL)
         let configuration = try MiniMaxH3Configuration.forInventory(inventory)
@@ -45,6 +73,8 @@ public enum MiniMaxH3GGUFQuantizedLoader {
         var quantizedCount = 0
         var denseCount = 0
         var skipped = 0
+        var metalQuantizedCount = 0
+        var cpuQuantizedCount = 0
 
         for descriptor in inspection.tensors {
             let shape = overrides[descriptor.name] ?? descriptor.shape
@@ -58,34 +88,38 @@ public enum MiniMaxH3GGUFQuantizedLoader {
             }
             let raw = data.subdata(in: start ..< end)
 
-            var value = try GGUFDequantizer.array(
-                raw: raw,
-                typeCode: descriptor.typeCode,
-                shape: shape,
-                name: descriptor.name
-            )
-
-            guard GGUFDequantizer.isQuantized(typeName: descriptor.type),
-                  canQuantize(shape: shape) else {
-                if GGUFDequantizer.isQuantized(typeName: descriptor.type) {
+            let isQuantized = GGUFDequantizer.isQuantized(typeName: descriptor.type)
+            guard isQuantized, canQuantize(shape: shape) else {
+                if isQuantized {
                     skipped += 1
                 }
+                let value = try GGUFDequantizer.array(
+                    raw: raw,
+                    typeCode: descriptor.typeCode,
+                    shape: shape,
+                    name: descriptor.name
+                )
                 MLX.eval(value)
                 tensors[descriptor.name] = value
                 denseCount += 1
                 continue
             }
 
-            value = value.asType(.float32)
-            let quantized = MLX.quantized(value, groupSize: groupSize, bits: targetBits)
+            let quantized = try quantize(
+                raw: raw,
+                descriptor: descriptor,
+                shape: shape,
+                useMetalQuantizer: useMetalQuantizer
+            )
             let prefix = parameterPrefix(descriptor.name)
-            tensors[descriptor.name] = quantized.wq
+            tensors[descriptor.name] = quantized.weights
             tensors["\(prefix).scales"] = quantized.scales
-            if let biases = quantized.biases {
-                tensors["\(prefix).biases"] = biases
-                MLX.eval(quantized.wq, quantized.scales, biases)
-            } else {
-                MLX.eval(quantized.wq, quantized.scales)
+            tensors["\(prefix).biases"] = quantized.biases
+            switch quantized.backend {
+            case .metal:
+                metalQuantizedCount += 1
+            case .cpu:
+                cpuQuantizedCount += 1
             }
             quantizedPrefixes.insert(prefix)
             quantizedCount += 1
@@ -97,7 +131,83 @@ public enum MiniMaxH3GGUFQuantizedLoader {
             quantizedPrefixes: quantizedPrefixes,
             quantizedCount: quantizedCount,
             denseCount: denseCount,
-            skippedQuantizationCount: skipped
+            skippedQuantizationCount: skipped,
+            metalQuantizedCount: metalQuantizedCount,
+            cpuQuantizedCount: cpuQuantizedCount
+        )
+    }
+
+    public static func loadQuantizedTensor(
+        fileURL: URL,
+        named name: String,
+        useMetalQuantizer: Bool = defaultUseMetalQuantizer
+    ) throws -> QuantizedTensor {
+        let inspection = try GGUFModelLoader.inspect(fileURL: fileURL)
+        guard let descriptor = inspection.tensors.first(where: { $0.name == name }),
+              let byteSize = descriptor.byteSize else {
+            throw MiniMaxH3WeightError.missingTensor(name)
+        }
+        let overrides = try MiniMaxH3GGUFWeightLoader.comfyShapeOverrides(in: inspection)
+        let shape = overrides[name] ?? descriptor.shape
+        guard GGUFDequantizer.isQuantized(typeName: descriptor.type),
+              canQuantize(shape: shape) else {
+            throw MiniMaxH3WeightError.unquantizableShape(name, shape: shape)
+        }
+        let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+        let start = inspection.dataOffset + Int(descriptor.offset)
+        let end = start + Int(byteSize)
+        guard start >= 0, end <= data.count else {
+            throw MiniMaxH3WeightError.missingTensor(name)
+        }
+        return try quantize(
+            raw: data.subdata(in: start ..< end),
+            descriptor: descriptor,
+            shape: shape,
+            useMetalQuantizer: useMetalQuantizer
+        )
+    }
+
+    private static func quantize(
+        raw: Data,
+        descriptor: GGUFTensorDescriptor,
+        shape: [Int],
+        useMetalQuantizer: Bool
+    ) throws -> QuantizedTensor {
+        if useMetalQuantizer,
+           MiniMaxH3GGUFMetalQuantizer.supports(typeCode: descriptor.typeCode) {
+            let quantized = try MiniMaxH3GGUFMetalQuantizer.quantize(
+                raw: raw,
+                sourceType: descriptor.typeCode,
+                sourceShape: shape,
+                name: descriptor.name
+            )
+            return QuantizedTensor(
+                weights: quantized.weights,
+                scales: quantized.scales,
+                biases: quantized.biases,
+                backend: .metal
+            )
+        }
+
+        let value = try GGUFDequantizer.array(
+            raw: raw,
+            typeCode: descriptor.typeCode,
+            shape: shape,
+            name: descriptor.name
+        ).asType(.float32)
+        let quantized = MLX.quantized(value, groupSize: groupSize, bits: targetBits)
+        guard let biases = quantized.biases else {
+            throw MiniMaxH3WeightError.unsupportedTensorType(
+                descriptor.name,
+                type: descriptor.type
+            )
+        }
+        MLX.eval(quantized.wq, quantized.scales, biases)
+        return QuantizedTensor(
+            weights: quantized.wq,
+            scales: quantized.scales,
+            biases: biases,
+            backend: .cpu
         )
     }
 

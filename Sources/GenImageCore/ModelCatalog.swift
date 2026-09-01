@@ -938,7 +938,7 @@ public enum ModelCatalog {
             architecture: .externalCLI,
             defaults: ProfileDefaults(
                 width: 1280,
-                height: 720,
+                height: 704,
                 steps: 16,
                 outputCount: 1,
                 frameCount: 124,
@@ -956,7 +956,7 @@ public enum ModelCatalog {
             architecture: .externalCLI,
             defaults: ProfileDefaults(
                 width: 1280,
-                height: 720,
+                height: 704,
                 steps: 16,
                 outputCount: 1,
                 frameCount: 124,
@@ -974,7 +974,7 @@ public enum ModelCatalog {
             architecture: .externalCLI,
             defaults: ProfileDefaults(
                 width: 1280,
-                height: 720,
+                height: 704,
                 steps: 16,
                 outputCount: 1,
                 frameCount: 124,
@@ -992,7 +992,7 @@ public enum ModelCatalog {
             architecture: .externalCLI,
             defaults: ProfileDefaults(
                 width: 1280,
-                height: 720,
+                height: 704,
                 steps: 16,
                 outputCount: 1,
                 frameCount: 124,
@@ -1154,7 +1154,7 @@ public enum ModelCatalog {
         let revision = "9fc3454d3ebe1be1bade862cd4a5011f325a22cb"
         let defaults = ProfileDefaults(
             width: 1280,
-            height: 720,
+            height: 704,
             steps: 16,
             outputCount: 1,
             frameCount: 124,

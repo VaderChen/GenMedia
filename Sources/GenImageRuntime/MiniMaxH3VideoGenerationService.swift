@@ -42,6 +42,25 @@ public final class MiniMaxH3VideoGenerationService: VideoGenerating, Sendable {
         return clamped - lower < upper - clamped ? lower : upper
     }
 
+    /// H3's VAE produces one latent sample per 16 pixels and the Transformer
+    /// consumes those samples in 2x2 spatial patches. Keep the public video
+    /// options on the common 16-pixel grid, but use a 32-pixel grid internally
+    /// so odd latent dimensions cannot reach `patchifyVideo`.
+    public static func normalizedSpatialDimension(_ dimension: Int) -> Int {
+        let lower = max(64, (dimension / 32) * 32)
+        return min(4096, lower)
+    }
+
+    public static func normalizedSpatialDimensions(
+        width: Int,
+        height: Int
+    ) -> (width: Int, height: Int) {
+        (
+            normalizedSpatialDimension(width),
+            normalizedSpatialDimension(height)
+        )
+    }
+
     public func generate(
         request: VideoGenerationRequest,
         progress: @escaping @Sendable (Double) -> Void
@@ -88,10 +107,11 @@ public final class MiniMaxH3VideoGenerationService: VideoGenerating, Sendable {
             for: request.profile.modelID,
             modelDirectory: request.modelURL
         )
+        let spatialDimensions = Self.normalizedSpatialDimensions(
+            width: request.options.width,
+            height: request.options.height
+        )
         let frameCount = Self.normalizedFrameCount(request.options.frameCount)
-        let latentFrames = frameCount / 4
-        let latentHeight = request.options.height / 16
-        let latentWidth = request.options.width / 16
         let executable = try Self.workerExecutable()
 
         try FileManager.default.createDirectory(
@@ -122,26 +142,39 @@ public final class MiniMaxH3VideoGenerationService: VideoGenerating, Sendable {
             var activity = RuntimeLogActivity(log: log)
             let generationSpan = 1.0 / Double(request.options.outputCount)
             let completedFraction = Double(index) * generationSpan
-            var workerArguments = [
-                "generate",
-                "--transformer", modelFiles.transformer.path,
-                "--video-vae", modelFiles.videoVAE.path,
-                "--audio-vae", modelFiles.audioVAE.path,
-                "--text-encoder", modelFiles.textEncoder.path,
-                "--tokenizer", modelFiles.processor.path,
-                "--prompt", request.options.prompt,
-                "--output", outputURL.path,
-                "--latent-frames", String(latentFrames),
-                "--latent-height", String(latentHeight),
-                "--latent-width", String(latentWidth),
-                "--audio-frames", String(max(8, request.options.frameCount / 16)),
-                "--frame-rate", String(request.options.frameRate),
-                "--steps", String(request.options.steps),
-                "--seed", String(request.options.seed &+ UInt64(index))
+            // The worker takes a JSON request rather than flags, matching
+            // GenImageLTXVideoWorker. Keeping the prompt out of argv also keeps
+            // multi-line prompts intact.
+            let requestURL = outputDirectory.appendingPathComponent(
+                "minimax-h3-\(identifier)-request.json"
+            )
+            defer { try? FileManager.default.removeItem(at: requestURL) }
+            let payload = WorkerRequest(
+                modelDirectory: request.modelURL.path,
+                outputPath: outputURL.path,
+                prompt: request.options.prompt,
+                width: spatialDimensions.width,
+                height: spatialDimensions.height,
+                frames: frameCount,
+                frameRate: request.options.frameRate,
+                seed: request.options.seed &+ UInt64(index),
+                steps: request.options.steps,
+                keyframes: inputImageURL.map {
+                    [WorkerRequest.Keyframe(frameIndex: 0, imagePath: $0.path)]
+                } ?? [],
+                transformerPath: modelFiles.transformer.path,
+                videoVAEPath: modelFiles.videoVAE.path,
+                audioVAEPath: modelFiles.audioVAE.path,
+                textEncoderPath: modelFiles.textEncoder.path,
+                tokenizerDirectory: modelFiles.processor.path
+            )
+            try JSONEncoder().encode(payload).write(to: requestURL, options: .atomic)
+            let workerArguments = [
+                "--request", requestURL.path,
+                "--format", "gguf",
+                "--variant", Self.isRef2VAModelID(request.profile.modelID)
+                    ? "ref2va" : "fl2va"
             ]
-            if let inputImageURL {
-                workerArguments += ["--input", inputImageURL.path]
-            }
 
             let status = try await RuntimeProcess.run(
                 executable: executable,
@@ -180,8 +213,8 @@ public final class MiniMaxH3VideoGenerationService: VideoGenerating, Sendable {
                         ? "MiniMax H3 生成影片"
                         : "MiniMax H3 生成影片 \(index + 1)",
                     fileURL: outputURL,
-                    pixelWidth: request.options.width,
-                    pixelHeight: request.options.height,
+                    pixelWidth: spatialDimensions.width,
+                    pixelHeight: spatialDimensions.height,
                     recipeID: request.recipeID
                 )
             )
@@ -190,6 +223,30 @@ public final class MiniMaxH3VideoGenerationService: VideoGenerating, Sendable {
 
         completed = true
         return outputs
+    }
+
+    /// Mirrors `MiniMaxH3RequestProtocol.Request` in the worker.
+    private struct WorkerRequest: Encodable {
+        struct Keyframe: Encodable {
+            var frameIndex: Int
+            var imagePath: String
+        }
+
+        var modelDirectory: String
+        var outputPath: String
+        var prompt: String
+        var width: Int
+        var height: Int
+        var frames: Int
+        var frameRate: Int
+        var seed: UInt64
+        var steps: Int
+        var keyframes: [Keyframe]
+        var transformerPath: String?
+        var videoVAEPath: String?
+        var audioVAEPath: String?
+        var textEncoderPath: String?
+        var tokenizerDirectory: String?
     }
 
     private struct ModelFiles {

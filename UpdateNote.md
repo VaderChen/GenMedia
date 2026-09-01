@@ -2,6 +2,14 @@
 
 本文件採「最新內容在上」的方式維護。開發期間先更新 `Unreleased`；建立 GitHub Release 時，將標題改為正式版本與日期，再新增下一個空白的 `Unreleased` 區段。
 
+## 1.26.0901 — 2026-09-01
+
+- 修正 MiniMax H3 在 `1280×720` 等高度不是 32 像素倍數時的 latent reshape 崩潰；服務端將寬高向下對齊至 32 像素網格，Worker 在 patchify 前拒絕不合法幾何尺寸。
+- H3 Worker 的正式服務路徑改用明確的 JSON request，保留 `--format` 與 `--variant` 分派，不以模型目錄自動猜測格式；單圖條件仍透過 Video VAE encode 傳入。
+- H3 GGUF 載入器加入 Metal 端量化路徑，診斷模式仍可使用 CPU reference quantizer；dense 與量化權重的既有計算邏輯不變。
+- 以真實 H3 GGUF 完成 `640×384`、4 幀、含音訊的生成驗證；H3 仍處於測試階段，不保證所有模型變體、輸出或硬體配置的正確性。
+- 驗證結果：根 App release build 成功、H3 Worker release build 成功、H3 geometry 測試 `3/3` 通過；Worker 仍有既有 temporal-tiling 測試缺口，未將該部分宣稱為全數通過。
+
 ## 1.26.0831 — 2026-08-31
 
 Release 狀態：已完成 Developer ID 簽章、Apple Notarization、Staple 與 Gatekeeper 驗證。

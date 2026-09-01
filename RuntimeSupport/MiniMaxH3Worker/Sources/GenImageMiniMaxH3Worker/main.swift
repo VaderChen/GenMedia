@@ -17,6 +17,13 @@ private enum GenImageMiniMaxH3Worker {
             exit(2)
         }
 
+        // The app drives the worker with --request; the other subcommands are
+        // diagnostics used by the parity harness.
+        if arguments.contains("--request") {
+            runRequest(arguments: arguments)
+            return
+        }
+
         switch subcommand {
         case "inspect":
             guard let path = value(for: "--transformer", in: arguments) else {
@@ -56,7 +63,10 @@ private enum GenImageMiniMaxH3Worker {
             guard let path = value(for: "--transformer", in: arguments) else {
                 fail("quant-check 需要 --transformer <path to .gguf>")
             }
-            runQuantCheck(path: path)
+            runQuantCheck(
+                path: path,
+                useMetalQuantizer: !arguments.contains("--cpu-quantizer")
+            )
         case "refiner-check":
             guard let path = value(for: "--transformer", in: arguments) else {
                 fail("refiner-check 需要 --transformer <path to .gguf>")
@@ -91,7 +101,10 @@ private enum GenImageMiniMaxH3Worker {
             guard let path = value(for: "--transformer", in: arguments) else {
                 fail("load-check 需要 --transformer <path to .gguf>")
             }
-            runLoadCheck(path: path)
+            runLoadCheck(
+                path: path,
+                useMetalQuantizer: !arguments.contains("--cpu-quantizer")
+            )
         case "text-check":
             guard let encoder = value(for: "--text-encoder", in: arguments),
                   let tokenizer = value(for: "--tokenizer", in: arguments) else {
@@ -105,6 +118,7 @@ private enum GenImageMiniMaxH3Worker {
                 tokenIDs: value(for: "--token-ids", in: arguments),
                 layerCount: intValue(for: "--layers", in: arguments),
                 dense: arguments.contains("--dense"),
+                useMetalQuantizer: !arguments.contains("--cpu-quantizer"),
                 outputPath: value(for: "--output", in: arguments)
             )
         case "generate":
@@ -147,6 +161,166 @@ private enum GenImageMiniMaxH3Worker {
             usage()
             exit(2)
         }
+    }
+
+    /// Serve one `--request` invocation.
+    private static func runRequest(arguments: [String]) {
+        func emit(_ event: MiniMaxH3RequestProtocol.Event) {
+            guard let data = try? JSONEncoder().encode(event) else { return }
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data("\n".utf8))
+        }
+
+        do {
+            guard let requestPath = value(for: "--request", in: arguments) else {
+                throw MiniMaxH3RequestProtocol.RequestError
+                    .missingComponent("--request")
+            }
+            let formatRaw = value(for: "--format", in: arguments) ?? "gguf"
+            guard let format = MiniMaxH3RequestProtocol.Format(rawValue: formatRaw) else {
+                throw MiniMaxH3RequestProtocol.RequestError.unsupportedFormat(formatRaw)
+            }
+            _ = format
+            let variantRaw = value(for: "--variant", in: arguments) ?? "fl2va"
+            guard let variant = MiniMaxH3RequestProtocol.Variant(rawValue: variantRaw) else {
+                throw MiniMaxH3RequestProtocol.RequestError.unsupportedVariant(variantRaw)
+            }
+
+            let data = try Data(contentsOf: URL(fileURLWithPath: requestPath))
+            let request = try JSONDecoder().decode(
+                MiniMaxH3RequestProtocol.Request.self, from: data
+            )
+            // Ref2VA's transformer denoises text-to-video the same way; only
+            // the reference-block conditioning is unimplemented. So the variant
+            // is rejected when anchors are actually requested, not up front.
+            if variant == .ref2va, request.keyframes?.isEmpty == false {
+                throw MiniMaxH3RequestProtocol.RequestError.unsupportedVariant(variantRaw)
+            }
+            let components = try MiniMaxH3RequestProtocol.Components.resolve(
+                request: request
+            )
+            let geometry = try MiniMaxH3RequestProtocol.latentGeometry(
+                width: request.width, height: request.height, frames: request.frames
+            )
+
+            let started = Date()
+            emit(.progress(stage: "loadingModel", value: 0.01))
+
+            // Keyframe anchors are encoded before the pipeline runs, so the
+            // large VAE encoder is not resident alongside the transformer.
+            var conditioning: MiniMaxH3Transformer.Conditioning?
+            if let keyframes = request.keyframes, !keyframes.isEmpty {
+                emit(.progress(stage: "encodingKeyframes", value: 0.03))
+                let encoder = try MiniMaxH3VideoVAEEncoder.load(
+                    fileURL: components.videoVAE
+                )
+                var entries: [MiniMaxH3Transformer.Conditioning.Entry] = []
+                for keyframe in keyframes {
+                    let pixels = try loadImagePixels(
+                        path: keyframe.imagePath,
+                        width: request.width,
+                        height: request.height
+                    )
+                    // Negative indices count from the end of the video.
+                    let resolved = keyframe.frameIndex < 0
+                        ? max(0, request.frames + keyframe.frameIndex)
+                        : keyframe.frameIndex
+                    entries.append(.init(
+                        resolvedFrameIndex: resolved,
+                        videoLatent: try encoder.encode(pixels: pixels)
+                    ))
+                }
+                MLX.GPU.clearCache()
+                conditioning = MiniMaxH3Transformer.Conditioning(entries: entries)
+            }
+
+            let pipeline = MiniMaxH3Pipeline(
+                transformerURL: components.transformer,
+                videoVAEURL: components.videoVAE,
+                audioVAEURL: components.audioVAE,
+                textEncoderURL: components.textEncoder,
+                tokenizerDirectoryURL: components.tokenizerDirectory
+            )
+            let pipelineRequest = MiniMaxH3Pipeline.Request(
+                latentFrames: geometry.latentFrames,
+                latentHeight: geometry.latentHeight,
+                latentWidth: geometry.latentWidth,
+                audioFrames: MiniMaxH3RequestProtocol.audioLatentFrames(
+                    frames: request.frames, frameRate: request.frameRate
+                ),
+                steps: request.steps,
+                seed: request.seed,
+                prompt: request.prompt
+            )
+
+            let result = try pipeline.run(
+                request: pipelineRequest,
+                conditioning: conditioning
+            ) { stage, fraction in
+                // Reserve the tail of the range for encoding the video file.
+                emit(.progress(stage: stage, value: 0.05 + fraction * 0.85))
+            }
+
+            emit(.progress(stage: "encoding", value: 0.92))
+            let images = try MiniMaxH3VideoWriter.images(from: result.pixels)
+            let outputURL = URL(fileURLWithPath: request.outputPath)
+            let audioConfiguration = MiniMaxH3AudioVAEConfiguration.default
+            try MiniMaxH3VideoWriter.writeMP4(
+                images,
+                to: outputURL,
+                frameRate: request.frameRate,
+                audio: result.audio.map {
+                    MiniMaxH3VideoWriter.Audio(
+                        waveform: $0,
+                        sampleRate: audioConfiguration.sampleRate
+                    )
+                }
+            )
+
+            emit(.completed(
+                durationSeconds: Double(images.count) / Double(max(request.frameRate, 1)),
+                sampleRate: result.audio == nil ? 0 : audioConfiguration.sampleRate,
+                numFrames: images.count,
+                pixelWidth: request.width,
+                pixelHeight: request.height
+            ))
+        } catch {
+            emit(.error(error.localizedDescription))
+            exit(1)
+        }
+    }
+
+    /// Load an image and resize it to the generation geometry, as `[1, 3, 1, H, W]`
+    /// in [-1, 1].
+    private static func loadImagePixels(
+        path: String,
+        width: Int,
+        height: Int
+    ) throws -> MLXArray {
+        let url = URL(fileURLWithPath: path)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw MiniMaxH3RequestProtocol.RequestError.missingComponent(path)
+        }
+        var rgba = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(
+            data: &rgba, width: width, height: height,
+            bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else {
+            throw MiniMaxH3RequestProtocol.RequestError.missingComponent(path)
+        }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var planar = [Float](repeating: 0, count: 3 * height * width)
+        for pixel in 0 ..< (width * height) {
+            for channel in 0 ..< 3 {
+                planar[channel * height * width + pixel] =
+                    Float(rgba[pixel * 4 + channel]) / 255.0 * 2.0 - 1.0
+            }
+        }
+        return MLXArray(planar, [1, 3, 1, height, width])
     }
 
     /// Encode one frame into a keyframe latent.
@@ -391,6 +565,7 @@ private enum GenImageMiniMaxH3Worker {
         tokenIDs: String?,
         layerCount: Int?,
         dense: Bool,
+        useMetalQuantizer: Bool,
         outputPath: String?
     ) {
         do {
@@ -399,7 +574,8 @@ private enum GenImageMiniMaxH3Worker {
                 fileURL: URL(fileURLWithPath: encoderPath),
                 tokenizerDirectory: URL(fileURLWithPath: tokenizerPath),
                 layerCount: layerCount,
-                quantizeLinear: !dense
+                quantizeLinear: !dense,
+                useMetalQuantizer: useMetalQuantizer
             )
             print("source tensors      : \(encoder.report.sourceTensorCount)")
             print("loaded LM tensors   : \(encoder.report.loadedTensorCount)")
@@ -447,16 +623,19 @@ private enum GenImageMiniMaxH3Worker {
 
     /// Load the whole transformer as INT8 and report cost, so a generation run
     /// does not discover an out-of-memory failure late.
-    private static func runLoadCheck(path: String) {
+    private static func runLoadCheck(path: String, useMetalQuantizer: Bool) {
         do {
             let started = Date()
             let loaded = try MiniMaxH3GGUFQuantizedLoader.load(
-                fileURL: URL(fileURLWithPath: path)
+                fileURL: URL(fileURLWithPath: path),
+                useMetalQuantizer: useMetalQuantizer
             )
             let elapsed = Date().timeIntervalSince(started)
             print("quantized tensors : \(loaded.quantizedCount)")
             print("dense tensors     : \(loaded.denseCount)")
             print("skipped quantize  : \(loaded.skippedQuantizationCount)")
+            print("Metal INT8 tensors: \(loaded.metalQuantizedCount)")
+            print("CPU INT8 tensors  : \(loaded.cpuQuantizedCount)")
             print("total entries     : \(loaded.tensors.count)")
             print(String(format: "load time         : %.1fs", elapsed))
             let active = Double(MLX.GPU.activeMemory) / 1_073_741_824.0
@@ -730,7 +909,7 @@ private enum GenImageMiniMaxH3Worker {
 
     /// Compare INT4 and INT8 re-quantization error against the exactly decoded
     /// Q4_0 values, on a few representative tensors.
-    private static func runQuantCheck(path: String) {
+    private static func runQuantCheck(path: String, useMetalQuantizer: Bool) {
         let names = [
             "blocks.0.attn.qkv_proj.weight",
             "blocks.0.mlp.fc1.weight",
@@ -742,6 +921,7 @@ private enum GenImageMiniMaxH3Worker {
                 fileURL: URL(fileURLWithPath: path),
                 matching: { names.contains($0) }
             )
+            print("quantizer: \(useMetalQuantizer ? "Metal" : "CPU")")
             print("tensor                                    shape            INT4 rel   INT8 rel")
             for name in names {
                 guard let reference = dense[name] else {
@@ -749,17 +929,26 @@ private enum GenImageMiniMaxH3Worker {
                     continue
                 }
                 let denominator = MLX.max(MLX.abs(reference)).item(Float.self)
+                let int8 = try MiniMaxH3GGUFQuantizedLoader.loadQuantizedTensor(
+                    fileURL: URL(fileURLWithPath: path),
+                    named: name,
+                    useMetalQuantizer: useMetalQuantizer
+                )
                 var line = "  \(name.padding(toLength: 40, withPad: " ", startingAt: 0))"
                 line += " \(String(describing: reference.shape).padding(toLength: 16, withPad: " ", startingAt: 0))"
-                for bits in [4, 8] {
-                    let q = MLX.quantized(reference, groupSize: 64, bits: bits)
-                    let restored = MLX.dequantized(
-                        q.wq, scales: q.scales, biases: q.biases,
-                        groupSize: 64, bits: bits
-                    )
-                    let error = MLX.max(MLX.abs(restored - reference)).item(Float.self)
-                    line += String(format: " %10.3e", error / max(denominator, 1e-12))
-                }
+                let int4 = MLX.quantized(reference, groupSize: 64, bits: 4)
+                let int4Restored = MLX.dequantized(
+                    int4.wq, scales: int4.scales, biases: int4.biases,
+                    groupSize: 64, bits: 4
+                )
+                let int4Error = MLX.max(MLX.abs(int4Restored - reference)).item(Float.self)
+                let int8Restored = MLX.dequantized(
+                    int8.weights, scales: int8.scales, biases: int8.biases,
+                    groupSize: 64, bits: 8
+                )
+                let int8Error = MLX.max(MLX.abs(int8Restored - reference)).item(Float.self)
+                line += String(format: " %10.3e", int4Error / max(denominator, 1e-12))
+                line += String(format: " %10.3e", int8Error / max(denominator, 1e-12))
                 print(line)
             }
         } catch {
@@ -987,7 +1176,9 @@ private enum GenImageMiniMaxH3Worker {
     private static func usage() {
         let text = """
         GenImageMiniMaxH3Worker inspect --transformer <model.gguf> [--verbose]
-        GenImageMiniMaxH3Worker text-check --text-encoder <qwen3vl.gguf> --tokenizer <processor directory> [--prompt <text>] [--token-ids <id,id,...>] [--layers <count>] [--dense] [--output out.safetensors]
+        GenImageMiniMaxH3Worker text-check --text-encoder <qwen3vl.gguf> --tokenizer <processor directory> [--prompt <text>] [--token-ids <id,id,...>] [--layers <count>] [--dense] [--cpu-quantizer] [--output out.safetensors]
+        GenImageMiniMaxH3Worker quant-check --transformer <model.gguf> [--cpu-quantizer]
+        GenImageMiniMaxH3Worker load-check --transformer <model.gguf> [--cpu-quantizer]
         GenImageMiniMaxH3Worker decode-video --vae <video_vae.safetensors> [--latent in.safetensors] [--output out.safetensors]
         GenImageMiniMaxH3Worker generate --transformer <h3.gguf> --video-vae <video_vae.safetensors> --audio-vae <audio_vae.safetensors> --text-encoder <qwen3vl.gguf> --tokenizer <processor directory> --prompt <text> --output out.mp4 [--input image] [--latent-frames 3] [--latent-height 16] [--latent-width 16] [--audio-frames 8] [--frame-rate 24] [--steps 8] [--seed 0]
         """

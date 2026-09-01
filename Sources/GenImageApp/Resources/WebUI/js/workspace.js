@@ -984,10 +984,23 @@ function renderQuickTool(state, capability) {
     (profile) => profile.capability === capability && !disabledProfileIDs.has(profile.id),
   );
   const activeID = state.activeProfileIDs[capability];
+  const activeProfile = profiles.find((profile) => profile.id === activeID);
+  const canDeactivate = Boolean(activeProfile && activeProfile.supportsGeneration !== false);
   return `
     <div class="tool-card">
       <div class="tool-copy">
-        <strong>${t(meta.titleKey)}</strong>
+        <div class="quick-tool-heading">
+          <strong>${t(meta.titleKey)}</strong>
+          ${canDeactivate ? `<button
+            type="button"
+            class="icon-button compact quick-tool-disable-button"
+            data-action="requestDeactivateProfile"
+            data-profile-id="${activeProfile.id}"
+            data-capability="${capability}"
+            title="${escapeHTML(t("profile.disableHint"))}"
+            aria-label="${escapeHTML(t("profile.disableHint"))}"
+          >×</button>` : ""}
+        </div>
         <select
           class="profile-select"
           data-profile-capability="${capability}"

@@ -318,6 +318,28 @@ button:disabled {
   margin-bottom: 4px;
 }
 
+.quick-tool-heading {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  justify-content: space-between;
+}
+
+.quick-tool-disable-button {
+  border-radius: 50%;
+  flex: 0 0 20px;
+  font-size: 15px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0;
+  width: 20px;
+}
+
+.quick-tool-disable-button:hover {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-muted));
+  color: var(--danger);
+}
+
 .profile-select,
 .field,
 .search-field {

@@ -30,4 +30,16 @@ struct MiniMaxH3VideoGenerationServiceTests {
         #expect(MiniMaxH3VideoGenerationService.normalizedFrameCount(124) == 124)
         #expect(MiniMaxH3VideoGenerationService.normalizedFrameCount(512) == 512)
     }
+
+    @Test func H3SpatialDimensionsAreNormalizedToTransformerPatchGrid() {
+        let normalized = MiniMaxH3VideoGenerationService.normalizedSpatialDimensions(
+            width: 1280,
+            height: 720
+        )
+        #expect(normalized.width == 1280)
+        #expect(normalized.height == 704)
+        #expect(
+            MiniMaxH3VideoGenerationService.normalizedSpatialDimension(640) == 640
+        )
+    }
 }
