@@ -1031,6 +1031,30 @@ Object.assign(messages.ko, {
   "profile.disableConfirm": "임시 비활성화",
 });
 
+Object.assign(messages["zh-Hant"], {
+  "miniMaxH3.lowResolutionTitle": "MiniMax H3 輸出解析度偏低",
+  "miniMaxH3.lowResolutionMessage": "目前設定為 {width} × {height}，H3 會先對齊為 {normalizedWidth} × {normalizedHeight}。技術最低尺寸為 {minimum}，寬高需為 {alignment} 的倍數；但短邊低於 {warningMinimum} px 可能出現模糊或色塊化。原生品質參考為短邊約 {nativeReference} px。仍要生成嗎？",
+  "miniMaxH3.lowResolutionContinue": "仍要生成",
+});
+
+Object.assign(messages.en, {
+  "miniMaxH3.lowResolutionTitle": "MiniMax H3 Output Resolution Is Low",
+  "miniMaxH3.lowResolutionMessage": "The current setting is {width} × {height}; H3 will align it to {normalizedWidth} × {normalizedHeight}. The technical minimum is {minimum}, and both dimensions must be multiples of {alignment}. A short side below {warningMinimum} px may produce blurry or blocky results. The native quality reference is about {nativeReference} px on the short side. Generate anyway?",
+  "miniMaxH3.lowResolutionContinue": "Generate Anyway",
+});
+
+Object.assign(messages.ja, {
+  "miniMaxH3.lowResolutionTitle": "MiniMax H3 の出力解像度が低すぎます",
+  "miniMaxH3.lowResolutionMessage": "現在の設定は {width} × {height} です。H3 は {normalizedWidth} × {normalizedHeight} に調整してから生成します。技術上の最低サイズは {minimum} で、各辺は {alignment} の倍数である必要があります。短辺が {warningMinimum} px 未満の場合、ぼやけやブロック状の結果になる可能性があります。ネイティブ品質の目安は短辺約 {nativeReference} px です。このまま生成しますか？",
+  "miniMaxH3.lowResolutionContinue": "このまま生成",
+});
+
+Object.assign(messages.ko, {
+  "miniMaxH3.lowResolutionTitle": "MiniMax H3 출력 해상도가 낮습니다",
+  "miniMaxH3.lowResolutionMessage": "현재 설정은 {width} × {height}이며 H3는 {normalizedWidth} × {normalizedHeight}로 맞춘 뒤 생성합니다. 기술적 최소 크기는 {minimum}이고 두 변은 {alignment}의 배수여야 합니다. 짧은 변이 {warningMinimum} px보다 작으면 흐리거나 블록처럼 보일 수 있습니다. 기본 품질 기준은 짧은 변 약 {nativeReference} px입니다. 그래도 생성할까요?",
+  "miniMaxH3.lowResolutionContinue": "그래도 생성",
+});
+
 let currentLocale = localStorage.getItem("genimage.locale") || "zh-Hant";
 
 export function getLocale() {

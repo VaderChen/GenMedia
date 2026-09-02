@@ -5,6 +5,18 @@ import MLX
 import MLXRandom
 import MiniMaxH3SwiftRuntime
 
+private final class RequestEventEmitter: @unchecked Sendable {
+    private let lock = NSLock()
+
+    func emit(_ event: MiniMaxH3RequestProtocol.Event) {
+        guard let data = try? JSONEncoder().encode(event) else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        FileHandle.standardOutput.write(data)
+        FileHandle.standardOutput.write(Data("\n".utf8))
+    }
+}
+
 /// MiniMax H3 worker.
 ///
 /// The worker exposes checkpoint inspection, text-encoder diagnostics, and
@@ -165,11 +177,7 @@ private enum GenImageMiniMaxH3Worker {
 
     /// Serve one `--request` invocation.
     private static func runRequest(arguments: [String]) {
-        func emit(_ event: MiniMaxH3RequestProtocol.Event) {
-            guard let data = try? JSONEncoder().encode(event) else { return }
-            FileHandle.standardOutput.write(data)
-            FileHandle.standardOutput.write(Data("\n".utf8))
-        }
+        let emitter = RequestEventEmitter()
 
         do {
             guard let requestPath = value(for: "--request", in: arguments) else {
@@ -204,13 +212,13 @@ private enum GenImageMiniMaxH3Worker {
             )
 
             let started = Date()
-            emit(.progress(stage: "loadingModel", value: 0.01))
+            emitter.emit(.progress(stage: "loadingModel", value: 0.01))
 
             // Keyframe anchors are encoded before the pipeline runs, so the
             // large VAE encoder is not resident alongside the transformer.
             var conditioning: MiniMaxH3Transformer.Conditioning?
             if let keyframes = request.keyframes, !keyframes.isEmpty {
-                emit(.progress(stage: "encodingKeyframes", value: 0.03))
+                emitter.emit(.progress(stage: "encodingKeyframes", value: 0.03))
                 let encoder = try MiniMaxH3VideoVAEEncoder.load(
                     fileURL: components.videoVAE
                 )
@@ -258,10 +266,20 @@ private enum GenImageMiniMaxH3Worker {
                 conditioning: conditioning
             ) { stage, fraction in
                 // Reserve the tail of the range for encoding the video file.
-                emit(.progress(stage: stage, value: 0.05 + fraction * 0.85))
+                emitter.emit(.progress(stage: stage, value: 0.05 + fraction * 0.85))
             }
 
-            emit(.progress(stage: "encoding", value: 0.92))
+            emitter.emit(.progress(stage: "encoding", value: 0.92))
+            let encodingHeartbeat = DispatchSource.makeTimerSource(
+                queue: DispatchQueue.global(qos: .utility)
+            )
+            encodingHeartbeat.schedule(deadline: .now() + 5, repeating: 5)
+            encodingHeartbeat.setEventHandler {
+                emitter.emit(.progress(stage: "encoding", value: 0.92))
+            }
+            encodingHeartbeat.resume()
+            defer { encodingHeartbeat.cancel() }
+
             let images = try MiniMaxH3VideoWriter.images(from: result.pixels)
             let outputURL = URL(fileURLWithPath: request.outputPath)
             let audioConfiguration = MiniMaxH3AudioVAEConfiguration.default
@@ -274,10 +292,15 @@ private enum GenImageMiniMaxH3Worker {
                         waveform: $0,
                         sampleRate: audioConfiguration.sampleRate
                     )
+                },
+                progress: { fraction in
+                    emitter.emit(
+                        .progress(stage: "encoding", value: 0.92 + fraction * 0.07)
+                    )
                 }
             )
 
-            emit(.completed(
+            emitter.emit(.completed(
                 durationSeconds: Double(images.count) / Double(max(request.frameRate, 1)),
                 sampleRate: result.audio == nil ? 0 : audioConfiguration.sampleRate,
                 numFrames: images.count,
@@ -285,7 +308,7 @@ private enum GenImageMiniMaxH3Worker {
                 pixelHeight: request.height
             ))
         } catch {
-            emit(.error(error.localizedDescription))
+            emitter.emit(.error(error.localizedDescription))
             exit(1)
         }
     }

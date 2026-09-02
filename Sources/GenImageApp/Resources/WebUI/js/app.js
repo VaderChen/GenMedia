@@ -13,6 +13,7 @@ import {
   renderPasteDialog,
   renderRoute,
   renderSidebar,
+  renderH3ResolutionWarningDialog,
   renderSmallOutputWarningDialog,
   renderToast,
   renderUpdateBanner,
@@ -26,6 +27,7 @@ import {
   defaultVideoDimensionsForAspect,
   dimensionsForAspect,
   sourceImageDimensions,
+  undersizedH3VideoOutput,
   undersizedImageOutput,
 } from "./geometry.js";
 import { getLocale, setLocale, t } from "./i18n.js";
@@ -160,6 +162,7 @@ const ui = {
   huggingFaceTokenValue: "",
   pasteDialogOpen: false,
   smallOutputWarning: null,
+  h3ResolutionWarning: null,
   infoDialog: null,
   modelFilter: "all",
   modelFormat: "all",
@@ -315,14 +318,15 @@ root.addEventListener("click", async (event) => {
         break;
       case "generateVideo":
         await Promise.all([syncRecipe(), syncVideoOutputSettings()]);
-        ui.route = "workspace";
-        ui.previewMode = "single";
-        setInspectorTab("jobs");
-        await invokeTrackedOutput(
-          "generateVideo",
-          { sourceAssetIDs: selectedVideoSourceAssetIDs() },
-          "generateVideo",
-        );
+        {
+          const h3Output = undersizedH3VideoOutput(state, activeVideoProfile());
+          if (h3Output && !h3ResolutionWarningAcknowledged) {
+            ui.h3ResolutionWarning = h3Output;
+            render();
+            break;
+          }
+        }
+        await runVideoGeneration();
         break;
       case "generateMusic":
         await Promise.all([syncRecipe(), syncMusicOutputSettings()]);
@@ -418,6 +422,16 @@ root.addEventListener("click", async (event) => {
         ui.smallOutputWarning = null;
         render();
         await runImageToImage();
+        break;
+      case "h3ResolutionWarningCancel":
+        ui.h3ResolutionWarning = null;
+        render();
+        break;
+      case "h3ResolutionWarningContinue":
+        h3ResolutionWarningAcknowledged = true;
+        ui.h3ResolutionWarning = null;
+        render();
+        await runVideoGeneration();
         break;
       case "upscale":
         ui.route = "workspace";
@@ -1375,6 +1389,7 @@ function render() {
       ${renderHuggingFaceTokenDialog(state, ui)}
       ${renderPasteDialog(state, ui, pasteState)}
       ${renderSmallOutputWarningDialog(ui)}
+      ${renderH3ResolutionWarningDialog(ui)}
       ${renderInfoDialog(state, ui)}
       ${renderToast(state)}
     `;
@@ -1714,6 +1729,20 @@ function selectedVideoSourceAssetIDs() {
   return imageIDs.has(workspaceState.selectedAssetID) ? [workspaceState.selectedAssetID] : [];
 }
 
+function activeVideoProfile() {
+  const capability = selectedVideoSourceAssetIDs().length > 0
+    ? "imageToVideo"
+    : "textToVideo";
+  const activeProfileID = state.activeProfileIDs?.[capability];
+  if (!activeProfileID) return null;
+  const disabledProfileIDs = new Set(state.disabledProfileIDs || []);
+  return state.profiles.find(
+    (profile) => profile.id === activeProfileID
+      && profile.capability === capability
+      && !disabledProfileIDs.has(profile.id),
+  ) || null;
+}
+
 function invokeTrackedOutput(method, params, action) {
   const pending = trackPendingOutput(ui, action);
   const request = params === undefined ? invoke(method) : invoke(method, params);
@@ -1809,6 +1838,7 @@ function sortForSignature(value) {
 
 // Warn at most once per session so deliberate batches of small outputs are not nagged.
 let smallOutputWarningAcknowledged = false;
+let h3ResolutionWarningAcknowledged = false;
 
 async function runImageToImage() {
   await syncRecipe();
@@ -1816,6 +1846,17 @@ async function runImageToImage() {
   ui.previewMode = "single";
   setInspectorTab("jobs");
   await invokeTrackedOutput("imageToImage", undefined, "imageToImage");
+}
+
+async function runVideoGeneration() {
+  ui.route = "workspace";
+  ui.previewMode = "single";
+  setInspectorTab("jobs");
+  await invokeTrackedOutput(
+    "generateVideo",
+    { sourceAssetIDs: selectedVideoSourceAssetIDs() },
+    "generateVideo",
+  );
 }
 
 function readFileAsDataURL(file) {

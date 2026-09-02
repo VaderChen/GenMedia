@@ -378,10 +378,21 @@ public final class MiniMaxH3VideoGenerationService: VideoGenerating, Sendable {
         return executable
     }
 
-    private static func latestProgress(in log: RuntimeLog) -> Double? {
+    private struct WorkerProgressEvent: Decodable {
+        let type: String
+        let value: Double?
+    }
+
+    static func latestProgress(in log: RuntimeLog) -> Double? {
         guard let data = log.data(),
               let text = String(data: data, encoding: .utf8) else { return nil }
         for line in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).reversed() {
+            if let data = line.data(using: .utf8),
+               let event = try? JSONDecoder().decode(WorkerProgressEvent.self, from: data),
+               event.type == "progress",
+               let value = event.value {
+                return min(max(value, 0), 1)
+            }
             let parts = line.split(separator: " ")
             guard parts.count >= 2,
                   let token = parts.last,

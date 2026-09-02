@@ -120,7 +120,8 @@ public enum MiniMaxH3VideoWriter {
         _ images: [CGImage],
         to url: URL,
         frameRate: Int = 24,
-        audio: Audio? = nil
+        audio: Audio? = nil,
+        progress: ((Double) -> Void)? = nil
     ) throws {
         guard let first = images.first else {
             throw WriterError.writerSetupFailed("沒有影格")
@@ -180,6 +181,21 @@ public enum MiniMaxH3VideoWriter {
         }
         writer.startSession(atSourceTime: .zero)
 
+        if let audioInput, let audio, !audioSamples.isEmpty {
+            let buffer = try audioSampleBuffer(
+                interleaved: audioSamples,
+                channels: audioChannels,
+                sampleRate: audio.sampleRate
+            )
+            try waitUntilReady(audioInput, writer: writer)
+            guard audioInput.append(buffer) else {
+                throw WriterError.writerSetupFailed(
+                    writer.error?.localizedDescription ?? "audio append"
+                )
+            }
+            audioInput.markAsFinished()
+        }
+
         for (index, image) in images.enumerated() {
             guard let pool = adaptor.pixelBufferPool else {
                 throw WriterError.writerSetupFailed("pixelBufferPool 不可用")
@@ -206,39 +222,41 @@ public enum MiniMaxH3VideoWriter {
             }
             CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
 
-            while !input.isReadyForMoreMediaData {
-                Thread.sleep(forTimeInterval: 0.005)
-            }
+            try waitUntilReady(input, writer: writer)
             let time = CMTime(value: CMTimeValue(index), timescale: CMTimeScale(frameRate))
-            adaptor.append(pixelBuffer, withPresentationTime: time)
+            guard adaptor.append(pixelBuffer, withPresentationTime: time) else {
+                throw WriterError.writerSetupFailed(
+                    writer.error?.localizedDescription ?? "video append"
+                )
+            }
+            progress?(Double(index + 1) / Double(images.count))
         }
 
         input.markAsFinished()
 
-        if let audioInput, let audio, !audioSamples.isEmpty {
-            let buffer = try audioSampleBuffer(
-                interleaved: audioSamples,
-                channels: audioChannels,
-                sampleRate: audio.sampleRate
-            )
-            while !audioInput.isReadyForMoreMediaData {
-                Thread.sleep(forTimeInterval: 0.005)
-            }
-            guard audioInput.append(buffer) else {
-                throw WriterError.writerSetupFailed(
-                    writer.error?.localizedDescription ?? "audio append"
-                )
-            }
-            audioInput.markAsFinished()
-        }
-
         let semaphore = DispatchSemaphore(value: 0)
         writer.finishWriting { semaphore.signal() }
-        semaphore.wait()
+        while semaphore.wait(timeout: .now() + 1) == .timedOut {
+            progress?(1)
+        }
         if writer.status != .completed {
             throw WriterError.writerSetupFailed(
                 writer.error?.localizedDescription ?? "status \(writer.status.rawValue)"
             )
+        }
+    }
+
+    private static func waitUntilReady(
+        _ input: AVAssetWriterInput,
+        writer: AVAssetWriter
+    ) throws {
+        while !input.isReadyForMoreMediaData {
+            if writer.status == .failed || writer.status == .cancelled {
+                throw WriterError.writerSetupFailed(
+                    writer.error?.localizedDescription ?? "writer stopped"
+                )
+            }
+            Thread.sleep(forTimeInterval: 0.005)
         }
     }
 
