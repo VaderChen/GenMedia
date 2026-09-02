@@ -15,6 +15,11 @@ export const MAXIMUM_DIMENSION = 4096;
 export const RECOMMENDED_MINIMUM_SIDE = 512;
 export const RECOMMENDED_MINIMUM_AREA = RECOMMENDED_MINIMUM_SIDE * RECOMMENDED_MINIMUM_SIDE;
 
+export const H3_ALIGNMENT = 32;
+export const H3_TECHNICAL_MINIMUM_DIMENSION = 64;
+export const H3_QUALITY_WARNING_MINIMUM_SHORT_SIDE = 512;
+export const H3_NATIVE_QUALITY_REFERENCE_SHORT_SIDE = 768;
+
 /// Nearest multiple of ALIGNMENT, clamped into the supported range.
 export function quantizeDimension(value) {
   if (!Number.isFinite(value) || value <= 0) return MINIMUM_DIMENSION;
@@ -101,4 +106,39 @@ export function undersizedImageOutput(state) {
   if (![width, height].every((value) => Number.isFinite(value) && value > 0)) return null;
   if (width * height >= RECOMMENDED_MINIMUM_AREA) return null;
   return { width, height };
+}
+
+export function isMiniMaxH3ModelID(modelID) {
+  return typeof modelID === "string" && modelID.toLowerCase().includes("minimax-h3");
+}
+
+export function normalizedH3VideoDimension(value) {
+  if (!Number.isFinite(value) || value <= 0) return H3_TECHNICAL_MINIMUM_DIMENSION;
+  const aligned = Math.floor(value / H3_ALIGNMENT) * H3_ALIGNMENT;
+  return Math.min(MAXIMUM_DIMENSION, Math.max(H3_TECHNICAL_MINIMUM_DIMENSION, aligned));
+}
+
+export function normalizedH3VideoDimensions(width, height) {
+  return {
+    width: normalizedH3VideoDimension(width),
+    height: normalizedH3VideoDimension(height),
+  };
+}
+
+export function undersizedH3VideoOutput(state, profile) {
+  if (!isMiniMaxH3ModelID(profile?.modelID)) return null;
+  const width = Number(state?.videoOutputSettings?.width);
+  const height = Number(state?.videoOutputSettings?.height);
+  if (![width, height].every((value) => Number.isFinite(value) && value > 0)) return null;
+
+  const normalized = normalizedH3VideoDimensions(width, height);
+  if (Math.min(normalized.width, normalized.height) >= H3_QUALITY_WARNING_MINIMUM_SHORT_SIDE) {
+    return null;
+  }
+  return {
+    width,
+    height,
+    normalizedWidth: normalized.width,
+    normalizedHeight: normalized.height,
+  };
 }

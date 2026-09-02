@@ -1,7 +1,13 @@
 import { renderAutomaticFlow } from "./automatic-flow.js";
 import { renderDownloads } from "./downloads.js";
 import { escapeHTML, gigabytes, percent, phaseLabel } from "./format.js";
-import { RECOMMENDED_MINIMUM_SIDE } from "./geometry.js";
+import {
+  H3_ALIGNMENT,
+  H3_NATIVE_QUALITY_REFERENCE_SHORT_SIDE,
+  H3_QUALITY_WARNING_MINIMUM_SHORT_SIDE,
+  H3_TECHNICAL_MINIMUM_DIMENSION,
+  RECOMMENDED_MINIMUM_SIDE,
+} from "./geometry.js";
 import { t } from "./i18n.js";
 import { renderModelDetails, renderModels } from "./models.js";
 import { renderProfileDetails, renderProfiles } from "./profiles.js";
@@ -393,6 +399,35 @@ export function renderSmallOutputWarningDialog(ui) {
       <div class="dialog-actions">
         <button class="secondary-button" data-action="smallOutputCancel">${t("common.cancel")}</button>
         <button class="primary-button" data-action="smallOutputContinue">${t("imageToImage.smallOutputContinue")}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
+export function renderH3ResolutionWarningDialog(ui) {
+  if (!ui.h3ResolutionWarning) return "";
+  const {
+    width,
+    height,
+    normalizedWidth,
+    normalizedHeight,
+  } = ui.h3ResolutionWarning;
+  return `<div class="dialog-backdrop">
+    <section class="paste-dialog" role="alertdialog" aria-modal="true" aria-labelledby="h3-resolution-dialog-title">
+      <h2 id="h3-resolution-dialog-title">${t("miniMaxH3.lowResolutionTitle")}</h2>
+      <p>${t("miniMaxH3.lowResolutionMessage", {
+        width,
+        height,
+        normalizedWidth,
+        normalizedHeight,
+        minimum: `${H3_TECHNICAL_MINIMUM_DIMENSION} × ${H3_TECHNICAL_MINIMUM_DIMENSION}`,
+        alignment: H3_ALIGNMENT,
+        warningMinimum: H3_QUALITY_WARNING_MINIMUM_SHORT_SIDE,
+        nativeReference: H3_NATIVE_QUALITY_REFERENCE_SHORT_SIDE,
+      })}</p>
+      <div class="dialog-actions">
+        <button class="secondary-button" data-action="h3ResolutionWarningCancel">${t("common.cancel")}</button>
+        <button class="primary-button" data-action="h3ResolutionWarningContinue">${t("miniMaxH3.lowResolutionContinue")}</button>
       </div>
     </section>
   </div>`;

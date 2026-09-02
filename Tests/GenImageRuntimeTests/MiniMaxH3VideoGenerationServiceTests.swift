@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import GenImageRuntime
@@ -41,5 +42,23 @@ struct MiniMaxH3VideoGenerationServiceTests {
         #expect(
             MiniMaxH3VideoGenerationService.normalizedSpatialDimension(640) == 640
         )
+    }
+
+    @Test func H3WorkerJSONProgressIsParsed() throws {
+        let logURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("genimage-h3-progress-\(UUID().uuidString).log")
+        defer { try? FileManager.default.removeItem(at: logURL) }
+        let log = try RuntimeLog(at: logURL)
+        defer { log.close() }
+
+        try log.handle.write(contentsOf: Data(
+            "{\"type\":\"progress\",\"stage\":\"encoding\",\"value\":0.92}\n".utf8
+        ))
+        log.flush()
+
+        let progress = try #require(
+            MiniMaxH3VideoGenerationService.latestProgress(in: log)
+        )
+        #expect(abs(progress - 0.92) < 1e-9)
     }
 }

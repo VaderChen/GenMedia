@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import MLX
 import Testing
 
 @testable import MiniMaxH3SwiftRuntime
@@ -42,5 +44,48 @@ struct MiniMaxH3VideoWriterTests {
         #expect(MiniMaxH3VideoWriter.sampleCount(
             frameCount: 8, frameRate: 0, sampleRate: 32000
         ) > 0)
+    }
+
+    @Test("Long video audio is submitted before video backpressure")
+    func longVideoWithAudioCompletes() throws {
+        let provider = try #require(CGDataProvider(
+            data: Data(repeating: 0, count: 16) as CFData
+        ))
+        let image = try #require(CGImage(
+            width: 2,
+            height: 2,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: 8,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ))
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("h3-long-video-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let frameCount = 152
+        let sampleCount = MiniMaxH3VideoWriter.sampleCount(
+            frameCount: frameCount, frameRate: 15, sampleRate: 32_000
+        )
+        let waveform = MLXArray(
+            [Float](repeating: 0, count: sampleCount * 2),
+            [1, 2, sampleCount]
+        )
+        var progressValues: [Double] = []
+        try MiniMaxH3VideoWriter.writeMP4(
+            Array(repeating: image, count: frameCount),
+            to: outputURL,
+            frameRate: 15,
+            audio: .init(waveform: waveform, sampleRate: 32_000),
+            progress: { progressValues.append($0) }
+        )
+
+        #expect(FileManager.default.fileExists(atPath: outputURL.path))
+        #expect(progressValues.last == 1)
     }
 }
