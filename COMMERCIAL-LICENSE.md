@@ -1,6 +1,6 @@
-# YourDesk 禁止商業販售政策
+# GenMedia 禁止商業販售政策
 
-YourDesk 現行版本採用[原始碼公開・禁止商業販售授權](LICENSE.md)。允許非販售的使用、修改及免費分享，包含公司內部自用；禁止販售軟體、付費代管／SaaS、收費遠端服務、付費產品整合，以及以安裝、客製、支援或維護等名義收費。
+GenMedia 現行版本採用[原始碼公開・禁止商業販售授權](LICENSE.md)。允許非販售的使用、修改及免費分享，包含公司內部自用；禁止販售軟體、付費代管／SaaS、收費遠端服務、付費產品整合，以及以安裝、客製、支援或維護等名義收費。
 
 若擬從事本條禁止的販售、營利安排，或將本軟體整合於收費產品或服務，請與著作權人另行討論授權範圍及相關事宜。符合本授權的免費整合及內部自用整合，不需另行取得授權。
 
@@ -13,7 +13,7 @@ YourDesk 現行版本採用[原始碼公開・禁止商業販售授權](LICENSE.
 
 ## English
 
-YourDesk uses the [source-available, no-commercial-sales license](LICENSE.en.md). Non-sale use, modification and free sharing, including internal business use, are allowed. Software sales, paid hosting/SaaS, paid remote services, paid product integration, and charges for installation, customization, support or maintenance are prohibited.
+GenMedia uses the [source-available, no-commercial-sales license](LICENSE.en.md). Non-sale use, modification and free sharing, including internal business use, are allowed. Software sales, paid hosting/SaaS, paid remote services, paid product integration, and charges for installation, customization, support or maintenance are prohibited.
 
 If you intend to engage in sales or monetization prohibited by this section, or integrate the Software into paid products or services, contact the copyright holder to discuss a separate license. Free integration and integration for internal use that comply with this license do not require separate permission.
 
@@ -25,7 +25,7 @@ If you intend to engage in sales or monetization prohibited by this section, or 
 
 ## 日本語
 
-YourDesk は[ソース公開・商業販売禁止ライセンス](LICENSE.ja.md)を採用します。企業内利用を含む非販売の利用、変更、無料共有を許可します。ソフトウェア販売、有料ホスティング／SaaS、有料遠隔サービス、有料製品への統合、およびインストール、受託開発、支援、保守の料金徴収は禁止します。
+GenMedia は[ソース公開・商業販売禁止ライセンス](LICENSE.ja.md)を採用します。企業内利用を含む非販売の利用、変更、無料共有を許可します。ソフトウェア販売、有料ホスティング／SaaS、有料遠隔サービス、有料製品への統合、およびインストール、受託開発、支援、保守の料金徴収は禁止します。
 
 本条が禁止する販売や収益化、または有料製品・サービスへの統合を希望する場合は、著作権者と別途ライセンスをご相談ください。本ライセンスを遵守する無料の統合および内部利用のための統合には、別途の許諾は不要です。
 
@@ -37,7 +37,7 @@ YourDesk は[ソース公開・商業販売禁止ライセンス](LICENSE.ja.md)
 
 ## 한국어
 
-YourDesk는 [소스 공개·상업적 판매 금지 라이선스](LICENSE.ko.md)를 적용합니다. 기업 내부 사용을 포함한 비판매 사용, 수정 및 무료 공유를 허용합니다. 소프트웨어 판매, 유료 호스팅/SaaS, 유료 원격 서비스, 유료 제품 통합 및 설치, 맞춤 개발, 지원, 유지보수에 대한 요금 부과는 금지합니다.
+GenMedia는 [소스 공개·상업적 판매 금지 라이선스](LICENSE.ko.md)를 적용합니다. 기업 내부 사용을 포함한 비판매 사용, 수정 및 무료 공유를 허용합니다. 소프트웨어 판매, 유료 호스팅/SaaS, 유료 원격 서비스, 유료 제품 통합 및 설치, 맞춤 개발, 지원, 유지보수에 대한 요금 부과는 금지합니다.
 
 이 조항에서 금지하는 판매나 수익화 또는 유료 제품·서비스에 소프트웨어를 통합하려면 저작권자와 별도 라이선스를 논의하세요. 이 라이선스를 준수하는 무료 통합 및 내부 사용을 위한 통합에는 별도 허가가 필요하지 않습니다.
 

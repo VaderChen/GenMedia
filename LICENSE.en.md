@@ -1,4 +1,4 @@
-# YourDesk Source-Available License — No Commercial Sales
+# GenMedia Source-Available License — No Commercial Sales
 
 Version 1.1  
 Copyright (C) 2026 VaderChen. All rights reserved.
@@ -9,7 +9,7 @@ This is a translation of the complete Traditional Chinese license. In case of in
 
 ## 1. Scope
 
-This license applies to YourDesk source code, executables, documentation and other content expressly accompanied by this license that the copyright holder has the right to provide under it (collectively, the “Software”). It does not apply to third-party components or expand the copyright holder's rights in others' content.
+This license applies to GenMedia source code, executables, documentation and other content expressly accompanied by this license that the copyright holder has the right to provide under it (collectively, the “Software”). It does not apply to third-party components or expand the copyright holder's rights in others' content.
 
 ## 2. Permitted non-sale activities
 
