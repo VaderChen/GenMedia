@@ -263,10 +263,12 @@ public actor SubtitleGenerationRouter: SubtitleGenerating {
             PendingTranslationGroup(items: batch, recoveryDepth: 0)
         ]
         var attemptIndex = 0
+        var pendingIndex = 0
 
-        while !pendingGroups.isEmpty {
+        while pendingIndex < pendingGroups.count {
             try Task.checkCancellation()
-            let group = pendingGroups.removeFirst()
+            let group = pendingGroups[pendingIndex]
+            pendingIndex += 1
             let payload = try String(
                 decoding: JSONEncoder().encode(group.items),
                 as: UTF8.self

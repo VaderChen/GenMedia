@@ -143,7 +143,7 @@ final class OobleckDecoder: Module {
         let strides = configuration.downsamplingRatios.reversed()
         self._inputConvolution.wrappedValue = Conv1d(
             inputChannels: configuration.decoderInputChannels,
-            outputChannels: configuration.decoderChannels * channelMultiples.last!,
+            outputChannels: configuration.decoderChannels * (channelMultiples.last ?? 1),
             kernelSize: 7,
             padding: 3
         )
