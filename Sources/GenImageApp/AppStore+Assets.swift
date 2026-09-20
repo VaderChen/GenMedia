@@ -11,56 +11,19 @@ extension AppStore {
     }
 
     func renameAsset(_ id: UUID, toFileName requestedName: String) throws {
-        guard let index = assets.firstIndex(where: { $0.id == id }),
-              let sourceURL = assets[index].fileURL else {
-            throw AssetRenameError.fileUnavailable
+        try ensureAssetMutationAllowed()
+        assets = try MediaAssetFiles.rename(assetID: id, to: requestedName, in: assets)
+        if let name = assets.first(where: { $0.id == id })?.fileURL?.lastPathComponent {
+            statusMessage = "已將檔案重新命名為「\(name)」。"
         }
-
-        let trimmedName = requestedName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty,
-              trimmedName != ".",
-              trimmedName != "..",
-              URL(fileURLWithPath: trimmedName).lastPathComponent == trimmedName else {
-            throw AssetRenameError.invalidName
-        }
-        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
-            throw AssetRenameError.fileUnavailable
-        }
-
-        let fileName = URL(fileURLWithPath: trimmedName).pathExtension.isEmpty
-            && !sourceURL.pathExtension.isEmpty
-            ? "\(trimmedName).\(sourceURL.pathExtension)"
-            : trimmedName
-        let destinationURL = sourceURL
-            .deletingLastPathComponent()
-            .appendingPathComponent(fileName, isDirectory: false)
-
-        guard destinationURL.standardizedFileURL != sourceURL.standardizedFileURL else { return }
-        guard !FileManager.default.fileExists(atPath: destinationURL.path) else {
-            throw AssetRenameError.destinationExists
-        }
-
-        do {
-            try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
-        } catch {
-            throw AssetRenameError.moveFailed(error.localizedDescription)
-        }
-
-        var asset = assets[index]
-        asset.fileURL = destinationURL
-        if asset.playbackURL?.standardizedFileURL == sourceURL.standardizedFileURL {
-            asset.playbackURL = destinationURL
-        }
-        asset.title = destinationURL.deletingPathExtension().lastPathComponent
-        assets[index] = asset
-        statusMessage = "已將檔案重新命名為「\(destinationURL.lastPathComponent)」。"
     }
 
     func removeAsset(
         _ id: UUID,
         selecting replacementID: UUID?,
         deleteFile: Bool = false
-    ) {
+    ) throws {
+        try ensureAssetMutationAllowed()
         guard let removedAsset = assets.first(where: { $0.id == id }) else { return }
 
         operations = operations.compactMap { operation in
@@ -98,12 +61,21 @@ extension AppStore {
             comparisonAssetID = nil
         }
 
-        let compatibilityRemovalError = removeCompatibilityFile(at: removedAsset.playbackURL)
-        let sourceRemovalError = deleteFile ? removeAssetFile(at: removedAsset.fileURL) : nil
+        let compatibilityRemovalError = removeCompatibilityFiles(for: [removedAsset])
+        var sourceRemovalError: Error?
+        var sourceRetained = false
+        if deleteFile, let source = removedAsset.fileURL {
+            do {
+                sourceRetained = try MediaAssetFiles.remove(at: source,
+                    preserving: MediaAssetFiles.references(in: assets)) == .retained
+            } catch { sourceRemovalError = error }
+        }
         if let sourceRemovalError {
             statusMessage = "已從工作區移除「\(removedAsset.title)」，但無法刪除檔案：\(sourceRemovalError.localizedDescription)"
         } else if let compatibilityRemovalError {
             statusMessage = "已從工作區移除「\(removedAsset.title)」，但無法清除媒體相容快取：\(compatibilityRemovalError.localizedDescription)"
+        } else if sourceRetained {
+            statusMessage = "已從工作區移除「\(removedAsset.title)」；檔案仍由其他資產使用，已保留。"
         } else if deleteFile {
             statusMessage = "已從工作區移除並刪除「\(removedAsset.title)」。"
         } else {
@@ -111,12 +83,11 @@ extension AppStore {
         }
     }
 
-    func closeWorkspaceProject(assetIDs: [UUID]) {
+    func closeWorkspaceProject(assetIDs: [UUID]) throws {
+        try ensureAssetMutationAllowed()
         let closedAssetIDs = Set(assetIDs).intersection(Set(assets.map(\.id)))
         guard !closedAssetIDs.isEmpty else { return }
-        let compatibilityURLs = assets.compactMap { asset in
-            closedAssetIDs.contains(asset.id) ? asset.playbackURL : nil
-        }
+        let closedAssets = assets.filter { closedAssetIDs.contains($0.id) }
 
         operations.removeAll { operation in
             operation.inputAssetID.map(closedAssetIDs.contains) == true
@@ -133,7 +104,7 @@ extension AppStore {
         if comparisonAssetID.map(closedAssetIDs.contains) == true {
             comparisonAssetID = nil
         }
-        compatibilityURLs.forEach { _ = removeCompatibilityFile(at: $0) }
+        _ = removeCompatibilityFiles(for: closedAssets)
         statusMessage = "已關閉生成專案分頁；\(closedAssetIDs.count) 個結果已從工作區移除，輸出檔案仍保留於磁碟。"
     }
 
@@ -198,48 +169,25 @@ extension AppStore {
         return asset.id
     }
 
-    private func removeCompatibilityFile(at fileURL: URL?) -> Error? {
-        guard let fileURL else { return nil }
-        let fileManager = FileManager.default
-        guard ApplicationSupport.managesFile(at: fileURL, fileManager: fileManager) else {
-            return CocoaError(.fileWriteNoPermission)
+    /// Only unreferenced playback proxies inside MediaCache may be removed
+    /// automatically. Sources remain protected even after their asset is closed.
+    @discardableResult
+    func removeCompatibilityFiles(for removedAssets: [MediaAsset]) -> Error? {
+        let references = MediaAssetFiles.references(in: assets) + removedAssets.compactMap(\.fileURL)
+        var firstError: Error?
+        for url in Set(removedAssets.compactMap(\.playbackURL)) {
+            do {
+                try MediaAssetFiles.remove(at: url, preserving: references,
+                    within: ApplicationSupport.directory(.mediaCache))
+            } catch { if firstError == nil { firstError = error } }
         }
-        return removeAssetFile(at: fileURL)
+        return firstError
     }
 
-    private func removeAssetFile(at fileURL: URL?) -> Error? {
-        guard let fileURL else { return nil }
-        let fileManager = FileManager.default
-        let candidate = fileURL.standardizedFileURL
-
-        guard fileManager.fileExists(atPath: candidate.path) else { return nil }
-        guard let values = try? candidate.resourceValues(forKeys: [.isDirectoryKey]),
-              values.isDirectory != true else { return CocoaError(.fileWriteInvalidFileName) }
-        do {
-            try fileManager.removeItem(at: candidate)
-            return nil
-        } catch {
-            return error
-        }
-    }
-}
-
-private enum AssetRenameError: LocalizedError {
-    case fileUnavailable
-    case invalidName
-    case destinationExists
-    case moveFailed(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .fileUnavailable:
-            "找不到可重新命名的媒體檔案。"
-        case .invalidName:
-            "檔案名稱不可為空白，也不能包含路徑。"
-        case .destinationExists:
-            "相同檔名的檔案已存在，請使用其他名稱。"
-        case let .moveFailed(message):
-            "無法重新命名檔案：\(message)"
+    private func ensureAssetMutationAllowed() throws {
+        guard !jobs.contains(where: { [.queued, .running, .cancelling].contains($0.state) }) else {
+            throw NSError(domain: "GenImage.AssetMutation", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "任務執行或取消中，完成後才能移除或重新命名媒體。"])
         }
     }
 }

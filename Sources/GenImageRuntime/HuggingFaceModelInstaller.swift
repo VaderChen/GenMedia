@@ -262,17 +262,15 @@ public actor HuggingFaceModelInstaller {
                 rootURL: rootURL,
                 excluding: destination
             ) {
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    try FileManager.default.removeItem(at: fileURL)
-                }
                 do {
-                    try FileManager.default.linkItem(at: reusableURL, to: fileURL)
+                    try ModelFileReplacement.replace(at: fileURL) { staging in
+                        try FileManager.default.linkItem(at: reusableURL, to: staging)
+                    }
                     progressTracker.markCompleted(file.relativePath, bytes: file.size)
                     continue
                 } catch {
-                    if FileManager.default.fileExists(atPath: fileURL.path) {
-                        try? FileManager.default.removeItem(at: fileURL)
-                    }
+                    // Unsupported hard links fall back to downloading. Keep the
+                    // previous destination until a complete replacement is ready.
                 }
             }
             pendingDownloads.append(file)
@@ -315,6 +313,7 @@ public actor HuggingFaceModelInstaller {
             }
         }
 
+        try Task.checkCancellation()
         progressTracker.emit()
 
         try Self.materializeQuantizationManifest(at: destination)
@@ -336,6 +335,7 @@ public actor HuggingFaceModelInstaller {
             }
         )
         let manifestData = try JSONEncoder.genImageManifest.encode(manifest)
+        try Task.checkCancellation()
         try manifestData.write(
             to: destination.appendingPathComponent("genimage-model.json"),
             options: .atomic
@@ -532,6 +532,7 @@ public actor HuggingFaceModelInstaller {
     }
 
     public nonisolated static func verify(modelID: String, rootURL: URL) throws -> URL {
+        try Task.checkCancellation()
         guard let plan = plan(for: modelID) else {
             throw ModelInstallerError.unsupportedModel(modelID)
         }
@@ -545,6 +546,7 @@ public actor HuggingFaceModelInstaller {
             throw ModelInstallerError.invalidManifest(manifestURL)
         }
         for file in manifest.files {
+            try Task.checkCancellation()
             let url = destination.appendingPathComponent(file.relativePath)
             let actual = fileSize(at: url)
             guard actual == file.size else {
@@ -555,7 +557,9 @@ public actor HuggingFaceModelInstaller {
                 )
             }
         }
+        try Task.checkCancellation()
         try validateRequiredRuntimeFiles(for: plan, at: destination)
+        try Task.checkCancellation()
         try validateGGUFWeights(modelID: modelID, at: destination)
         let runtimeURL = runtimeURL(for: plan, destination: destination)
         guard FileManager.default.fileExists(atPath: runtimeURL.path) else {
@@ -565,6 +569,7 @@ public actor HuggingFaceModelInstaller {
     }
 
     public nonisolated static func remove(modelID: String, rootURL: URL) throws {
+        try Task.checkCancellation()
         guard let destination = installationDirectory(modelID: modelID, rootURL: rootURL) else {
             throw ModelInstallerError.unsupportedModel(modelID)
         }
@@ -2088,154 +2093,6 @@ private final class DownloadProgressTracker: @unchecked Sendable {
     }
 }
 
-private final class FileDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    private let destination: URL
-    private let resumeDataURL: URL
-    private let expectedBytes: Int64
-    private let progress: @Sendable (Int64, Int64) -> Void
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Void, Error>?
-    private var session: URLSession?
-    private var task: URLSessionDownloadTask?
-    private var movedFile = false
-    private var completed = false
-
-    init(
-        destination: URL,
-        expectedBytes: Int64,
-        progress: @escaping @Sendable (Int64, Int64) -> Void
-    ) {
-        self.destination = destination
-        resumeDataURL = destination.appendingPathExtension("resume")
-        self.expectedBytes = expectedBytes
-        self.progress = progress
-    }
-
-    func start(request: URLRequest) async throws {
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                lock.lock()
-                self.continuation = continuation
-                let configuration = URLSessionConfiguration.default
-                configuration.timeoutIntervalForRequest = 60 * 60 * 24
-                configuration.timeoutIntervalForResource = 60 * 60 * 24
-                configuration.waitsForConnectivity = false
-                configuration.httpMaximumConnectionsPerHost = 8
-                configuration.httpShouldUsePipelining = true
-                configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-                configuration.allowsExpensiveNetworkAccess = true
-                configuration.allowsConstrainedNetworkAccess = true
-                let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-                self.session = session
-                let task: URLSessionDownloadTask
-                if let resumeData = try? Data(contentsOf: resumeDataURL), !resumeData.isEmpty {
-                    task = session.downloadTask(withResumeData: resumeData)
-                } else {
-                    task = session.downloadTask(with: request)
-                }
-                self.task = task
-                lock.unlock()
-                task.resume()
-            }
-        } onCancel: {
-            self.cancel()
-        }
-    }
-
-    func cancel() {
-        lock.lock()
-        let task = task
-        lock.unlock()
-        task?.cancel { [resumeDataURL] resumeData in
-            guard let resumeData, !resumeData.isEmpty else { return }
-            try? resumeData.write(to: resumeDataURL, options: .atomic)
-        }
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didWriteData bytesWritten: Int64,
-        totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64
-    ) {
-        progress(totalBytesWritten, totalBytesExpectedToWrite)
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didFinishDownloadingTo location: URL
-    ) {
-        do {
-            let fileManager = FileManager.default
-            if let response = downloadTask.response as? HTTPURLResponse,
-               !(200..<300).contains(response.statusCode) {
-                let body = try? Data(contentsOf: location)
-                let message = body
-                    .flatMap { String(data: $0.prefix(2_048), encoding: .utf8) } ?? ""
-                if response.statusCode == 401,
-                   let url = downloadTask.originalRequest?.url,
-                   url.host?.localizedCaseInsensitiveContains("civitai.com") == true {
-                    throw ModelInstallerError.authenticationRequired(url, message)
-                }
-                throw ModelInstallerError.httpStatus(response.statusCode, message)
-            }
-            let actual = Int64(
-                (try location.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? -1
-            )
-            guard actual == expectedBytes else {
-                throw ModelInstallerError.sizeMismatch(
-                    path: destination.lastPathComponent,
-                    expected: expectedBytes,
-                    actual: actual
-                )
-            }
-            if fileManager.fileExists(atPath: destination.path) {
-                try fileManager.removeItem(at: destination)
-            }
-            try fileManager.moveItem(at: location, to: destination)
-            try? fileManager.removeItem(at: resumeDataURL)
-            lock.lock()
-            movedFile = true
-            lock.unlock()
-        } catch {
-            finish(.failure(error))
-        }
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        didCompleteWithError error: (any Error)?
-    ) {
-        if let error {
-            finish(.failure(error))
-            return
-        }
-        lock.lock()
-        let movedFile = movedFile
-        lock.unlock()
-        finish(movedFile ? .success(()) : .failure(ModelInstallerError.invalidResponse))
-    }
-
-    private func finish(_ result: Result<Void, Error>) {
-        lock.lock()
-        guard !completed else {
-            lock.unlock()
-            return
-        }
-        completed = true
-        let continuation = continuation
-        self.continuation = nil
-        let session = session
-        self.session = nil
-        task = nil
-        lock.unlock()
-        session?.finishTasksAndInvalidate()
-        continuation?.resume(with: result)
-    }
-}
 
 public enum ModelInstallerError: LocalizedError, Sendable {
     case unsupportedModel(String)

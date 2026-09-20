@@ -87,13 +87,17 @@ extension AppStore {
         }
     }
 
+    var visibleProfiles: [InferenceProfile] {
+        profiles.filter { ProfileVisibility.isVisible($0, models: models) }
+    }
+
     func profiles(for capability: ModelCapability) -> [InferenceProfile] {
-        profiles.filter { $0.capability == capability }
+        visibleProfiles.filter { $0.capability == capability }
     }
 
     func activeProfile(for capability: ModelCapability) -> InferenceProfile? {
         guard let id = activeProfileIDs[capability] else { return nil }
-        return profiles.first { $0.id == id }
+        return visibleProfiles.first { $0.id == id }
     }
 
     var preferredVideoProfile: InferenceProfile? {

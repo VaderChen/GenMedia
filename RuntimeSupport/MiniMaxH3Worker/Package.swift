@@ -13,7 +13,7 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(path: "../.."),
+        .package(name: "GenImage", path: "../.."),
         .package(
             url: "https://github.com/ml-explore/mlx-swift.git",
             exact: "0.31.6"
@@ -27,7 +27,7 @@ let package = Package(
         .target(
             name: "MiniMaxH3SwiftRuntime",
             dependencies: [
-                .product(name: "GenImageGGUF", package: "GenMedia"),
+                .product(name: "GenImageGGUF", package: "GenImage"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXRandom", package: "mlx-swift"),

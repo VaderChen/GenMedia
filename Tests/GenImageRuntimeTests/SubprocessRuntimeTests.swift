@@ -101,6 +101,21 @@ struct SubprocessRuntimeTests {
         #expect(Date().timeIntervalSince(startedAt) < 5)
     }
 
+    @Test func cancellationBeforeLaunchDoesNotAttemptToRunTheExecutable() async throws {
+        let logURL = temporaryLogURL()
+        defer { try? FileManager.default.removeItem(at: logURL) }
+        let log = try RuntimeLog(at: logURL)
+        defer { log.close() }
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await RuntimeProcess.run(
+                executable: URL(fileURLWithPath: "/does-not-exist/genimage-worker"),
+                arguments: [], log: log
+            )
+        }
+        await #expect(throws: CancellationError.self) { try await task.value }
+    }
+
     @Test func logActivityDistinguishesGrowthFromIdleness() async throws {
         let logURL = temporaryLogURL()
         defer { try? FileManager.default.removeItem(at: logURL) }

@@ -123,16 +123,44 @@ public enum MiniMaxH3VideoWriter {
         audio: Audio? = nil,
         progress: ((Double) -> Void)? = nil
     ) throws {
-        guard let first = images.first else {
-            throw WriterError.writerSetupFailed("沒有影格")
+        guard let first = images.first else { throw WriterError.writerSetupFailed("沒有影格") }
+        try writeMP4(frameCount: images.count, width: first.width, height: first.height,
+            imageAt: { images[$0] }, to: url, frameRate: frameRate, audio: audio, progress: progress)
+    }
+
+    /// Production path: only one frame's CPU pixels and CGImage are live at a
+    /// time. The full-array conversion remains available for diagnostic PNGs.
+    public static func writeMP4(
+        pixels: MLXArray,
+        to url: URL,
+        frameRate: Int = 24,
+        audio: Audio? = nil,
+        progress: ((Double) -> Void)? = nil
+    ) throws {
+        guard pixels.ndim == 5, pixels.shape[0] == 1, pixels.shape[1] == 3,
+              pixels.shape[2] > 0, pixels.shape[3] > 0, pixels.shape[4] > 0 else {
+            throw WriterError.unexpectedShape(pixels.shape)
         }
+        try writeMP4(frameCount: pixels.shape[2], width: pixels.shape[4], height: pixels.shape[3],
+            imageAt: { index in
+                try images(from: pixels[0..., 0..., index..<(index + 1), 0..., 0...])[0]
+            }, to: url, frameRate: frameRate, audio: audio, progress: progress)
+    }
+
+    private static func writeMP4(
+        frameCount: Int, width: Int, height: Int,
+        imageAt: (Int) throws -> CGImage,
+        to url: URL, frameRate: Int, audio: Audio?, progress: ((Double) -> Void)?
+    ) throws {
+        guard frameRate > 0 else { throw WriterError.writerSetupFailed("FPS 必須大於零") }
         try? FileManager.default.removeItem(at: url)
 
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        defer { if writer.status == .writing { writer.cancelWriting() } }
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: first.width,
-            AVVideoHeightKey: first.height
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = false
@@ -140,9 +168,9 @@ public enum MiniMaxH3VideoWriter {
             assetWriterInput: input,
             sourcePixelBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey as String:
-                    Int(kCVPixelFormatType_32ARGB),
-                kCVPixelBufferWidthKey as String: first.width,
-                kCVPixelBufferHeightKey as String: first.height
+                    Int(kCVPixelFormatType_32BGRA),
+                kCVPixelBufferWidthKey as String: width,
+                kCVPixelBufferHeightKey as String: height
             ]
         )
         guard writer.canAdd(input) else {
@@ -155,7 +183,7 @@ public enum MiniMaxH3VideoWriter {
         var audioChannels = 0
         if let audio {
             let prepared = try preparedAudio(
-                audio, frameCount: images.count, frameRate: frameRate
+                audio, frameCount: frameCount, frameRate: frameRate
             )
             audioSamples = prepared.interleaved
             audioChannels = prepared.channels
@@ -196,40 +224,44 @@ public enum MiniMaxH3VideoWriter {
             audioInput.markAsFinished()
         }
 
-        for (index, image) in images.enumerated() {
-            guard let pool = adaptor.pixelBufferPool else {
-                throw WriterError.writerSetupFailed("pixelBufferPool 不可用")
-            }
-            var buffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
-            guard let pixelBuffer = buffer else {
-                throw WriterError.writerSetupFailed("無法建立 pixel buffer")
-            }
-            CVPixelBufferLockBaseAddress(pixelBuffer, [])
-            if let context = CGContext(
-                data: CVPixelBufferGetBaseAddress(pixelBuffer),
-                width: image.width, height: image.height,
-                bitsPerComponent: 8,
-                bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
-                    | CGBitmapInfo.byteOrder32Little.rawValue
-            ) {
-                context.draw(
-                    image,
-                    in: CGRect(x: 0, y: 0, width: image.width, height: image.height)
-                )
-            }
-            CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
-
+        for index in 0..<frameCount {
             try waitUntilReady(input, writer: writer)
-            let time = CMTime(value: CMTimeValue(index), timescale: CMTimeScale(frameRate))
-            guard adaptor.append(pixelBuffer, withPresentationTime: time) else {
-                throw WriterError.writerSetupFailed(
-                    writer.error?.localizedDescription ?? "video append"
-                )
+            try autoreleasepool {
+                let image = try imageAt(index)
+                guard let pool = adaptor.pixelBufferPool else {
+                    throw WriterError.writerSetupFailed("pixelBufferPool 不可用")
+                }
+                var buffer: CVPixelBuffer?
+                CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
+                guard let pixelBuffer = buffer else {
+                    throw WriterError.writerSetupFailed("無法建立 pixel buffer")
+                }
+                CVPixelBufferLockBaseAddress(pixelBuffer, [])
+                guard let context = CGContext(
+                    data: CVPixelBufferGetBaseAddress(pixelBuffer),
+                    width: image.width, height: image.height,
+                    bitsPerComponent: 8,
+                    bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
+                        | CGBitmapInfo.byteOrder32Little.rawValue
+                ) else {
+                    CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
+                    throw WriterError.writerSetupFailed("無法建立影格繪圖 context")
+                }
+                // Little-endian skip-first CGContext stores BGRA bytes.
+                context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+                CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
+
+                try waitUntilReady(input, writer: writer)
+                let time = CMTime(value: CMTimeValue(index), timescale: CMTimeScale(frameRate))
+                guard adaptor.append(pixelBuffer, withPresentationTime: time) else {
+                    throw WriterError.writerSetupFailed(
+                        writer.error?.localizedDescription ?? "video append"
+                    )
+                }
             }
-            progress?(Double(index + 1) / Double(images.count))
+            progress?(Double(index + 1) / Double(frameCount))
         }
 
         input.markAsFinished()

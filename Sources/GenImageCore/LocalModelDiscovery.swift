@@ -20,30 +20,42 @@ public enum LocalModelDiscovery {
     public static func discover(at root: URL, fileManager: FileManager = .default) -> DiscoveredModelCatalog {
         var result = DiscoveredModelCatalog()
 
-        discoverZImage(root: root, fileManager: fileManager, result: &result)
-        discoverCaptioner(root: root, fileManager: fileManager, result: &result)
-        discoverNSFWCaptioner(root: root, fileManager: fileManager, result: &result)
-        discoverManagedMultimodalModels(root: root, fileManager: fileManager, result: &result)
-        discoverQwenImageEdit(root: root, fileManager: fileManager, result: &result)
-        discoverLTX23(root: root, fileManager: fileManager, result: &result)
-        discoverLTX23MLXQ4(root: root, fileManager: fileManager, result: &result)
-        discoverLTX23GGUFDistilledQ3KM(root: root, fileManager: fileManager, result: &result)
-        discoverLTXVideo096GGUF(root: root, fileManager: fileManager, result: &result)
-        discoverLTXCompanionModels(root: root, fileManager: fileManager, result: &result)
-        discoverMiniMaxH3MLX(root: root, fileManager: fileManager, result: &result)
-        discoverMiniMaxH3GGUF(root: root, fileManager: fileManager, result: &result)
-        discoverACEStep15(root: root, fileManager: fileManager, result: &result)
-        discoverMiniMaxMusic3MLX(root: root, fileManager: fileManager, result: &result)
-        discoverMiniMaxMusic3MLX4Bit(root: root, fileManager: fileManager, result: &result)
-        discoverMiniMaxMusic3GGUF(root: root, fileManager: fileManager, result: &result)
-        discoverMiniMaxMusic3Composer(root: root, fileManager: fileManager, result: &result)
-        discoverWhisperMultilingual(root: root, fileManager: fileManager, result: &result)
-        discoverParaformerChinese(root: root, fileManager: fileManager, result: &result)
-        discoverParakeetJapanese(root: root, fileManager: fileManager, result: &result)
-        discoverUpscalers(root: root, fileManager: fileManager, result: &result)
-        discoverLoRAs(root: root, fileManager: fileManager, result: &result)
+        let scanners: [(URL, FileManager, inout DiscoveredModelCatalog) -> Void] = [
+            discoverZImage,
+            discoverCaptioner,
+            discoverNSFWCaptioner,
+            discoverManagedMultimodalModels,
+            discoverQwenImageEdit,
+            discoverLTX23,
+            discoverLTX23MLXQ4,
+            discoverLTX23GGUFDistilledQ3KM,
+            discoverLTXVideo096GGUF,
+            discoverLTXCompanionModels,
+            discoverMiniMaxH3MLX,
+            discoverMiniMaxH3GGUF,
+            discoverACEStep15,
+            discoverMiniMaxMusic3MLX,
+            discoverMiniMaxMusic3MLX4Bit,
+            discoverMiniMaxMusic3GGUF,
+            discoverMiniMaxMusic3Composer,
+            discoverWhisperMultilingual,
+            discoverParaformerChinese,
+            discoverParakeetJapanese,
+            discoverUpscalers,
+            discoverLoRAs,
+        ]
+        for scan in scanners {
+            guard !Task.isCancelled else { break }
+            scan(root, fileManager, &result)
+        }
 
         return result
+    }
+
+    public static func discoverLoRAs(at root: URL, fileManager: FileManager = .default) -> [LoRADescriptor] {
+        var result = DiscoveredModelCatalog()
+        discoverLoRAs(root: root, fileManager: fileManager, result: &result)
+        return result.loras
     }
 
     private struct ManagedModelManifest: Decodable {
@@ -1443,6 +1455,7 @@ public enum LocalModelDiscovery {
         var discovered: [String: LoRADescriptor] = [:]
         var managedModels: [String: ModelDescriptor] = [:]
         for case let fileURL as URL in enumerator {
+            guard !Task.isCancelled else { break }
             guard fileURL.pathExtension.lowercased() == "safetensors",
                   fileURL.deletingLastPathComponent().pathComponents.contains(where: {
                       $0.localizedCaseInsensitiveContains("lora")
@@ -2075,6 +2088,7 @@ public enum LocalModelDiscovery {
 
         var totalBytes: Int64 = 0
         for case let fileURL as URL in enumerator {
+            guard !Task.isCancelled else { break }
             guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
                   values.isRegularFile == true else { continue }
             totalBytes += Int64(values.fileSize ?? 0)

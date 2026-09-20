@@ -26,6 +26,8 @@ stdio server 自己持有 `InferenceServices` 並在 `GenImageMCP` 行程內完�
 http://127.0.0.1:12181/mcp
 ```
 
+HTTP 端點僅供原生本機客戶端使用：綁定 `127.0.0.1`，`Host` 必須是 `127.0.0.1:<port>` 或 `localhost:<port>`，POST 必須指定 `Content-Type: application/json`（可附 charset）。所有帶 `Origin` 的請求都回覆 403，包括 `null` 與本機來源；不接受瀏覽器預檢，也不回傳 CORS 標頭。不帶 Origin 的 OPTIONS 回覆 405，錯誤 Content-Type 回覆 415。本機原生程式仍屬信任邊界，這些檢查不是客戶端身分驗證；請勿透過代理對外公開此端點。
+
 此端點只綁定本機並接受 HTTP `POST` JSON-RPC；關閉 Switch 會立即停止監聽。HTTP transport 直接呼叫與 stdio 相同的 `MCPServer` 工具核心，不會啟動 stdio 子行程，也不是轉送到另一個外部服務。HTTP 模式屬於 App 內嵌服務，因此使用時 GenMedia.app 必須保持執行；需要 headless 整合時請使用上方的獨立 stdio 執行檔。
 
 ## MCP 方法

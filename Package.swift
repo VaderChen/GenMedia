@@ -113,6 +113,10 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "GenImageAppTests",
+            dependencies: ["GenImageApp", "GenImageCore"]
+        ),
+        .testTarget(
             name: "GenImageCoreTests",
             dependencies: ["GenImageCore"]
         ),

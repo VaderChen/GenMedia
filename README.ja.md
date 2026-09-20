@@ -12,13 +12,24 @@ GenMedia は **Apple Silicon をネイティブサポート**するローカル 
 - 専用の設定画面で繁体字中国語、英語、日本語、韓国語、および永続化可能な 6 種類のカラーテーマを利用できます。
 - 設定画面のスイッチで localhost 専用 MCP HTTP API を起動でき、App を起動していない場合も独立した JSON-RPC 2.0 stdio サーバーを利用できます。
 
+## 最近の修正と検証（2026-09-21）
+
+モデルの検出、検証、削除はバックグラウンドで実行します。同じモデルの一時停止、再開、修復、削除は先行処理の後片付けを待ちます。出力先を変更すると新しい処理から反映され、実行中の処理は開始時の出力先を維持します。
+
+別のアセットやワークスペースが参照するファイルは保持し、名前変更は一致するすべての参照に反映します。自動削除は参照されていない MediaCache プロキシに限定します。ワークスペースを読み込めない場合は索引とキャッシュを保持し、そのセッションの自動保存を停止します。
+
+LoRA 変換は重みを 1 MiB 単位でコピーします。Worker のログは差分読み取りし、正常終了直前の大量ログも処理します。ルートパッケージ全体のビルドと **141 件の Swift テスト**が成功しました。合成 LoRA 測定と検証範囲は[性能記録](docs/PERFORMANCE_CHANGES.md)（繁体字中国語）を参照してください。すべてのモデルやハードウェアでの動作確認を意味するものではありません。
+
+- [検証手順と結果](docs/VALIDATION.md)（繁体字中国語）
+- [詳細な検査・修正報告](docs/PROJECT_REVIEW_2026-09-20.md)（繁体字中国語）
+
 ## プレビュー
 
 ![GenMedia メディア生成インターフェース](images/cap001.jpg)
 
 ## 実行
 
-要件：macOS 14 以降、Apple Silicon、Xcode 16 以降。
+要件：Apple Silicon。パッケージの最低デプロイ先は macOS 14 です。ビルドには固定された依存パッケージに対応する Xcode／Swift と Metal Toolchain が必要です。今回の検証は Swift 6.4 と macOS 27 SDK を使用し、旧版ツールチェーンや OS は再検証していません。
 
 ```bash
 ./build.command
@@ -43,15 +54,14 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ### FFmpeg ビルドのトラブルシューティング
 
 - 初回の `./build.command` は FFmpeg と LAME のソース取得にネットワーク接続が必要です。以後はキャッシュしたソースと `third_party/ffmpeg` を再利用し、不足または不完全な場合だけ自動で再構築します。
-- Homebrew の `pkg-config` は不要です。LAME の構成確認専用 fallback を空白のない一時パスから実行するため、プロジェクトパスに空白が含まれていてもビルドできます。
-- ExFAT などの外部ファイルシステムが作成する `._*` AppleDouble sidecar は dylib 処理前に削除され、Mach-O と誤認されません。
+- Homebrew の `pkg-config` は不要です。LAME の構成確認には `scripts/pkg-config-fallback.sh` を直接使用でき、FFmpeg のソースは `.build/ffmpeg-source` に保存します。
 - 中断または失敗時は、以前の使用可能な FFmpeg を復元します。ネットワークまたは Xcode の問題を解消して `./build.command` を再実行してください。出力先は `GENMEDIA_FFMPEG_ROOT` で変更できます。
 
 ### 動画 Runtime
 
 動画生成はアプリに同梱された `GenImageLTXVideoWorker` Swift サブプロセスで実行します。Swift アプリがプロファイル、パラメータ検証、ジョブキュー、キャンセル、進捗、アセット、動画再生を管理し、追加の動画 Runtime は必要ありません。
 
-モデルセンターの `dgrauet/ltx-2.3-mlx-q4` は、ネイティブ MLX INT4 Transformer、Video／Audio VAE、vocoder、空間アップスケーラーに加えて、`google/gemma-3-12b-it-qat-q4_0-unquantized` の Gemma 3 12B テキストエンコーダーもダウンロードします。全体で約 42 GiB の空き容量が必要で、48 GB 以上のメモリを推奨します。
+モデルセンターの `dgrauet/ltx-2.3-mlx-q4` は、ネイティブ MLX INT4 Transformer、Video／Audio VAE、vocoder、空間アップスケーラーに加えて、`Lightricks/gemma-3-12b-it-qat-q4_0-unquantized` の Gemma 3 12B テキストエンコーダーもダウンロードします。全体で約 42 GiB の空き容量が必要で、48 GB 以上のメモリを推奨します。
 
 開発ビルドでは `GENIMAGE_LTX_WORKER` で Worker を指定できます。リリース版は Bundle の `Contents/Helpers/GenImageLTXVideoWorker` を使用します。`GENIMAGE_LTX_GEMMA_MODEL` を設定すると Gemma ディレクトリを上書きでき、未設定時は LTX モデル内の `gemma-3-12b` を使用します。
 
@@ -106,10 +116,11 @@ Qwen3-VL、Qwen3.5、Qwen3.8 はマルチモーダルモデルのため、モデ
 - キャンセル時はまず `cancelling` になり、Runtime Task の終了後に `cancelled` へ移行して生成・メモリ関連の操作を再び有効にします。ETA は進捗 35% かつ開始 15 秒後から数値表示し、安定したサンプルが不足する場合は全体経過時間を使用します。
 - Z-Image MLX 互換レイヤーは `quantize_config.json`、affine／mxfp4、packed pad token、FP16 から BF16 への読み込みを処理します。andrevp Z-Image Turbo MLX 4-bit は実際の画像生成で検証済みです。
 - 依存パッケージへのソース修正は `Patches/manifest.txt` に列挙し、Swift Package 解決後に `scripts/apply-runtime-patches.command` が適用します（`build.command` から自動実行）。依存パッケージのバージョンが manifest と異なる、修正ファイルが無い、適用に失敗した、適用後に想定した目印が見つからない場合はビルドを中止し、未修正のソースのまま進むことはありません。`scripts/apply-runtime-patches.command --verify` で確認のみ実行できます。
-- テキストから画像の完了後もモデル重みと暖機 buffer を保持します。5 分間アイドルになると再利用可能な MLX 一時 buffer だけを整理し、モデルはアンロードしません。側面のメモリ解放、モデル切り替え、またはプロファイル切り替え時の RAM 90% 超過保護でのみ不要な Runtime を解放します。
-- ダウンロードでは配布元のファイル名を保持し、生成出力は `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm`、`Music-YYYYMMDD-HHmm` を使用します。同じ分に重複する場合は連番を追加します。出力ディレクトリは設定画面で変更できます。
+- 必要なモデルの推奨メモリが 64 GB を超える Profile は一時的に非表示にします。64 GB は選択可能で、既存の Profile とモデルファイルは保持します。カタログの推奨値による判定であり、実際の最大メモリ使用量を保証するものではありません。
+- Z-Image は常駐 Worker でモデルと LoRA を再利用し、連続生成時の再読み込みを減らします。5 分間のアイドル、メモリ解放操作、またはシステムのメモリ圧迫通知でアンロードします。メモリ圧迫時に実行中の処理は完了後に Worker を解放し、キャンセルや失敗時は終了して次回に再起動します。
+- ダウンロードでは配布元のファイル名を保持します。生成出力は `Image-YYYYMMDD-HHmm-UUID`、`Video-YYYYMMDD-HHmm-UUID`、`Music-YYYYMMDD-HHmm-UUID` とし、バッチや同一分の重複を防ぎます。出力先は設定で変更でき、字幕は通常、元ファイルと同じ基本名で元のディレクトリに保存します。
 - 開いている各ワークスペースタブを生成プロジェクトとして扱います。アセットと lineage は Application Support にアトミック保存され、アプリ再起動後も復元されます。タブを明示的に閉じた場合のみプロジェクトのワークスペース索引を削除し、出力済みメディアはディスクに保持します。
-- アプリのデータはすべて `~/Library/Application Support/GenImage/`（`Models`、`Runtime`、`Workspace`、`Pasted`、`Generated`）に置き、`GenImageCore/ApplicationSupport.swift` が唯一の定義元です。ワークスペース索引は以前 `GenMedia/` に書かれており、起動時に現在のルートへ引き取ります。同名の項目は既存のものを残し、上書きも統合もしません。既存モデルと旧版 Runtime データとの互換性を保つため、アプリ名に合わせた `GenMedia` へは改名せず `GenImage` のままにしています。
+- アプリの管理データは既定で `~/Library/Application Support/GenImage/`（`Models`、`Runtime`、`Workspace`、`Pasted`、`Generated`）に置き、`GenImageCore/ApplicationSupport.swift` が唯一の定義元です。ワークスペース索引は以前 `GenMedia/` に書かれており、起動時に現在のルートへ引き取ります。同名の項目は既存のものを残し、上書きも統合もしません。既存モデルと旧版 Runtime データとの互換性を保つため、アプリ名に合わせた `GenMedia` へは改名せず `GenImage` のままにしています。 モデルと生成出力は設定で別の保存先を指定でき、読み込んだユーザーファイルは元の場所に保持します。
 - プロンプトと歌詞の編集中は、カーソル、選択範囲、IME の変換状態をネイティブ状態更新から保護します。生成タイプ、プロンプト、歌詞、出力設定のタブは作成パネルだけを再描画します。避けられない全体更新でも、再生中の音声・動画ノードを再利用して再生を中断しません。
 - ワークスペースのフィルムストリップには画像読み込みボタンがあり、Finder から PNG、JPEG、WebP、GIF、TIFF、HEIC、HEIF を 1 枚以上ドロップできます。音楽生成中はメディアソースの混在を防ぐため画像読み込みを無効にします。画像生成で入力画像を選択するとメインボタンは画像から画像のプロファイルを使用し、未選択時はテキストから画像のプロファイルを使用します。
 - 画像と動画の比率項目はドロップダウンになっています。画像から画像では入力画像を選択した場合だけ「元の解像度」を表示し、入力画像のサイズを Runtime が扱える 16 の倍数へ変換します。
@@ -244,8 +255,9 @@ scripts/
 
 ## ライセンス
 
-本プロジェクトは GPLv3 と商用ライセンスのデュアルライセンス方式を採用しています。
+本プロジェクトには [GenMedia ソース公開・商業販売禁止ライセンス v1.1](LICENSE.ja.md) が適用されます。
 
-- オープンソースでの利用は [GNU General Public License v3.0](LICENSE) に基づきます。
-- クローズドソースへの統合、プロプライエタリ製品の配布、個別の商用条件など、GPLv3 に準拠できない、または準拠を希望しない場合は、著作権者に連絡して別途商用ライセンスを取得してください。
-- 内蔵 FFmpeg と LAME はそれぞれの LGPL 条項に従います。ライセンス本文、正確なソース版、ビルド情報は App の `Contents/Resources/Licenses/` に収録されます。
+- ライセンス条件に従い、非販売の利用、研究、改変、無料共有、および組織内部での自己利用が許可されます。
+- 販売、有料ホスティング／SaaS、有料サポート、有料製品への組み込みなど、制限対象の収益化には別途書面での許諾が必要です。[商業販売禁止ポリシー](COMMERCIAL-LICENSE.md)を参照してください。
+- 独自のソース公開ライセンスであり、OSI のオープンソース定義への適合は主張しません。内容に相違がある場合は繁体字中国語のライセンス全文が優先します。
+- 第三者のライブラリとモデルには各自のライセンスが適用されます。内蔵 FFmpeg／LAME の LGPL 本文、ソース版、ビルド情報は `Contents/Resources/Licenses/` に収録されます。

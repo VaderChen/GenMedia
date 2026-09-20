@@ -2,7 +2,8 @@ import Foundation
 import GenImageCore
 
 public actor SubtitleGenerationRouter: SubtitleGenerating {
-    private var outputDirectory: URL
+    private nonisolated let outputLocation: OutputDirectoryStorage
+    private var outputDirectory: URL { outputLocation.url }
     private let adapters: [any MediaTranscribing]
     private let translator: any TextGenerating
 
@@ -15,19 +16,20 @@ public actor SubtitleGenerationRouter: SubtitleGenerating {
         ],
         translator: any TextGenerating = QwenTextGenerationService()
     ) {
-        self.outputDirectory = outputDirectory
+        self.outputLocation = OutputDirectoryStorage(outputDirectory)
         self.adapters = adapters
         self.translator = translator
     }
 
-    public func setOutputDirectory(_ outputDirectory: URL) {
-        self.outputDirectory = outputDirectory
+    public nonisolated func setOutputDirectory(_ outputDirectory: URL) {
+        outputLocation.update(to: outputDirectory)
     }
 
     public func generate(
         request: SubtitleGenerationRequest,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> SubtitleGenerationResult {
+        let outputDirectory = self.outputDirectory
         guard let adapter = adapters.first(where: { $0.supports(profile: request.profile) }) else {
             throw SubtitleTranscriptionError.unsupportedProfile(request.profile.name)
         }
@@ -48,6 +50,7 @@ public actor SubtitleGenerationRouter: SubtitleGenerating {
             let translatedTranscript = try await translate(
                 recognizedTranscript,
                 configuration: translation,
+                outputDirectory: outputDirectory,
                 progress: { value in
                     progress(0.68 + min(1, max(0, value)) * 0.28)
                 }
@@ -59,7 +62,7 @@ public actor SubtitleGenerationRouter: SubtitleGenerating {
             try Task.checkCancellation()
         }
 
-        let outputURL = subtitleOutputURL(for: request)
+        let outputURL = subtitleOutputURL(for: request, outputDirectory: outputDirectory)
         let destinationDirectory = outputURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(
             at: destinationDirectory,
@@ -131,7 +134,7 @@ public actor SubtitleGenerationRouter: SubtitleGenerating {
         )
     }
 
-    private func subtitleOutputURL(for request: SubtitleGenerationRequest) -> URL {
+    private func subtitleOutputURL(for request: SubtitleGenerationRequest, outputDirectory: URL) -> URL {
         if let outputURL = request.outputURL {
             return outputURL
         }
@@ -167,6 +170,7 @@ public actor SubtitleGenerationRouter: SubtitleGenerating {
     private func translate(
         _ transcript: TranscriptResult,
         configuration: SubtitleTranslationConfiguration,
+        outputDirectory: URL,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> TranscriptResult {
         let batches = Self.translationBatches(transcript.segments)

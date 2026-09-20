@@ -12,13 +12,24 @@ GenMedia 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App�
 - 獨立設定頁支援繁體中文、英文、日文、韓文及六套可持久保存的配色。
 - 設定頁可用 Switch 啟動只綁定本機的 MCP HTTP API；另保留可在 App 未啟動時獨立運作的 JSON-RPC 2.0 stdio server。
 
+## 近期修正與驗證（2026-09-21）
+
+模型掃描、下載後驗證與移除在背景執行；同一模型的暫停、續傳、修復與移除會等待前一個操作完成清理。切換輸出目錄後，新工作使用新路徑，進行中的工作保留開始時的路徑。
+
+共用媒體仍被其他資產或工作區引用時會保留；改名同步更新全部對應參照。自動清理只處理未被引用的 MediaCache 代理。工作區讀取失敗時保留原始索引與快取，並停用該次執行的工作區自動存檔。
+
+LoRA 權重轉換改用 1 MiB 分塊，Worker 日誌增量讀取且能處理正常退出前的大量日誌。完整根套件編譯及 **141 項 Swift 測試**通過；合成 LoRA 量測與尚未驗證的範圍見[效能紀錄](docs/PERFORMANCE_CHANGES.md)。這不代表所有大型模型或硬體組合都已驗證。
+
+- [驗證方式與結果](docs/VALIDATION.md)
+- [完整檢查與修正報告](docs/PROJECT_REVIEW_2026-09-20.md)
+
 ## 預覽
 
 ![GenMedia 媒體智能生成介面](images/cap001.jpg)
 
 ## 執行
 
-需求：macOS 14+、Apple Silicon、Xcode 16+。
+需求：Apple Silicon；套件最低部署目標為 macOS 14，建置需要可支援鎖定相依套件版本的 Xcode／Swift 與 Metal Toolchain。本輪使用 Swift 6.4、macOS 27 SDK 驗證；舊版工具鏈與系統未於本輪重測。
 
 ```bash
 ./build.command
@@ -40,11 +51,12 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 
 `run.command` 會自動使用 `--no-app`，日常啟動不會重複建立 App bundle。對外發佈的 DMG 由獨立本機流程完成 Developer ID Application 簽章、Apple Notarization、Staple 與 Gatekeeper 驗證。
 
+建置直接在本機專案目錄執行；App 與 DMG 的暫存封裝位於 `dist/`，備份暫存位於 `Backups/`。App 完成簽章驗證後才替換舊版。
+
 ### FFmpeg 建置問題排除
 
 - 第一次執行 `./build.command` 需要網路下載 FFmpeg 與 LAME 原始碼；之後會沿用暫存來源與 `third_party/ffmpeg` 產物。缺少或不完整時會自動重建。
-- 不需安裝 Homebrew `pkg-config`。專案提供只供 LAME 組態檢查的 fallback，並以無空白的暫存路徑執行，因此專案路徑包含空白也能建置。
-- ExFAT 等外接磁碟建立的 `._*` AppleDouble sidecar 會在處理 dylib 前自動清除，避免被誤判為 Mach-O。
+- 不需安裝 Homebrew `pkg-config`；LAME 組態檢查可直接使用專案內的 `scripts/pkg-config-fallback.sh`。FFmpeg 原始碼快取位於 `.build/ffmpeg-source`。
 - 建置中止或失敗時會還原先前可用的 FFmpeg。排除網路或 Xcode 問題後直接重跑 `./build.command` 即可；若要改用其他輸出位置，可設定 `GENMEDIA_FFMPEG_ROOT`。
 
 ### 影片 Runtime
@@ -104,14 +116,16 @@ Qwen3-VL、Qwen3.5 與 Qwen3.8 屬於多模態模型，因此模型中心會同�
 
 ### Profile、工作佇列與記憶體
 
+- 暫時隱藏所需模型建議記憶體超過 64 GB 的 Profile，64 GB 仍可選。既有 Profile 與模型檔案保留；此門檻依模型清單的建議需求判斷，並非實際峰值用量保證。
+
 - Profile 依「使用中、可用、下載中、不可用」排序；模型與 LoRA 相依項目完整時使用淡綠色外框，下載完成後會立即重新排序。
 - 工作取消會先進入 `cancelling`，Runtime Task 結束後自動轉成 `cancelled` 並解除所有生成與記憶體按鈕。ETA 在進度 35% 且執行滿 15 秒後顯示數字，樣本不足時會使用整體耗時備援估算。
 - Z-Image MLX 量化相容層支援 `quantize_config.json`、affine／mxfp4、packed pad token 與 FP16→BF16 載入修正。andrevp Z-Image Turbo MLX 4-bit 已完成實際生成驗證。
 - 相依套件的原始碼修正列於 `Patches/manifest.txt`，由 `scripts/apply-runtime-patches.command` 在 Swift Package resolve 後套用；`build.command` 會自動呼叫。相依套件版本與 manifest 記載不符、修正檔遺失、套用失敗或套用後找不到預期標記，都會中止建置而不會以未修正的原始碼繼續。執行 `scripts/apply-runtime-patches.command --verify` 可只做檢查。
-- 文生圖完成後保留模型權重與暖機 buffer；5 分鐘後只清理可重用的 MLX 暫存 buffer，不卸載模型。按下側欄「釋放記憶體」、切換模型，或切換 Profile 時 RAM 超過 90%，才會卸載不再需要的 Runtime。
-- 下載保留來源原始檔名；生成輸出使用 `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm` 或 `Music-YYYYMMDD-HHmm`，同分鐘重複時自動加上流水號，並可在設定頁更改輸出目錄。
+- Z-Image 以常駐 Worker 重用已載入的模型與 LoRA，減少連續生成的重載成本；閒置 5 分鐘、按下「釋放記憶體」或收到系統記憶體壓力通知時會卸載。執行中的工作在記憶體壓力下會先完成，再釋放 Worker；取消或失敗則終止 Worker，下次重新啟動。
+- 下載保留來源原始檔名；生成輸出使用 `Image-YYYYMMDD-HHmm-UUID`、`Video-YYYYMMDD-HHmm-UUID` 或 `Music-YYYYMMDD-HHmm-UUID`，避免批次或同分鐘輸出互相覆寫。輸出目錄可在設定頁更改；字幕優先保留來源檔名並寫入來源目錄。
 - 每個開啟的工作區分頁視為一個生成專案；資產與 lineage 會原子寫入 Application Support，App 關閉後仍可恢復。只有明確關閉分頁時才移除該專案的工作區索引，已輸出的媒體檔仍保留於磁碟。
-- App 的資料一律位於 `~/Library/Application Support/GenImage/`（`Models`、`Runtime`、`Workspace`、`Pasted`、`Generated`），由 `GenImageCore/ApplicationSupport.swift` 統一定義。工作區索引曾寫在 `GenMedia/`，啟動時會自動接回目前的根目錄；同名項目一律保留現有的，不覆蓋也不合併。目錄名稱維持 `GenImage` 而非改為與 App 一致的 `GenMedia`，以相容既有模型與舊版 Runtime 資料。
+- App 管理資料預設位於 `~/Library/Application Support/GenImage/`（`Models`、`Runtime`、`Workspace`、`Pasted`、`Generated`），由 `GenImageCore/ApplicationSupport.swift` 統一定義。工作區索引曾寫在 `GenMedia/`，啟動時會自動接回目前的根目錄；同名項目一律保留現有的，不覆蓋也不合併。目錄名稱維持 `GenImage` 而非改為與 App 一致的 `GenMedia`，以相容既有模型與舊版 Runtime 資料。模型與生成輸出可在設定中另選目錄；匯入的使用者檔案保留在原位置。
 - Prompt 與歌詞編輯期間會保留游標、選取範圍及輸入法組字狀態；生成類型、Prompt、歌詞與輸出設定 TAB 只局部更新創作面板。必要的完整畫面更新會沿用播放中的音訊或影片節點，避免中斷播放。
 - 工作區底片列提供圖片匯入按鈕，並支援從 Finder 拖放一張或多張 PNG、JPEG、WebP、GIF、TIFF、HEIC 與 HEIF 圖片；音樂生成模式會停用圖片匯入，避免混用媒體來源。圖片生成時若已選取來源圖片，主按鈕會自動使用圖生圖 Profile，未選取時則使用文生圖 Profile。
 - 圖片與影片比例選項改為下拉選單；圖生圖選取來源圖片後才會顯示「原解析度」，並依來源尺寸換算為符合 Runtime 的 16 倍數寬高。
@@ -246,8 +260,9 @@ App 已接入真實本機推論：Z-Image Turbo 文生圖、Qwen3-VL／Qwen3.5�
 
 ## 授權
 
-本專案採 GPLv3 與商業授權雙軌：
+本專案使用[GenMedia 原始碼公開・禁止商業販售授權 v1.1](LICENSE.md)。
 
-- 開源使用依 [GNU General Public License v3.0](LICENSE) 授權。
-- 若要在無法或不願遵守 GPLv3 的情境下使用，例如閉源整合、專有產品發行或需要客製商業條款，請聯絡著作權人另行取得商業授權。
-- App 內建 FFmpeg 與 LAME 維持各自的 LGPL 授權；授權文字、精確來源版本與建置資訊會放入 App 的 `Contents/Resources/Licenses/`。
+- 依授權條件允許非販售的使用、研究、修改與免費分享，包含公司或組織內部自用。
+- 販售、付費代管／SaaS、收費支援、付費產品整合及其他受限制的營利安排，須另行取得書面授權；詳見[禁止商業販售政策](COMMERCIAL-LICENSE.md)。
+- 這是自訂的原始碼公開授權，不宣稱符合 OSI 開源定義；完整條件及四語差異以繁體中文授權全文為準。
+- 第三方程式庫與模型保留各自授權。內建 FFmpeg／LAME 的 LGPL 授權、來源版本及建置資訊位於 App 的 `Contents/Resources/Licenses/`。

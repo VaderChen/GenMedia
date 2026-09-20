@@ -12,7 +12,7 @@
 - 工作佇列、取消、進度、預估剩餘時間、生成耗時、模型快取及手動記憶體釋放。
 - 每個工作區分頁作為持久化生成專案；App 重啟後恢復資產、操作、選取狀態與 Profile 快照。
 - 創作設定區域渲染、輸入游標與 IME 保護，以及音訊／影片連續播放。
-- `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm`、`Music-YYYYMMDD-HHmm` 輸出命名與同分鐘防碰撞流水號。
+- 輸出名稱採 `Image-YYYYMMDD-HHmm-UUID`、`Video-YYYYMMDD-HHmm-UUID`、`Music-YYYYMMDD-HHmm-UUID`，防止批次與同分鐘輸出碰撞。
 - Release App bundle、MLX metallib、原生 MCP 推論工具及獨立 DMG 簽章／公證流程。
 
 ## 目前階段：穩定與驗證

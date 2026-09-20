@@ -26,6 +26,8 @@ Enable Settings → MCP Integration in GenMedia.app to expose:
 http://127.0.0.1:12181/mcp
 ```
 
+The HTTP endpoint is for native local clients. It binds to `127.0.0.1`, requires `Host: 127.0.0.1:<port>` or `localhost:<port>`, and requires `Content-Type: application/json` for POST (charset parameters are accepted). Every request containing `Origin` receives 403, including null and local origins. Browser preflight is rejected and no CORS headers are returned. OPTIONS without Origin receives 405; an unsupported Content-Type receives 415. Native local processes remain trusted: these checks do not authenticate clients. Do not expose this endpoint through a public proxy.
+
 This endpoint binds to localhost only and accepts JSON-RPC over HTTP `POST`; turning the switch off stops the listener immediately. The HTTP transport calls the same `MCPServer` tool core as stdio. It does not start a stdio child process and is not a proxy to another service. Because this mode is embedded in the app, GenMedia.app must remain open; use the standalone stdio executable for headless integrations.
 
 ## MCP Methods

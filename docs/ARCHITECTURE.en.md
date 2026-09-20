@@ -2,6 +2,17 @@
 
 [繁體中文](ARCHITECTURE.md) | English | [日本語](ARCHITECTURE.ja.md) | [한국어](ARCHITECTURE.ko.md)
 
+## Runtime and persistence updates (2026-09-21)
+
+- `ModelDiscoveryController` scans in the background and accepts only the latest request. `SerialTaskQueue` orders operations per model and waits for cancellation cleanup before replacements or directory scans.
+- `FileDownloadDelegate` waits for resume metadata before cancellation returns. Downloads and reused hard links use `ModelFileReplacement` so replacement failures preserve existing files.
+- `SafetensorsHeader` reads at most 16 MiB of JSON; LoRA conversion copies weights in 1 MiB chunks. Worker input is cancellable, and exit handling drains bounded log batches before reporting a missing result.
+- `OutputDirectoryStorage` updates service destinations synchronously; each job retains its initial path. `MediaAssetFiles` protects shared files and updates all matching references on rename; automatic cleanup is limited to unreferenced MediaCache proxies.
+- `ProjectWorkspaceWriter` coalesces background writes and flushes at shutdown. An unreadable workspace preserves the original index/cache and disables autosave for that session. Custom profiles retain their complete definitions and stable IDs.
+- Bridge activity messages carry metrics and progress separately from content; thumbnails and media delivery have bounded caches/buffers. Profiles above the 64 GB recommendation threshold remain hidden.
+
+The root build and 141 Swift tests passed. See [validation](VALIDATION.md), [performance measurements](PERFORMANCE_CHANGES.md), and the [detailed review](PROJECT_REVIEW_2026-09-20.md) (Traditional Chinese) for methods and limits.
+
 ## Design Goals
 
 1. Text-to-image, image-to-text, image-to-image, video generation, music generation, subtitle generation, and upscaling are independent capabilities with no mutual dependency.

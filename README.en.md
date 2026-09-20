@@ -12,13 +12,24 @@ GenMedia is a local AI media generation app with **native Apple Silicon support*
 - A dedicated settings page supports Traditional Chinese, English, Japanese, Korean, and six persistent color themes.
 - Settings provides a switch for a localhost-only MCP HTTP API, while a standalone JSON-RPC 2.0 stdio server remains available when the app is not running.
 
+## Recent fixes and validation (2026-09-21)
+
+Model discovery, verification, and removal run in the background. Pause, resume, repair, and removal of the same model wait for earlier operations to finish cleanup. After an output-directory change, new jobs use the new location and running jobs keep their original destination.
+
+Files still referenced by another asset or workspace are retained; renaming updates all matching references. Automatic cleanup is limited to unreferenced MediaCache proxies. An unreadable workspace preserves its index and cache and disables workspace autosave for that session.
+
+LoRA conversion copies weights in 1 MiB chunks. Worker logs are read incrementally, including large logs written before a normal exit. The complete root package builds and **141 Swift tests pass**. See the [performance record](docs/PERFORMANCE_CHANGES.md) (Traditional Chinese) for the synthetic LoRA measurement and validation limits; this does not establish compatibility with every model or hardware configuration.
+
+- [Validation instructions and results](docs/VALIDATION.md) (Traditional Chinese)
+- [Detailed review and fixes](docs/PROJECT_REVIEW_2026-09-20.md) (Traditional Chinese)
+
 ## Preview
 
 ![GenMedia intelligent media generation interface](images/cap001.jpg)
 
 ## Run
 
-Requirements: macOS 14+, Apple Silicon, and Xcode 16+.
+Requirements: Apple Silicon; the package deployment target starts at macOS 14. Building requires Xcode/Swift compatible with the pinned dependencies and the Metal Toolchain. This validation used Swift 6.4 and the macOS 27 SDK; older toolchains and systems were not retested.
 
 ```bash
 ./build.command
@@ -43,15 +54,14 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ### FFmpeg Build Troubleshooting
 
 - The first `./build.command` run needs network access to download the FFmpeg and LAME sources. Later builds reuse the cached sources and `third_party/ffmpeg`; a missing or incomplete distribution is rebuilt automatically.
-- Homebrew `pkg-config` is not required. The project supplies a fallback used only for LAME configuration and runs it from a space-free temporary path, so project paths containing spaces are supported.
-- `._*` AppleDouble sidecars created by external filesystems such as ExFAT are removed before dylib processing so they cannot be mistaken for Mach-O files.
+- Homebrew `pkg-config` is not required; LAME configuration can use `scripts/pkg-config-fallback.sh` directly. FFmpeg source files are cached in `.build/ffmpeg-source`.
 - If the build is interrupted or fails, the previous usable FFmpeg distribution is restored. Fix the network or Xcode issue and rerun `./build.command`. Set `GENMEDIA_FFMPEG_ROOT` to use a different output location.
 
 ### Video Runtime
 
 Video generation runs in the bundled `GenImageLTXVideoWorker` Swift subprocess. The Swift app manages profiles, parameter validation, the job queue, cancellation, progress, assets, and video playback without an additional video runtime.
 
-The model-center plan for `dgrauet/ltx-2.3-mlx-q4` also downloads the native MLX INT4 transformer, video/audio VAEs, vocoder, spatial upscaler, and the Gemma 3 12B text encoder from `google/gemma-3-12b-it-qat-q4_0-unquantized`; the complete download is about 42 GiB, and 48 GB or more of memory is recommended.
+The model-center plan for `dgrauet/ltx-2.3-mlx-q4` also downloads the native MLX INT4 transformer, video/audio VAEs, vocoder, spatial upscaler, and the Gemma 3 12B text encoder from `Lightricks/gemma-3-12b-it-qat-q4_0-unquantized`; the complete download is about 42 GiB, and 48 GB or more of memory is recommended.
 
 Development builds can use `GENIMAGE_LTX_WORKER` to select a custom Worker. Release apps use `Contents/Helpers/GenImageLTXVideoWorker`. `GENIMAGE_LTX_GEMMA_MODEL` can override the Gemma directory; when unset, the Worker first uses `gemma-3-12b` inside the LTX model directory.
 
@@ -106,10 +116,11 @@ For legacy headless launch scripts, `CIVITAI_TOKEN` remains supported as a compa
 - Cancellation enters `cancelling` first, then changes to `cancelled` and unlocks all generation and memory controls when the runtime task exits. A numeric ETA appears after 35% progress and 15 seconds; overall elapsed time is used as a fallback when stable samples are not yet available.
 - The Z-Image MLX compatibility layer handles `quantize_config.json`, affine/mxfp4 modes, packed pad tokens, and FP16-to-BF16 loading. The andrevp Z-Image Turbo MLX 4-bit profile has been validated with a real generation run.
 - Source patches for dependencies are listed in `Patches/manifest.txt` and applied by `scripts/apply-runtime-patches.command` after Swift Package resolution; `build.command` invokes it. A dependency pinned to a version the manifest was not written against, a missing patch file, a failed application, or a missing marker afterwards all abort the build rather than letting it continue against unpatched sources. Run `scripts/apply-runtime-patches.command --verify` to check without changing anything.
-- Text-to-image completion keeps model weights and warm buffers resident. Reusable MLX buffers are trimmed after five idle minutes without unloading the model. Models are unloaded only by the sidebar Release Memory action, a model switch, or the over-90% RAM protection applied while switching profiles.
-- Downloads retain their upstream filenames. Generated outputs use `Image-YYYYMMDD-HHmm`, `Video-YYYYMMDD-HHmm`, or `Music-YYYYMMDD-HHmm`; a numeric suffix prevents collisions within the same minute. The output directory is configurable in Settings.
+- Profiles requiring a model with a recommended memory requirement above 64 GB are temporarily hidden. Exactly 64 GB remains available; existing profiles and model files are retained. This uses catalog recommendations, not a measured peak-memory guarantee.
+- Z-Image reuses loaded models and LoRAs in a persistent worker between generations. It unloads after five idle minutes, the Release Memory action, or system memory pressure. Under memory pressure an active job finishes before the worker is released; cancellation or failure terminates it, and the next request starts a new worker.
+- Downloads retain upstream filenames. Generated outputs use `Image-YYYYMMDD-HHmm-UUID`, `Video-YYYYMMDD-HHmm-UUID`, or `Music-YYYYMMDD-HHmm-UUID` to prevent collisions in batches and within the same minute. The output directory is configurable in Settings; subtitles normally retain the source basename and are written beside the source.
 - Each open workspace tab is treated as a generation project. Assets and lineage are atomically stored under Application Support and restored after the app relaunches. Explicitly closing a tab removes that project's workspace index while keeping exported media files on disk.
-- All app data lives under `~/Library/Application Support/GenImage/` (`Models`, `Runtime`, `Workspace`, `Pasted`, `Generated`), defined in one place by `GenImageCore/ApplicationSupport.swift`. The workspace index used to be written under `GenMedia/`; it is adopted into the current root at launch, and an entry that already exists is kept rather than overwritten or merged. The directory keeps the name `GenImage` rather than matching the app's `GenMedia` to preserve compatibility with existing models and legacy runtime data.
+- App-managed data defaults to `~/Library/Application Support/GenImage/` (`Models`, `Runtime`, `Workspace`, `Pasted`, `Generated`), defined in one place by `GenImageCore/ApplicationSupport.swift`. The workspace index used to be written under `GenMedia/`; it is adopted into the current root at launch, and an entry that already exists is kept rather than overwritten or merged. The directory keeps the name `GenImage` rather than matching the app's `GenMedia` to preserve compatibility with existing models and legacy runtime data. Models and generated outputs can use directories selected in Settings; imported user files remain at their original locations.
 - Prompt and lyrics editors preserve the caret, selection, and IME composition while native state updates arrive. Generation type, Prompt, Lyrics, and output-setting tabs rerender only the creation panel. Unavoidable full updates reuse playing audio and video nodes instead of interrupting playback.
 - The workspace filmstrip provides an image import button and supports dropping one or more PNG, JPEG, WebP, GIF, TIFF, HEIC, or HEIF files from Finder. Image import is disabled during music generation to keep media sources separate. In image generation mode, selecting a source image automatically routes the main button to the image-to-image profile; without a source image it uses the text-to-image profile.
 - Image and video aspect-ratio choices are dropdowns. Image-to-image shows `Original Resolution` only after a source image is selected, using source dimensions quantized to Runtime-compatible multiples of 16.
@@ -244,8 +255,9 @@ More information:
 
 ## License
 
-This project uses a dual GPLv3 and commercial licensing model:
+This project uses the [GenMedia Source-Available License — No Commercial Sales v1.1](LICENSE.en.md).
 
-- Open-source use is licensed under the [GNU General Public License v3.0](LICENSE).
-- If you cannot or do not want to comply with GPLv3, such as for closed-source integration, proprietary distribution, or customized commercial terms, contact the copyright holder to obtain a separate commercial license.
-- Bundled FFmpeg and LAME remain under their respective LGPL terms. License texts, exact source versions, and build information are included under `Contents/Resources/Licenses/` in the app.
+- Non-sale use, research, modification, and free sharing, including internal organizational use, are permitted subject to the license terms.
+- Sales, paid hosting/SaaS, paid support, paid-product integration, and other restricted monetization require a separate written license; see the [no-commercial-sales policy](COMMERCIAL-LICENSE.md).
+- This is a custom source-available license and does not claim to meet the OSI Open Source Definition. The complete Traditional Chinese license governs in case of inconsistency.
+- Third-party libraries and models retain their own licenses. LGPL license texts, source versions, and build information for bundled FFmpeg/LAME are included in `Contents/Resources/Licenses/`.

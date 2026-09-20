@@ -8,7 +8,7 @@ FFMPEG_VERSION="${FFMPEG_VERSION:-8.1.2}"
 LAME_VERSION="${LAME_VERSION:-4.0}"
 PREFIX="${FFMPEG_PREFIX:-$PROJECT_DIR/third_party/ffmpeg}"
 PREFIX_BACKUP="$PREFIX.bak"
-SOURCE_ROOT="${FFMPEG_SOURCE_ROOT:-${TMPDIR:-/tmp}/genmedia-ffmpeg-source}"
+SOURCE_ROOT="${FFMPEG_SOURCE_ROOT:-$PROJECT_DIR/.build/ffmpeg-source}"
 INSTALL_PREFIX="${FFMPEG_INSTALL_PREFIX:-/opt/genmedia-ffmpeg}"
 STAGING_ROOT="$SOURCE_ROOT/staging-$FFMPEG_VERSION"
 STAGED_PREFIX="$STAGING_ROOT$INSTALL_PREFIX"
@@ -21,18 +21,12 @@ LAME_PREFIX="$SOURCE_ROOT/lame-$LAME_VERSION-macos14"
 LAME_DOWNLOAD_URL="https://downloads.sourceforge.net/project/lame/lame/$LAME_VERSION/lame-$LAME_VERSION.tar.gz"
 LAME_LIB_DIR="$LAME_PREFIX/lib"
 BUILD_SUCCEEDED=false
-PKG_CONFIG_FALLBACK_PATH=""
+PREVIOUS_PREFIX_MOVED=false
+PREFIX_CREATED=false
+ROLLBACK_DONE=false
 PKG_CONFIG_COMMAND="${PKG_CONFIG:-$(command -v pkg-config 2>/dev/null || true)}"
 if [[ -z "$PKG_CONFIG_COMMAND" ]]; then
-  PKG_CONFIG_FALLBACK_SOURCE="$SCRIPT_DIR/pkg-config-fallback.sh"
-  PKG_CONFIG_COMMAND="/tmp/genmedia-pkg-config-fallback-$UID"
-  if [[ ! -x "$PKG_CONFIG_FALLBACK_SOURCE" ]]; then
-    print -u2 "找不到 GenMedia pkg-config fallback：$PKG_CONFIG_FALLBACK_SOURCE"
-    exit 1
-  fi
-  /bin/cp "$PKG_CONFIG_FALLBACK_SOURCE" "$PKG_CONFIG_COMMAND"
-  chmod 755 "$PKG_CONFIG_COMMAND"
-  PKG_CONFIG_FALLBACK_PATH="$PKG_CONFIG_COMMAND"
+  PKG_CONFIG_COMMAND="$SCRIPT_DIR/pkg-config-fallback.sh"
 fi
 
 for command_name in curl tar make clang otool vtool install_name_tool; do
@@ -51,17 +45,18 @@ if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
   exit 1
 fi
 restore_previous_prefix() {
-  if [[ -n "$PKG_CONFIG_FALLBACK_PATH" ]]; then
-    rm -f -- "$PKG_CONFIG_FALLBACK_PATH"
-  fi
-  if [[ "$BUILD_SUCCEEDED" == false ]]; then
+  [[ "$BUILD_SUCCEEDED" == false && "$ROLLBACK_DONE" == false ]] || return 0
+  ROLLBACK_DONE=true
+  if [[ "$PREFIX_CREATED" == true ]]; then
     rm -rf -- "$PREFIX"
-    if [[ -d "$PREFIX_BACKUP" ]]; then
-      mv -- "$PREFIX_BACKUP" "$PREFIX"
-    fi
+  fi
+  if [[ "$PREVIOUS_PREFIX_MOVED" == true && -d "$PREFIX_BACKUP" ]]; then
+    mv -- "$PREFIX_BACKUP" "$PREFIX"
   fi
 }
-trap restore_previous_prefix EXIT INT TERM
+trap restore_previous_prefix EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 mkdir -p "$SOURCE_ROOT"
 if [[ ! -d "$SOURCE_DIR" ]]; then
@@ -85,8 +80,10 @@ if [[ -e "$PREFIX_BACKUP" ]]; then
 fi
 if [[ -e "$PREFIX" ]]; then
   mv -- "$PREFIX" "$PREFIX_BACKUP"
+  PREVIOUS_PREFIX_MOVED=true
 fi
 mkdir -p "$PREFIX"
+PREFIX_CREATED=true
 
 rm -rf -- "$LAME_PREFIX"
 cd "$LAME_SOURCE_DIR"
@@ -159,10 +156,6 @@ for library in "${EXTERNAL_LIBRARIES[@]}"; do
   /bin/cp -P "$library" "$PREFIX/lib/${library:t}"
 done
 
-# ExFAT 等外接磁碟可能在複製 dylib 時建立 AppleDouble sidecar；這些
-# `._*.dylib` 並非 Mach-O，不可交給 install_name_tool 或 codesign。
-find "$PREFIX" -name '._*' -delete
-
 while IFS= read -r library; do
   /usr/bin/install_name_tool -id "@rpath/${library:t}" "$library"
   while IFS= read -r dependency; do
@@ -173,7 +166,7 @@ while IFS= read -r library; do
     /usr/bin/otool -L "$library" \
       | sed -n 's/^[[:space:]]*\([^[:space:]]*\.dylib\).*$/\1/p'
   )
-done < <(find "$PREFIX/lib" -maxdepth 1 -type f -name '*.dylib' ! -name '._*' -print)
+done < <(find "$PREFIX/lib" -maxdepth 1 -type f -name '*.dylib' -print)
 
 for tool in ffmpeg ffprobe; do
   /usr/bin/install_name_tool \
@@ -242,9 +235,6 @@ done
 BUILD_SUCCEEDED=true
 if [[ -d "$PREFIX_BACKUP" ]]; then
   rm -rf -- "$PREFIX_BACKUP"
-fi
-if [[ -n "$PKG_CONFIG_FALLBACK_PATH" ]]; then
-  rm -f -- "$PKG_CONFIG_FALLBACK_PATH"
 fi
 trap - EXIT INT TERM
 

@@ -266,12 +266,7 @@ public final class MiniMaxMusic3GenerationService: MusicRuntimeAdapter, Sendable
     }
 
     private nonisolated static func latestProgress(in log: RuntimeLog) -> Double? {
-        guard let data = log.data() else { return nil }
-        return data.split(separator: 0x0A).compactMap { line -> Double? in
-            guard let event = try? JSONDecoder().decode(WorkerEvent.self, from: Data(line)),
-                  event.type == "progress" else { return nil }
-            return event.value
-        }.max()
+        log.latestProgress(useMaximum: true)
     }
 
     private nonisolated static func logMessage(in log: RuntimeLog) -> String {

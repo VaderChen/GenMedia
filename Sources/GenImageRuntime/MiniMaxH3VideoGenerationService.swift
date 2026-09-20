@@ -384,20 +384,14 @@ public final class MiniMaxH3VideoGenerationService: VideoGenerating, Sendable {
     }
 
     static func latestProgress(in log: RuntimeLog) -> Double? {
-        guard let data = log.data(),
-              let text = String(data: data, encoding: .utf8) else { return nil }
-        for line in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).reversed() {
-            if let data = line.data(using: .utf8),
-               let event = try? JSONDecoder().decode(WorkerProgressEvent.self, from: data),
-               event.type == "progress",
-               let value = event.value {
-                return min(max(value, 0), 1)
-            }
+        log.latestProgress { data in
+            if let value = RuntimeLog.jsonProgress(data) { return min(max(value, 0), 1) }
+            guard let line = String(data: data, encoding: .utf8) else { return nil }
             let parts = line.split(separator: " ")
             guard parts.count >= 2,
                   let token = parts.last,
                   token.hasSuffix("%"),
-                  let percent = Double(token.dropLast()) else { continue }
+                  let percent = Double(token.dropLast()) else { return nil }
             let fraction = min(max(percent / 100, 0), 1)
             switch parts[parts.count - 2] {
             case "loadingTextEncoder": return fraction * 0.05
@@ -408,7 +402,6 @@ public final class MiniMaxH3VideoGenerationService: VideoGenerating, Sendable {
             default: return fraction
             }
         }
-        return nil
     }
 }
 

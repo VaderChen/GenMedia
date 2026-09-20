@@ -2,6 +2,17 @@
 
 [繁體中文](ARCHITECTURE.md) | [English](ARCHITECTURE.en.md) | 日本語 | [한국어](ARCHITECTURE.ko.md)
 
+## Runtime と永続化の更新（2026-09-21）
+
+- `ModelDiscoveryController` はバックグラウンドで検出し、最新の要求だけを反映します。`SerialTaskQueue` はモデルごとに操作を順序化し、キャンセルの後片付けが終わってから次の操作やディレクトリ検出へ進みます。
+- `FileDownloadDelegate` は再開情報の保存完了を待ってキャンセルを返します。ダウンロードとハードリンク再利用は `ModelFileReplacement` で安全に置換し、失敗時は既存ファイルを保持します。
+- `SafetensorsHeader` の JSON 読み込み上限は 16 MiB、LoRA の重みコピーは 1 MiB 単位です。Worker 入力はキャンセル可能で、終了時は上限付きログを最後まで読んで結果を判定します。
+- `OutputDirectoryStorage` は出力先を同期更新し、各処理は開始時のパスを保持します。`MediaAssetFiles` は共有ファイルを保護し、名前変更を全参照に反映します。自動削除は未参照の MediaCache プロキシに限定します。
+- `ProjectWorkspaceWriter` はバックグラウンドで保存を集約し、終了時に flush します。読み込み失敗時は索引とキャッシュを保持して自動保存を停止します。カスタム Profile は完全な定義と固定 ID を保存します。
+- Bridge の進捗通知と内容更新を分離し、サムネイルとメディア転送のメモリ量を制限します。推奨メモリが 64 GB を超える Profile は非表示です。
+
+ルートビルドと 141 件の Swift テストが成功しました。[検証](VALIDATION.md)、[性能記録](PERFORMANCE_CHANGES.md)、[詳細報告](PROJECT_REVIEW_2026-09-20.md)（繁体字中国語）に方法と制限を記載しています。
+
 ## 設計目標
 
 1. テキストから画像、画像からテキスト、画像から画像、動画生成、音楽生成、字幕生成、アップスケールは相互に依存しない独立した機能です。

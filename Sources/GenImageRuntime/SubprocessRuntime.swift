@@ -57,11 +57,13 @@ enum RuntimeExecutable {
 struct RuntimeLog {
     let url: URL
     let handle: FileHandle
+    private let progressReader: RuntimeLogProgress
 
     init(at url: URL) throws {
         FileManager.default.createFile(atPath: url.path, contents: nil)
         self.handle = try FileHandle(forWritingTo: url)
         self.url = url
+        self.progressReader = RuntimeLogProgress(url: url)
     }
 
     func flush() {
@@ -81,8 +83,25 @@ struct RuntimeLog {
     }
 
     func tail(_ maximumBytes: Int) -> String? {
-        guard let data = data() else { return nil }
-        return String(data: data.suffix(maximumBytes), encoding: .utf8)
+        guard maximumBytes > 0, let reader = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? reader.close() }
+        guard let size = try? reader.seekToEnd(),
+              (try? reader.seek(toOffset: size > UInt64(maximumBytes) ? size - UInt64(maximumBytes) : 0)) != nil,
+              let data = try? reader.read(upToCount: maximumBytes) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    func latestProgress(
+        useMaximum: Bool = false,
+        parse: (Data) -> Double? = RuntimeLog.jsonProgress
+    ) -> Double? {
+        progressReader.value(useMaximum: useMaximum, parse: parse)
+    }
+
+    static func jsonProgress(_ line: Data) -> Double? {
+        struct Event: Decodable { let type: String; let value: Double? }
+        guard let event = try? JSONDecoder().decode(Event.self, from: line), event.type == "progress" else { return nil }
+        return event.value
     }
 
     /// 失敗時給人看的訊息：log 尾端，取不到就用 fallback。
@@ -148,6 +167,7 @@ enum RuntimeProcess {
         pollInterval: Duration = .milliseconds(250),
         onPoll: () throws -> Void = {}
     ) async throws -> Int32 {
+        try Task.checkCancellation()
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
@@ -168,6 +188,7 @@ enum RuntimeProcess {
             throw error
         }
         process.waitUntilExit()
+        try Task.checkCancellation()
         log.flush()
         return process.terminationStatus
     }

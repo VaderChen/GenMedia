@@ -2,23 +2,38 @@ import Foundation
 import GenImageCore
 
 public actor ZImageTextToImageService: TextToImageGenerating {
-    private var outputDirectory: URL
+    private nonisolated let outputLocation: OutputDirectoryStorage
+    private var outputDirectory: URL { outputLocation.url }
+    private let worker = WarmRuntimeWorker()
+    private var isGenerating = false
+    private let configuredWorker: URL?
 
     public init(outputDirectory: URL) {
-        self.outputDirectory = outputDirectory
+        self.outputLocation = OutputDirectoryStorage(outputDirectory)
+        self.configuredWorker = nil
     }
 
-    public func setOutputDirectory(_ outputDirectory: URL) {
-        self.outputDirectory = outputDirectory
+    init(outputDirectory: URL, workerExecutable: URL) {
+        self.outputLocation = OutputDirectoryStorage(outputDirectory)
+        self.configuredWorker = workerExecutable
     }
 
-    public func unload() {
+    public nonisolated func setOutputDirectory(_ outputDirectory: URL) {
+        outputLocation.update(to: outputDirectory)
+    }
+
+    public func unload() async {
+        await worker.unload()
     }
 
     public func generate(
         request: TextToImageRequest,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> [MediaAsset] {
+        let outputDirectory = self.outputDirectory
+        guard !isGenerating else { throw WarmRuntimeWorker.Failure.busy }
+        isGenerating = true
+        defer { isGenerating = false }
         guard request.profile.capability == .textToImage else {
             throw ZImageRuntimeError.incompatibleProfile
         }
@@ -44,7 +59,7 @@ public actor ZImageTextToImageService: TextToImageGenerating {
             }
             loraPath = isLoRADirectory.boolValue
                 ? loraURL
-                : try normalizedLoRAURLIfNeeded(loraURL)
+                : try ZImageLoRAAdapterNormalizer.normalize(loraURL)
             loraScale = selection.scale
         } else {
             loraPath = nil
@@ -69,13 +84,8 @@ public actor ZImageTextToImageService: TextToImageGenerating {
         }
 
         let identifier = UUID().uuidString
-        let requestURL = outputDirectory.appendingPathComponent("z-image-\(identifier)-request.json")
-        let logURL = outputDirectory.appendingPathComponent("z-image-\(identifier).log")
-        defer {
-            try? FileManager.default.removeItem(at: requestURL)
-            try? FileManager.default.removeItem(at: logURL)
-        }
         let payload = WorkerRequest(
+            requestID: identifier,
             modelDirectory: modelURL.path,
             outputPaths: outputURLs.map(\.path),
             prompt: request.recipe.prompt,
@@ -87,29 +97,13 @@ public actor ZImageTextToImageService: TextToImageGenerating {
             loraPath: loraPath?.path,
             loraScale: loraScale
         )
-        try JSONEncoder().encode(payload).write(to: requestURL, options: .atomic)
-        let log = try RuntimeLog(at: logURL)
-        defer { log.close() }
-
-        let executable = try Self.workerExecutable()
         progress(0.01)
-        let status = try await RuntimeProcess.run(
-            executable: executable,
-            arguments: ["--request", requestURL.path],
-            environment: RuntimeExecutable.environment(),
-            log: log,
-            pollInterval: .milliseconds(300)
-        ) {
-            if let value = Self.latestProgress(in: log) {
-                progress(min(0.99, max(0.01, value)))
-            }
-        }
-        guard status == 0 else {
-            throw ZImageRuntimeError.workerFailed(
-                status: status,
-                message: Self.logMessage(in: log)
-            )
-        }
+        _ = try await worker.run(
+            executable: configuredWorker ?? Self.workerExecutable(),
+            request: JSONEncoder().encode(payload),
+            requestID: identifier,
+            progress: progress
+        )
         try Task.checkCancellation()
         guard outputURLs.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {
             let missing = outputURLs.first(where: { !FileManager.default.fileExists(atPath: $0.path) })
@@ -137,6 +131,7 @@ public actor ZImageTextToImageService: TextToImageGenerating {
     }
 
     private struct WorkerRequest: Encodable {
+        var requestID: String
         var modelDirectory: String
         var outputPaths: [String]
         var prompt: String
@@ -147,12 +142,6 @@ public actor ZImageTextToImageService: TextToImageGenerating {
         var seed: UInt64
         var loraPath: String?
         var loraScale: Double?
-    }
-
-    private struct WorkerEvent: Decodable {
-        var type: String
-        var value: Double?
-        var message: String?
     }
 
     private nonisolated static func workerExecutable() throws -> URL {
@@ -210,108 +199,6 @@ public actor ZImageTextToImageService: TextToImageGenerating {
         return executable
     }
 
-    private nonisolated static func latestProgress(in log: RuntimeLog) -> Double? {
-        guard let data = log.data() else { return nil }
-        return data.split(separator: 0x0A).compactMap { line -> Double? in
-            guard let event = try? JSONDecoder().decode(WorkerEvent.self, from: Data(line)),
-                  event.type == "progress" else { return nil }
-            return event.value
-        }.last
-    }
-
-    private nonisolated static func logMessage(in log: RuntimeLog) -> String {
-        guard let data = log.data() else { return "Z-Image Worker 未提供錯誤訊息。" }
-        let events = data.split(separator: 0x0A).compactMap {
-            try? JSONDecoder().decode(WorkerEvent.self, from: Data($0))
-        }
-        if let message = events.last(where: { $0.type == "error" })?.message {
-            return message
-        }
-        return log.message(maximumBytes: 4_096, fallback: "Z-Image Worker 執行失敗。")
-    }
-
-    private func normalizedLoRAURLIfNeeded(_ url: URL) throws -> URL {
-        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-        guard data.count >= 8 else { return url }
-
-        var headerLength: UInt64 = 0
-        for (index, byte) in data.prefix(8).enumerated() {
-            headerLength |= UInt64(byte) << UInt64(index * 8)
-        }
-        guard headerLength <= UInt64(data.count - 8),
-              headerLength <= UInt64(Int.max) else {
-            return url
-        }
-
-        let oldHeaderLength = Int(headerLength)
-        let headerStart = data.index(data.startIndex, offsetBy: 8)
-        let headerEnd = data.index(headerStart, offsetBy: oldHeaderLength)
-        guard let headerObject = try JSONSerialization.jsonObject(
-            with: data[headerStart..<headerEnd]
-        ) as? [String: Any] else {
-            return url
-        }
-
-        var header = headerObject
-        var renamed = false
-        for key in headerObject.keys {
-            let normalizedKey: String
-            if key.hasSuffix(".lora_A") {
-                normalizedKey = "\(key).weight"
-            } else if key.hasSuffix(".lora_B") {
-                normalizedKey = "\(key).weight"
-            } else {
-                continue
-            }
-            guard header[normalizedKey] == nil,
-                  let value = header.removeValue(forKey: key) else { continue }
-            header[normalizedKey] = value
-            renamed = true
-        }
-        guard renamed else { return url }
-
-        var normalizedHeader = try JSONSerialization.data(
-            withJSONObject: header,
-            options: [.sortedKeys]
-        )
-        let padding = (8 - normalizedHeader.count % 8) % 8
-        if padding > 0 {
-            normalizedHeader.append(Data(repeating: 0x20, count: padding))
-        }
-
-        let cacheDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("GenImage-LoRAAdapters", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: cacheDirectory,
-            withIntermediateDirectories: true
-        )
-        let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-        let signature = "\(url.path)|\(values?.fileSize ?? 0)|\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)"
-        var hash: UInt64 = 14_695_981_039_346_656_037
-        for byte in signature.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        let baseName = url.deletingPathExtension().lastPathComponent
-            .replacingOccurrences(of: ".", with: "-")
-        let normalizedURL = cacheDirectory.appendingPathComponent(
-            "\(baseName)-\(String(hash, radix: 16)).safetensors"
-        )
-        if FileManager.default.fileExists(atPath: normalizedURL.path) {
-            return normalizedURL
-        }
-
-        var normalizedData = Data()
-        var encodedHeaderLength = UInt64(normalizedHeader.count)
-        for _ in 0..<8 {
-            normalizedData.append(UInt8(encodedHeaderLength & 0xff))
-            encodedHeaderLength >>= 8
-        }
-        normalizedData.append(normalizedHeader)
-        normalizedData.append(data[headerEnd..<data.endIndex])
-        try normalizedData.write(to: normalizedURL, options: .atomic)
-        return normalizedURL
-    }
 
 }
 

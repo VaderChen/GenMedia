@@ -22,7 +22,11 @@ final class HybridBridgeController: NSObject, ObservableObject {
     let webUISchemeHandler = WebUISchemeHandler()
 
     private weak var webView: WKWebView?
-    private var storeCancellable: AnyCancellable?
+    private var storeCancellables = Set<AnyCancellable>()
+    private var pendingActivityPush: Task<Void, Never>?
+    private var indexedAssets: [MediaAsset]?
+    private var projectedAssets: [MediaAsset]?
+    private var cachedWebAssets: [WebAsset] = []
     private var mcpServiceCancellable: AnyCancellable?
     private var pendingPush: Task<Void, Never>?
     private var pasteKeyMonitor: Any?
@@ -31,14 +35,69 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        storeCancellable = store.objectWillChange.sink { [weak self] _ in
+        observe(store.$projects, content: true)
+        observe(store.$selectedProjectID, content: true)
+        observe(store.$assets, content: true)
+        observe(store.$operations, content: true)
+        observe(store.$selectedAssetID, content: true)
+        observe(store.$comparisonAssetID, content: true)
+        observe(store.$recipe, content: true)
+        observe(store.$videoOutputSettings, content: true)
+        observe(store.$musicOutputSettings, content: true)
+        observe(store.$modelRootPath, content: true)
+        observe(store.$outputDirectoryPath, content: true)
+        observe(store.$models, content: true)
+        observe(store.$loras, content: true)
+        observe(store.$profiles, content: true)
+        observe(store.$disabledProfileIDs, content: true)
+        observe(store.$activeProfileIDs, content: true)
+        observe(store.$availableUpdate, content: true)
+        observe(store.$jobs, content: false)
+        observe(store.$systemMetrics, content: false)
+        observe(store.$statusMessage, content: false)
+        observe(store.$installations, content: false)
+        observe(store.$isReleasingMemory, content: false)
+        NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
+            .sink { [weak self] _ in self?.store.flushProjectWorkspace() }
+            .store(in: &storeCancellables)
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                self?.indexedAssets = nil
+                self?.projectedAssets = nil
+                self?.scheduleStatePush()
+            }
+            .store(in: &storeCancellables)
+        mcpServiceCancellable = mcpService.objectWillChange.sink { [weak self] _ in
             Task { @MainActor in
                 self?.scheduleStatePush()
             }
         }
-        mcpServiceCancellable = mcpService.objectWillChange.sink { [weak self] _ in
-            Task { @MainActor in
-                self?.scheduleStatePush()
+    }
+
+    private func observe<Value>(_ publisher: Published<Value>.Publisher, content: Bool) {
+        publisher.dropFirst().sink { [weak self] _ in
+            // Published emits before the value changes; read the completed
+            // mutation on the next turn of the main executor.
+            Task { @MainActor [weak self] in
+                if content { self?.scheduleStatePush() }
+                else { self?.scheduleActivityPush() }
+            }
+        }.store(in: &storeCancellables)
+    }
+
+    private func scheduleActivityPush() {
+        pendingActivityPush?.cancel()
+        pendingActivityPush = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(35))
+            guard !Task.isCancelled, let self, pageReady, let webView else { return }
+            do {
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                let data = try encoder.encode(WebActivityState(store: store))
+                guard let json = String(data: data, encoding: .utf8) else { return }
+                _ = try await webView.evaluateJavaScript("window.GenImageNative?.receiveActivity(\(json));")
+            } catch {
+                sendError(id: nil, message: error.localizedDescription)
             }
         }
     }
@@ -80,12 +139,21 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
     func pushState() {
         guard pageReady, let webView else { return }
-        assetSchemeHandler.updateAssets(store.assets)
+        pendingActivityPush?.cancel()
+        if indexedAssets != store.assets {
+            assetSchemeHandler.updateAssets(store.assets)
+            indexedAssets = store.assets
+        }
+        let projectAssets = store.projectAssets
+        if projectedAssets != projectAssets {
+            cachedWebAssets = projectAssets.map { WebAsset(asset: $0, subtitleAssets: projectAssets) }
+            projectedAssets = projectAssets
+        }
 
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(WebAppState(store: store, mcpService: mcpService))
+            let data = try encoder.encode(WebAppState(store: store, mcpService: mcpService, webAssets: cachedWebAssets))
             guard let json = String(data: data, encoding: .utf8) else { return }
             webView.evaluateJavaScript("window.GenImageNative?.receiveState(\(json));")
         } catch {
@@ -103,6 +171,9 @@ final class HybridBridgeController: NSObject, ObservableObject {
     }
 
     private func handle(method: String, params: [String: Any]) throws {
+        if ["setCivitaiToken", "clearCivitaiToken", "setHuggingFaceToken", "clearHuggingFaceToken"].contains(method) {
+            scheduleStatePush()
+        }
         switch method {
         case "bootstrap":
             pushState()
@@ -113,7 +184,7 @@ final class HybridBridgeController: NSObject, ObservableObject {
 
         case "removeAsset":
             guard let id = uuid(params["assetID"]) else { throw BridgeError.invalidParameters }
-            store.removeAsset(
+            try store.removeAsset(
                 id,
                 selecting: uuid(params["replacementAssetID"]),
                 deleteFile: params["deleteFile"] as? Bool ?? false
@@ -123,7 +194,7 @@ final class HybridBridgeController: NSObject, ObservableObject {
             guard let rawAssetIDs = params["assetIDs"] as? [String] else {
                 throw BridgeError.invalidParameters
             }
-            store.closeWorkspaceProject(
+            try store.closeWorkspaceProject(
                 assetIDs: rawAssetIDs.compactMap(UUID.init(uuidString:))
             )
 

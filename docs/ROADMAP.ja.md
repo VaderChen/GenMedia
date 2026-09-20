@@ -12,7 +12,7 @@
 - ジョブキュー、キャンセル、進捗、残り時間推定、生成時間、モデルキャッシュ、手動メモリ解放。
 - 各ワークスペースタブを永続化された生成プロジェクトとして扱い、再起動後にアセット、操作、選択状態、プロファイルスナップショットを復元。
 - 作成パネルの部分描画、カーソルと IME の保護、音声／動画の連続再生。
-- `Image-YYYYMMDD-HHmm`、`Video-YYYYMMDD-HHmm`、`Music-YYYYMMDD-HHmm` の出力名と同一分の重複防止連番。
+- 出力名は `Image-YYYYMMDD-HHmm-UUID`、`Video-YYYYMMDD-HHmm-UUID`、`Music-YYYYMMDD-HHmm-UUID` とし、バッチと同一分の重複を防ぎます。
 - Release App bundle、MLX metallib、ネイティブ MCP 推論ツール、独立した DMG 署名／公証フロー。
 
 ## 現在の段階：安定化と検証

@@ -94,6 +94,34 @@ struct SubtitleGenerationRouterTests {
         #expect(!FileManager.default.fileExists(atPath: outputDirectory.path))
     }
 
+    @Test func outputDirectoryChangesApplyToNewJobsAndDoNotRedirectRunningJobs() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let original = root.appendingPathComponent("original", isDirectory: true)
+        let updated = root.appendingPathComponent("updated", isDirectory: true)
+        let (started, startedContinuation) = AsyncStream<Void>.makeStream()
+        let (release, releaseContinuation) = AsyncStream<Void>.makeStream()
+        defer { startedContinuation.finish(); releaseContinuation.finish() }
+        let adapter = GatedTranscriber(started: startedContinuation, release: release)
+        let router = SubtitleGenerationRouter(
+            outputDirectory: original, adapters: [adapter], translator: StubTextGenerator()
+        )
+        var subtitleRequest = request()
+        // A missing source uses the configured output folder instead of a sidecar.
+        subtitleRequest.sourceAsset.fileURL = root.appendingPathComponent("missing.mp4")
+        let jobRequest = subtitleRequest
+        let running = Task { try await router.generate(request: jobRequest) { _ in } }
+        for await _ in started { break }
+        router.setOutputDirectory(updated)
+        releaseContinuation.yield(())
+        let first = try await running.value
+        let second = try await router.generate(request: jobRequest) { _ in }
+        #expect(first.asset.fileURL?.deletingLastPathComponent().standardizedFileURL == original.standardizedFileURL)
+        #expect(second.asset.fileURL?.deletingLastPathComponent().standardizedFileURL == updated.standardizedFileURL)
+        #expect(first.asset.fileURL.map { FileManager.default.fileExists(atPath: $0.path) } == true)
+        #expect(second.asset.fileURL.map { FileManager.default.fileExists(atPath: $0.path) } == true)
+    }
+
     @Test func translationBatchesUseTheReducedStructuredOutputLimits() {
         let segments = (0..<13).map { index in
             TimedTranscriptSegment(start: Double(index), end: Double(index + 1), text: "字幕 \(index)")
@@ -320,4 +348,32 @@ private actor StubTextGenerator: TextGenerating {
 
 private enum StubTextGeneratorError: Error {
     case unexpectedCall
+}
+
+private actor GatedTranscriber: MediaTranscribing {
+    let started: AsyncStream<Void>.Continuation
+    let release: AsyncStream<Void>
+    private var hasStarted = false
+
+    init(started: AsyncStream<Void>.Continuation, release: AsyncStream<Void>) {
+        self.started = started
+        self.release = release
+    }
+
+    nonisolated func supports(profile: InferenceProfile) -> Bool { true }
+
+    func transcribe(
+        request: SubtitleGenerationRequest,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> TranscriptResult {
+        if !hasStarted {
+            hasStarted = true
+            started.yield(())
+            for await _ in release { break }
+        }
+        return TranscriptResult(text: "test", languageCode: "en", durationSeconds: 1,
+            segments: [TimedTranscriptSegment(start: 0, end: 1, text: "test")])
+    }
+
+    func unload() async {}
 }

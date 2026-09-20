@@ -47,6 +47,10 @@ Web UI 只能透過 Bridge 使用本機能力，不可直接讀取任意檔案�
 
 ### Web UI 更新策略
 
+- `WebAppState` 負責完整內容同步；`WebActivityState` 僅同步任務、安裝狀態、系統資源、訊息與記憶體釋放狀態。純進度更新不重算資產或全畫面內容簽章，階段切換才重新檢查相關控制項。
+- 系統資源讀取在背景執行；`WebAsset` 與資產 URL 索引依資產值快取。App 再次成為前景時清除索引，以更新外部修改的字幕。
+- 圖片格線與底片列透過 `/thumbnail` 取得最大 384 px 的 ImageIO 縮圖，採延遲載入；原圖預覽仍讀完整檔案。PNG 縮圖保留透明度及 EXIF 方向，記憶體快取限制為 16 MiB／256 張。
+
 - Swift 推送狀態時，Web UI 會在 Prompt、負向 Prompt 或歌詞欄位聚焦期間保留本機編輯值，並延後非必要的完整渲染，避免游標、選取範圍與輸入法組字被重設。
 - 生成類型與 Prompt／歌詞／輸出設定 TAB 使用獨立的創作面板 renderer，不替換預覽、播放器、Inspector 或側欄 DOM。
 - 工作區分頁 schema v3 讓每個 Tab 保存自己的工作類型、Profile 參照、Prompt、輸出參數及自動流程步驟；切換 Tab 時以單一 Bridge 命令套回 Native 創作狀態。
@@ -72,6 +76,15 @@ Web UI 只能透過 Bridge 使用本機能力，不可直接讀取任意檔案�
 
 ## Profile
 
+App 先以內建目錄及保存的自訂 Profile 建立 UI，再由 `ModelDiscoveryController` 在背景讀取模型磁碟。控制器取消舊工作並驗證請求識別碼，只有最新目錄能發布結果；失敗不替換既有清單。成功時重新對應 Profile 選取與 LoRA，仍套用 64 GB 可見性規則。模型目錄掃描期間暫不接受生成、模型下載／修復或移除操作。
+
+下載後驗證及手動修復透過 `BackgroundTask` 執行，取消會傳遞到背景工作；套用結果前再次檢查下載任務識別碼與根目錄。LoRA 清單使用獨立的掃描控制器，不因安裝單一模型而重新統計所有大型模型目錄。同步檔案系統呼叫仍須等待作業系統返回，但不占用 MainActor，取消後也不會套用舊結果。
+
+模型操作由 `SerialTaskQueue` 按模型 ID 排序；替換工作先取消並等待前一個工作的所有清理，即使 UI 已顯示暫停，也保留其佇列尾端。不同模型可同時下載。切換模型根目錄前取消下載／驗證，並透過 `ModelDiscoveryController.beforeDiscovery` 等待全部模型操作結束。移除在背景執行且不能暫停；開始移除前確認沒有生成工作，移除結束前也不允許啟動新生成。目錄切換會等移除完成並更新舊狀態後才開始掃描。
+
+`FileDownloadDelegate.start` 返回前會等待 URLSession 取消回呼與續傳資訊寫入完成；連線建立前收到取消也會記錄。下載結果先驗證大小，再移入目標磁碟的唯一暫存檔，最後使用同磁碟 rename 替換目的檔；搬移或替換失敗保留既有檔案。模型硬連結重用也透過 `ModelFileReplacement` 先建立暫存連結，失敗時保留目的檔並回退下載。HTTP 錯誤本文只讀前 2 KiB。
+
+
 `InferenceProfile` 包含：
 
 - 功能類型。
@@ -81,9 +94,13 @@ Web UI 只能透過 Bridge 使用本機能力，不可直接讀取任意檔案�
 - 功能預設值。
 - Profile revision。
 
+`ProfileVisibility` 暫時隱藏任何必要模型的建議記憶體超過 64 GB 的 Profile，64 GB 保留；會比對模型 ID 與已登錄本機路徑。建議需求代表 Runtime 規劃值，不將分階段載入的元件相加；未知模型維持可見。UI、Profile 選取與啟動預設選取共用此規則，模型與原始 Profile 資料不刪除。
+
 執行工作時，`WorkflowOperation.profileSnapshot` 保存完整值，而不是只保存 Profile ID。
 
 內建 Profile 不直接修改。使用者需要變更時先複製，再儲存為新的 revision。
+
+`CustomProfilePersistence` 將完整自訂 Profile 陣列保存至 UserDefaults 的 `GenImage.customProfiles.v1`，啟動時先還原定義，再還原啟用狀態。自訂 Profile 的選取簽章使用穩定 UUID，重新命名不會失去選取；複製會建立新 UUID 並保留音樂長度設定。資料無法解碼時保留原值並停用該次執行的自訂 Profile 保存。
 
 ## 資產與流程
 
@@ -100,17 +117,38 @@ Web UI 只能透過 Bridge 使用本機能力，不可直接讀取任意檔案�
 
 `WorkflowGraph` 提供 lineage 與 children 查詢，UI 不需要推測資產關係。
 
+`ProjectWorkspaceWriter` 在串行背景佇列合併 300 ms 內的工作區快照，原子存檔；App 結束通知會同步 flush 最後一份修改。
+
+`ProjectWorkspacePersistence.restore` 區分檔案不存在與讀取／版本錯誤。發生錯誤時 App 保留原始索引、跳過孤兒快取清理並停用工作區自動存檔，顯示錯誤原因；需修復索引並重新啟動才能恢復保存，該次執行的工作區變更不會覆寫原檔。
+
+`OutputFileNaming` 使用類型、分鐘時間戳與 UUID，避免尚未寫入的批次結果或不同服務取得相同輸出路徑。切換輸出目錄時同時更新推論、字幕與影音合成服務。 圖片、Upscale 與字幕 actor 使用具備鎖保護的 `OutputDirectoryStorage`，讓設定更新同步完成而不必排入 actor；每個工作開始時取得路徑快照，跨 await 後仍使用同一路徑。字幕依來源產生 sidecar 的規則及明確指定的輸出路徑優先權維持不變。
+
+`MediaAssetFiles` 統一處理媒體檔案的保留與重新命名。移除檔案前檢查全部工作區的來源／播放 URL，仍有參照時保留檔案；自動清理只接受 MediaCache 內的檔案，並額外保護這次被關閉資產的來源。孤兒快取判斷同時檢查資產 ID 與檔案 URL，避免另一次匯入產生新 ID 後誤刪正在使用的檔案。刪除命名工作區也使用相同清理規則。
+
+重新命名會更新所有指向同一個目錄項目的資產，保持 ID 與 lineage；只解析父目錄的符號連結，移動符號連結本身時不改掉直接使用其目標的資產。原生層在生成／匯入工作執行或取消中拒絕改名、移除資產及關閉結果分頁，Bridge 將錯誤傳給 UI，避免 UI 先移除分頁但原生操作未完成。
+
+`WarmRuntimeWorker` 在行程退出後先排空日誌，再判斷是否缺少完成事件；`IncrementalLogReader` 回報是否仍有未讀資料，仍限制每輪 1 MiB、單行 64 KiB。只有確定寫入端已退出且讀到 EOF 才交付無換行的最後一行。普通子行程在啟動前、返回結果前都檢查取消，避免已取消工作仍執行程式或回報成功。
+
+`AssetSchemeHandler` 每個請求保有不可逆的取消狀態；背景讀取的每個媒體區塊最多 512 KiB，等待主執行緒交付後才繼續讀取。停止後不再交付資料或完成回呼，handler 自身不會將整段影片累積在待交付佇列；WebKit 內部的媒體緩衝由 WebKit 管理。
+
 開啟中的工作區分頁是生成專案的生命週期邊界。Swift 將 `Project`、`MediaAsset`、`WorkflowOperation` 與選取狀態以原子 JSON 快照保存至 Application Support；一般 App 結束不會清除。Web UI 的分頁狀態保存在 WebKit localStorage，關閉分頁時透過 Bridge 通知原生層移除該分頁資產與 lineage 索引，但不刪除已輸出的媒體檔。
 
 命名工作區位於分頁之上，每個工作區維護自己的分頁集合。建立與刪除由 Bridge 進入 `AppStore+Workspaces`，刪除前必須確認；切換工作區只切換對應分頁與選取狀態，不重建 Runtime 或媒體播放器。
 
 ## 推論 Runtime
 
+`SafetensorsHeader` 僅讀 8 bytes 長度與最多 16 MiB JSON，拒絕超過檔案或上限的標頭。`ZImageLoRAAdapterNormalizer` 改寫 LoRA A/B 鍵名後，以 1 MiB 區塊複製張量資料，透過 autoreleasepool 釋放區塊，並在每次複製前檢查取消。暫存檔完整寫入且來源大小／修改時間／檔案識別未變後，以原子 rename 發布；舊快取若標頭或檔案長度不符會重建。
+
+`WarmRuntimeWorker` 的 stdin 設為非阻塞，遇到滿管線會短暫讓出執行權並檢查取消；寫入期限為 30 秒。送出請求期間仍維持單一任務限制，取消或失敗會終止該 Worker 並丟棄 session。
+
 文生圖固定使用 `Z-Image.swift` commit `28bfcf3148c041a554629247170eb54d9ac46830`：
 
 - macOS 14+、Swift 6。
 - `ZImageGenerationRequest` 支援 Prompt、負向 Prompt、尺寸、步數、Seed、模型與 runtime options。
-- `ZImageTextToImageService` 包裝 `ZImagePipeline.generate` 並提供逐階段進度。
+- `ZImageTextToImageService` 透過 `WarmRuntimeWorker` 與獨立 Worker 的 `--serve` JSON-line 協定通訊，使用 request ID 關聯逐階段進度與結果；Worker 持有並重用 `ZImagePipeline`。
+- Worker 閒置 5 分鐘或記憶體壓力時卸載；若仍在生成，等工作結束後釋放。取消、失敗或長時間無回應會終止 Worker，下次請求重建；可重用 MLX buffer 上限為 512 MiB 或實體 RAM 的 1/16，取較小者。
+- `IncrementalLogReader` 記錄檔案 offset 與未完成行，每次最多讀取 1 MiB，單行限制 64 KiB；log tail 以 seek 讀取末尾，不重讀整份日誌。
+- Upscale 將每個 tile 寫入單一 bitmap，避免累積 Core Image 合成圖；H3 MP4 每次只轉換一格 CPU 圖片。完整的 Upscale 輸出畫布與 H3 解碼像素張量仍需留在記憶體中。
 - 去噪迴圈會檢查 Swift Task cancellation。
 - 支援模型卸載、LoRA 卸載、取消與記憶體快取清理。
 

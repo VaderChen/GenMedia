@@ -1,9 +1,11 @@
 import Darwin
 import Foundation
 import Logging
+import MLX
 import ZImage
 
-private struct WorkerRequest: Decodable {
+private struct WorkerRequest: Decodable, Sendable {
+    var requestID: String?
     var modelDirectory: String
     var outputPaths: [String]
     var prompt: String
@@ -17,6 +19,7 @@ private struct WorkerRequest: Decodable {
 }
 
 private struct WorkerEvent: Encodable {
+    var requestID: String? = nil
     var type: String
     var stage: String?
     var value: Double?
@@ -55,12 +58,18 @@ private enum GenImageZImageWorker {
                 handler.logLevel = .warning
                 return handler
             }
+            // Keep weights warm, but bound reusable GPU buffers independently.
+            Memory.cacheLimit = min(512 * 1_024 * 1_024, Int(ProcessInfo.processInfo.physicalMemory / 16))
+            if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--serve" {
+                await serve()
+                return
+            }
             let requestURL = try requestURL(from: CommandLine.arguments)
             let request = try JSONDecoder().decode(
                 WorkerRequest.self,
                 from: Data(contentsOf: requestURL)
             )
-            try await run(request)
+            try await run(request, pipeline: ZImagePipeline(logger: Logger(label: "genimage.zimage.worker")))
         } catch {
             emit(
                 WorkerEvent(type: "error", stage: nil, value: nil, message: error.localizedDescription),
@@ -70,7 +79,24 @@ private enum GenImageZImageWorker {
         }
     }
 
-    private static func run(_ request: WorkerRequest) async throws {
+    private static func serve() async {
+        let pipeline = ZImagePipeline(logger: Logger(label: "genimage.zimage.worker"))
+        while let line = readLine() {
+            var requestID: String?
+            do {
+                let request = try JSONDecoder().decode(WorkerRequest.self, from: Data(line.utf8))
+                requestID = request.requestID
+                try await run(request, pipeline: pipeline)
+            } catch {
+                emit(WorkerEvent(requestID: requestID, type: "error", stage: nil, value: nil,
+                    message: error.localizedDescription), to: .standardError)
+                pipeline.unloadModel()
+            }
+        }
+        pipeline.unloadModel()
+    }
+
+    private static func run(_ request: WorkerRequest, pipeline: ZImagePipeline) async throws {
         let modelURL = URL(fileURLWithPath: request.modelDirectory, isDirectory: true)
         guard FileManager.default.fileExists(atPath: modelURL.path) else {
             throw WorkerError.missingFile(modelURL)
@@ -101,7 +127,6 @@ private enum GenImageZImageWorker {
             )
         }
 
-        let pipeline = ZImagePipeline(logger: Logger(label: "genimage.zimage.worker"))
         let outputCount = outputURLs.count
         for (index, outputURL) in outputURLs.enumerated() {
             try Task.checkCancellation()
@@ -134,6 +159,7 @@ private enum GenImageZImageWorker {
                     let aggregate = (Double(index) + localProgress) / Double(outputCount)
                     emit(
                         WorkerEvent(
+                            requestID: request.requestID,
                             type: "progress",
                             stage: String(describing: update.stage),
                             value: min(0.99, max(0, aggregate)),
@@ -150,6 +176,7 @@ private enum GenImageZImageWorker {
             }
             emit(
                 WorkerEvent(
+                    requestID: request.requestID,
                     type: "progress",
                     stage: "completedImage",
                     value: Double(index + 1) / Double(outputCount),
@@ -158,7 +185,7 @@ private enum GenImageZImageWorker {
             )
         }
 
-        emit(WorkerEvent(type: "completed", stage: nil, value: 1, message: nil))
+        emit(WorkerEvent(requestID: request.requestID, type: "completed", stage: nil, value: 1, message: nil))
     }
 
     private static func requestURL(from arguments: [String]) throws -> URL {

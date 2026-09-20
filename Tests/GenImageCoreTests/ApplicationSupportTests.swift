@@ -196,4 +196,22 @@ struct ApplicationSupportTests {
             .appendingPathComponent("\(orphanID.uuidString).m4a")
             .standardizedFileURL])
     }
+
+    @Test func cacheCleanupKeepsFilesReferencedUnderADifferentAssetID() throws {
+        let root = try makeSandbox()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceID = UUID()
+        let importedAgainID = UUID()
+        let file = root.appendingPathComponent("\(sourceID).mp4")
+        let alias = root.appendingPathComponent("alias.mp4")
+        try write("keep", to: file)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: file)
+        for reference in [file, alias] {
+            let files = ApplicationSupport.orphanMediaCacheFiles(in: root,
+                referencedAssetIDs: [importedAgainID], referencedFileURLs: [reference])
+            #expect(files.isEmpty)
+            #expect(try String(contentsOf: file, encoding: .utf8) == "keep")
+        }
+    }
+
 }

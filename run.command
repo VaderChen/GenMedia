@@ -5,8 +5,6 @@ set -euo pipefail
 SCRIPT_DIR="${0:A:h}"
 cd "$SCRIPT_DIR"
 
-export COPYFILE_DISABLE=1
-
 FFMPEG_ROOT="${GENMEDIA_FFMPEG_ROOT:-$SCRIPT_DIR/third_party/ffmpeg}"
 if [[ -x "$FFMPEG_ROOT/bin/ffmpeg" && -x "$FFMPEG_ROOT/bin/ffprobe" ]]; then
   export GENMEDIA_FFMPEG="${GENMEDIA_FFMPEG:-$FFMPEG_ROOT/bin/ffmpeg}"

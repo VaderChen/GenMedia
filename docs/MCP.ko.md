@@ -26,6 +26,8 @@ GenMedia.app에서 설정 → MCP 연동 스위치를 켜면 다음 URL이 표�
 http://127.0.0.1:12181/mcp
 ```
 
+HTTP 엔드포인트는 네이티브 로컬 클라이언트 전용입니다. `127.0.0.1`에 바인딩하며 `Host`는 `127.0.0.1:<port>` 또는 `localhost:<port>`, POST의 `Content-Type`은 `application/json`이어야 합니다(charset 매개변수 허용). null 및 로컬 Origin을 포함해 `Origin`이 있는 모든 요청에는 403을 반환합니다. 브라우저 사전 요청을 거부하며 CORS 헤더를 반환하지 않습니다. Origin 없는 OPTIONS는 405, 지원하지 않는 Content-Type은 415를 반환합니다. 네이티브 로컬 프로세스는 여전히 신뢰 대상이며 이 검사는 클라이언트 인증이 아닙니다. 공개 프록시를 통해 엔드포인트를 노출하지 마세요.
+
 이 엔드포인트는 localhost에만 바인딩되고 HTTP `POST` JSON-RPC를 받습니다. 스위치를 끄면 즉시 수신을 중단합니다. HTTP transport는 stdio와 같은 `MCPServer` 도구 코어를 직접 호출하며 stdio 자식 프로세스를 시작하거나 다른 서비스로 프록시하지 않습니다. 앱 내장 모드이므로 사용할 때는 GenMedia.app을 계속 실행해야 하며 headless 연동에는 독립 stdio 실행 파일을 사용하세요.
 
 ## MCP 메서드

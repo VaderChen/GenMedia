@@ -12,7 +12,7 @@
 - 작업 대기열, 취소, 진행률, 예상 남은 시간, 생성 시간, 모델 캐시, 수동 메모리 해제.
 - 각 작업 공간 탭을 영구 생성 프로젝트로 취급하고 재실행 후 에셋, 작업, 선택 상태, 프로필 스냅샷 복원.
 - 생성 패널 부분 렌더링, 커서와 IME 보호, 오디오/비디오 연속 재생.
-- `Image-YYYYMMDD-HHmm`, `Video-YYYYMMDD-HHmm`, `Music-YYYYMMDD-HHmm` 출력 이름과 같은 분 충돌 방지 일련번호.
+- 출력 이름은 `Image-YYYYMMDD-HHmm-UUID`, `Video-YYYYMMDD-HHmm-UUID`, `Music-YYYYMMDD-HHmm-UUID`를 사용하여 배치 및 같은 분의 충돌을 방지합니다.
 - Release App bundle, MLX metallib, 네이티브 MCP 추론 도구, 독립 DMG 서명/공증 흐름.
 
 ## 현재 단계: 안정화와 검증

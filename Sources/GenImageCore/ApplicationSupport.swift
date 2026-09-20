@@ -66,6 +66,7 @@ public enum ApplicationSupport: Sendable {
     public static func orphanMediaCacheFiles(
         in directory: URL,
         referencedAssetIDs: Set<UUID>,
+        referencedFileURLs: [URL] = [],
         fileManager: FileManager = .default
     ) -> [URL] {
         guard let entries = try? fileManager.contentsOfDirectory(
@@ -76,7 +77,13 @@ public enum ApplicationSupport: Sendable {
             return []
         }
 
+        let referencedPaths = Set(referencedFileURLs.filter(\.isFileURL).map {
+            $0.resolvingSymlinksInPath().standardizedFileURL
+        })
         return entries.filter { entry in
+            guard !referencedPaths.contains(entry.resolvingSymlinksInPath().standardizedFileURL) else {
+                return false
+            }
             guard let resourceValues = try? entry.resourceValues(forKeys: [.isRegularFileKey]),
                   resourceValues.isRegularFile == true,
                   let assetID = UUID(uuidString: entry.deletingPathExtension().lastPathComponent)

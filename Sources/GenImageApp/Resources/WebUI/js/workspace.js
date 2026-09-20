@@ -1229,7 +1229,7 @@ function renderArtwork(asset, controls = false, showKind = true) {
           playsinline
           ${controls ? "controls" : "muted"}
         >${controls ? renderVideoSubtitleTrack(asset) : ""}</video>`
-      : `<img src="${escapeHTML(asset.previewURL)}" data-asset-id="${escapeHTML(asset.id)}" alt="${escapeHTML(asset.title)}" draggable="false" />`
+      : `<img src="${escapeHTML(controls ? asset.previewURL : (asset.thumbnailURL || asset.previewURL))}" data-asset-id="${escapeHTML(asset.id)}" alt="${escapeHTML(asset.title)}" draggable="false" decoding="async" ${controls ? "" : 'loading="lazy"'} />`
     : `<span class="placeholder-icon">${asset.kind === "upscaled" ? "↗" : asset.kind === "generated" ? "✦" : isAudio ? "♫" : isSubtitle ? "CC" : "▧"}</span>`;
   return `
     <div

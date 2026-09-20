@@ -7,7 +7,7 @@
 
 模型來源為 `minimax-music3-mlx-4bit`，seed 為 `7`，denoise steps 為 `1`。
 每個 fixture 都保存 `latent_chunk_N`、Python 最終 `audio`，以及 metadata 中的
-`chunk_diagnostics`（crop、raw end 與保留 samples）。
+`chunk_diagnostics`（crop、raw end 與保留 samples）。`model` 中繼資料保存模型名稱。
 
 | Fixture | 真實 frames | chunks | 最終 audio shape | BF16 SNR |
 |---|---:|---:|---|---:|

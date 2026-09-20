@@ -24,6 +24,7 @@ struct WebAsset: Encodable {
     let textContent: String?
     let createdAt: Date
     let previewURL: String?
+    let thumbnailURL: String?
     let subtitleURL: String?
     let sidecarSubtitleFormat: SubtitleFormat?
 
@@ -46,6 +47,9 @@ struct WebAsset: Encodable {
         previewURL = asset.playbackURL == nil && asset.fileURL == nil
             ? nil
             : "genimage-asset://\(asset.id.uuidString)"
+        thumbnailURL = asset.kind.isImage && asset.fileURL != nil
+            ? "genimage-asset://\(asset.id.uuidString)/thumbnail"
+            : nil
         let sidecar = Self.sidecar(for: asset, subtitleAssets: subtitleAssets)
         subtitleURL = sidecar == nil
             ? nil
@@ -220,7 +224,7 @@ struct WebAppState: Encodable {
     let mcpService: WebMCPServiceState
 
     @MainActor
-    init(store: AppStore, mcpService: LocalMCPServiceController) {
+    init(store: AppStore, mcpService: LocalMCPServiceController, webAssets: [WebAsset]) {
         schemaVersion = 1
         projectName = store.selectedProject?.name ?? "工作區"
         workspaces = store.projects.enumerated().map { index, project in
@@ -231,10 +235,7 @@ struct WebAppState: Encodable {
         outputDirectoryPath = store.outputDirectoryPath
         civitaiTokenConfigured = CivitaiTokenStore.isConfigured()
         huggingFaceTokenConfigured = HuggingFaceTokenStore.isConfigured()
-        let projectAssets = store.projectAssets
-        assets = projectAssets.map { asset in
-            WebAsset(asset: asset, subtitleAssets: projectAssets)
-        }
+        assets = webAssets
         selectedAssetID = store.selectedAssetID
         comparisonAssetID = store.comparisonAssetID
         recipe = WebRecipe(recipe: store.recipe)
@@ -245,12 +246,15 @@ struct WebAppState: Encodable {
             WebModel(descriptor: $0, installation: store.installation(for: $0.id))
         }
         loras = store.loras
-        profiles = store.profiles
+        profiles = store.visibleProfiles
         disabledProfileIDs = store.disabledProfileIDs.sorted {
             $0.uuidString < $1.uuidString
         }
+        let visibleProfileIDs = Set(profiles.map(\.id))
         activeProfileIDs = Dictionary(
-            uniqueKeysWithValues: store.activeProfileIDs.map { ($0.key.rawValue, $0.value) }
+            uniqueKeysWithValues: store.activeProfileIDs.compactMap { capability, id in
+                visibleProfileIDs.contains(id) ? (capability.rawValue, id) : nil
+            }
         )
         operations = store.projectOperations.map {
             WebOperation(
@@ -268,5 +272,23 @@ struct WebAppState: Encodable {
         systemMetrics = store.systemMetrics
         isReleasingMemory = store.isReleasingMemory
         self.mcpService = WebMCPServiceState(service: mcpService)
+    }
+}
+
+/// Frequently changing fields have a separate bridge message, so a metrics
+/// tick never rebuilds assets, probes credentials, or serializes the catalog.
+struct WebActivityState: Encodable {
+    let jobs: [GenerationJob]
+    let installations: [String: ModelInstallation]
+    let statusMessage: String?
+    let systemMetrics: SystemMetricsSnapshot
+    let isReleasingMemory: Bool
+
+    @MainActor init(store: AppStore) {
+        jobs = store.jobs
+        installations = store.installations
+        statusMessage = store.statusMessage
+        systemMetrics = store.systemMetrics
+        isReleasingMemory = store.isReleasingMemory
     }
 }

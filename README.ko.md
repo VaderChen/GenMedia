@@ -12,13 +12,24 @@ GenMedia는 **Apple Silicon을 네이티브로 지원**하는 로컬 AI 미디�
 - 별도의 설정 화면에서 번체 중국어, 영어, 일본어, 한국어와 저장 가능한 6가지 색상 테마를 지원합니다.
 - 설정 화면의 스위치로 localhost 전용 MCP HTTP API를 시작할 수 있으며, 앱이 실행 중이 아니어도 독립 JSON-RPC 2.0 stdio 서버를 사용할 수 있습니다.
 
+## 최근 수정 및 검증 (2026-09-21)
+
+모델 검색, 검증 및 삭제는 백그라운드에서 실행합니다. 같은 모델의 일시 중지, 재개, 복구 및 삭제는 이전 작업의 정리가 끝날 때까지 기다립니다. 출력 디렉터리를 변경하면 새 작업부터 적용되고 실행 중인 작업은 시작 시 경로를 유지합니다.
+
+다른 에셋이나 작업 공간에서 참조하는 파일은 보존하며 이름 변경은 일치하는 모든 참조에 반영합니다. 자동 정리는 참조되지 않는 MediaCache 프록시로 제한합니다. 작업 공간을 읽을 수 없으면 인덱스와 캐시를 보존하고 해당 세션의 자동 저장을 중지합니다.
+
+LoRA 변환은 가중치를 1 MiB 단위로 복사합니다. Worker 로그는 증분으로 읽으며 정상 종료 직전의 대량 로그도 처리합니다. 루트 패키지 전체 빌드와 **Swift 테스트 141개**를 통과했습니다. 합성 LoRA 측정 및 검증 범위는 [성능 기록](docs/PERFORMANCE_CHANGES.md)(번체 중국어)을 참조하세요. 모든 모델과 하드웨어 조합을 검증했다는 의미는 아닙니다.
+
+- [검증 방법 및 결과](docs/VALIDATION.md)(번체 중국어)
+- [상세 검사 및 수정 보고서](docs/PROJECT_REVIEW_2026-09-20.md)(번체 중국어)
+
 ## 미리보기
 
 ![GenMedia 지능형 미디어 생성 인터페이스](images/cap001.jpg)
 
 ## 실행
 
-요구 사항: macOS 14 이상, Apple Silicon, Xcode 16 이상.
+요구 사항: Apple Silicon. 패키지의 최소 배포 대상은 macOS 14입니다. 빌드에는 고정된 의존성과 호환되는 Xcode/Swift 및 Metal Toolchain이 필요합니다. 이번 검증은 Swift 6.4와 macOS 27 SDK를 사용했으며 이전 도구 체인 및 OS는 다시 검증하지 않았습니다.
 
 ```bash
 ./build.command
@@ -43,15 +54,14 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ### FFmpeg 빌드 문제 해결
 
 - 첫 `./build.command` 실행에는 FFmpeg와 LAME 소스를 내려받기 위한 네트워크 연결이 필요합니다. 이후 빌드는 캐시된 소스와 `third_party/ffmpeg`를 재사용하며, 없거나 불완전할 때만 자동으로 다시 빌드합니다.
-- Homebrew `pkg-config`는 필요하지 않습니다. LAME 구성 확인 전용 fallback을 공백이 없는 임시 경로에서 실행하므로 프로젝트 경로에 공백이 있어도 빌드할 수 있습니다.
-- ExFAT 같은 외부 파일 시스템이 만드는 `._*` AppleDouble sidecar는 dylib 처리 전에 제거되어 Mach-O 파일로 잘못 인식되지 않습니다.
+- Homebrew `pkg-config`는 필요하지 않습니다. LAME 구성 확인에는 `scripts/pkg-config-fallback.sh`를 직접 사용하며 FFmpeg 소스는 `.build/ffmpeg-source`에 저장합니다.
 - 빌드가 중단되거나 실패하면 이전의 사용 가능한 FFmpeg 배포판을 복원합니다. 네트워크 또는 Xcode 문제를 해결한 뒤 `./build.command`를 다시 실행하세요. `GENMEDIA_FFMPEG_ROOT`로 출력 위치를 변경할 수 있습니다.
 
 ### 비디오 Runtime
 
 비디오 생성은 앱에 포함된 `GenImageLTXVideoWorker` Swift 하위 프로세스에서 실행됩니다. Swift 앱이 프로필, 매개변수 검증, 작업 대기열, 취소, 진행률, 에셋, 비디오 재생을 관리하므로 별도의 비디오 Runtime이 필요하지 않습니다.
 
-모델 센터의 `dgrauet/ltx-2.3-mlx-q4` 설치 계획은 네이티브 MLX INT4 Transformer, Video／Audio VAE, vocoder, 공간 업스케일러와 `google/gemma-3-12b-it-qat-q4_0-unquantized`의 Gemma 3 12B 텍스트 인코더를 함께 내려받습니다. 전체 다운로드는 약 42 GiB이며 48 GB 이상의 메모리를 권장합니다.
+모델 센터의 `dgrauet/ltx-2.3-mlx-q4` 설치 계획은 네이티브 MLX INT4 Transformer, Video／Audio VAE, vocoder, 공간 업스케일러와 `Lightricks/gemma-3-12b-it-qat-q4_0-unquantized`의 Gemma 3 12B 텍스트 인코더를 함께 내려받습니다. 전체 다운로드는 약 42 GiB이며 48 GB 이상의 메모리를 권장합니다.
 
 개발 빌드는 `GENIMAGE_LTX_WORKER`로 사용자 지정 Worker를 선택할 수 있습니다. 릴리스 앱은 Bundle의 `Contents/Helpers/GenImageLTXVideoWorker`를 사용합니다. `GENIMAGE_LTX_GEMMA_MODEL`은 Gemma 디렉터리를 재정의하며, 설정하지 않으면 LTX 모델 디렉터리의 `gemma-3-12b`를 먼저 사용합니다.
 
@@ -106,10 +116,11 @@ Qwen3-VL, Qwen3.5, Qwen3.8은 멀티모달 모델이므로 모델 센터에서 �
 - 취소 시 먼저 `cancelling` 상태로 전환되고 Runtime Task가 끝나면 `cancelled`로 변경되어 생성 및 메모리 버튼이 다시 활성화됩니다. ETA는 진행률 35% 및 실행 15초 이후 숫자로 표시되며 안정적인 샘플이 부족하면 전체 경과 시간을 사용합니다.
 - Z-Image MLX 호환 계층은 `quantize_config.json`, affine/mxfp4, packed pad token, FP16에서 BF16으로의 로딩을 처리합니다. andrevp Z-Image Turbo MLX 4-bit는 실제 이미지 생성으로 검증했습니다.
 - 의존 패키지에 대한 소스 수정은 `Patches/manifest.txt`에 나열하며 Swift Package 해석 후 `scripts/apply-runtime-patches.command`가 적용합니다(`build.command`가 자동 호출). 의존 패키지 버전이 manifest와 다르거나, 수정 파일이 없거나, 적용에 실패하거나, 적용 후 예상한 표시를 찾지 못하면 빌드를 중단하며 수정되지 않은 소스로 계속 진행하지 않습니다. `scripts/apply-runtime-patches.command --verify`로 검사만 할 수 있습니다.
-- 텍스트→이미지 작업이 끝난 뒤에도 모델 가중치와 워밍업 buffer를 유지합니다. 5분 동안 유휴 상태가 되면 재사용 가능한 MLX 임시 buffer만 정리하고 모델은 언로드하지 않습니다. 사이드바의 메모리 해제, 모델 전환 또는 프로필 전환 시 RAM 90% 초과 보호가 동작할 때만 불필요한 Runtime을 해제합니다.
-- 다운로드는 원본 파일명을 유지합니다. 생성 결과는 `Image-YYYYMMDD-HHmm`, `Video-YYYYMMDD-HHmm` 또는 `Music-YYYYMMDD-HHmm`을 사용하며 같은 분에 중복되면 일련번호를 추가합니다. 설정에서 출력 디렉터리를 변경할 수 있습니다.
+- 필요한 모델의 권장 메모리가 64 GB를 초과하는 Profile은 일시적으로 숨깁니다. 정확히 64 GB인 Profile은 계속 선택할 수 있고 기존 Profile 및 모델 파일은 보존합니다. 카탈로그 권장값 기준이며 실제 최대 메모리 사용량을 보장하지 않습니다.
+- Z-Image는 상주 Worker에서 모델과 LoRA를 재사용하여 연속 생성의 재로딩 비용을 줄입니다. 5분 유휴, 메모리 해제 또는 시스템 메모리 압박 시 언로드합니다. 메모리 압박 시 실행 중인 작업은 완료 후 Worker를 해제하며, 취소나 실패 시 Worker를 종료하고 다음 요청에서 다시 시작합니다.
+- 다운로드는 원본 파일명을 유지합니다. 생성 결과는 `Image-YYYYMMDD-HHmm-UUID`, `Video-YYYYMMDD-HHmm-UUID`, `Music-YYYYMMDD-HHmm-UUID`를 사용해 배치 및 같은 분의 충돌을 방지합니다. 출력 디렉터리는 설정에서 변경하며 자막은 보통 원본 이름을 유지하여 원본 디렉터리에 저장합니다.
 - 열려 있는 각 작업 공간 탭을 생성 프로젝트로 취급합니다. 에셋과 lineage는 Application Support에 원자적으로 저장되며 앱을 다시 실행해도 복원됩니다. 탭을 명시적으로 닫을 때만 해당 프로젝트의 작업 공간 인덱스를 제거하고 출력된 미디어 파일은 디스크에 유지합니다.
-- 앱 데이터는 모두 `~/Library/Application Support/GenImage/`(`Models`, `Runtime`, `Workspace`, `Pasted`, `Generated`)에 있으며 `GenImageCore/ApplicationSupport.swift`가 유일한 정의처입니다. 작업 공간 인덱스는 예전에 `GenMedia/`에 기록되었고 실행 시 현재 루트로 가져옵니다. 이름이 같은 항목은 기존 것을 유지하며 덮어쓰거나 병합하지 않습니다. 기존 모델과 이전 Runtime 데이터의 호환성을 유지하기 위해 앱 이름에 맞춘 `GenMedia`로 바꾸지 않고 `GenImage`를 유지합니다.
+- 앱이 관리하는 데이터의 기본 위치는 `~/Library/Application Support/GenImage/`(`Models`, `Runtime`, `Workspace`, `Pasted`, `Generated`)에 있으며 `GenImageCore/ApplicationSupport.swift`가 유일한 정의처입니다. 작업 공간 인덱스는 예전에 `GenMedia/`에 기록되었고 실행 시 현재 루트로 가져옵니다. 이름이 같은 항목은 기존 것을 유지하며 덮어쓰거나 병합하지 않습니다. 기존 모델과 이전 Runtime 데이터의 호환성을 유지하기 위해 앱 이름에 맞춘 `GenMedia`로 바꾸지 않고 `GenImage`를 유지합니다. 모델과 생성 결과는 설정에서 다른 디렉터리를 선택할 수 있으며 가져온 사용자 파일은 원래 위치에 유지합니다.
 - 프롬프트와 가사를 편집하는 동안 커서, 선택 범위, IME 조합 상태를 네이티브 상태 업데이트로부터 보존합니다. 생성 유형, 프롬프트, 가사, 출력 설정 탭은 생성 패널만 다시 렌더링합니다. 불가피한 전체 업데이트에서도 재생 중인 오디오와 비디오 노드를 재사용하여 재생이 끊기지 않도록 합니다.
 - 작업 공간 필름스트립에 이미지 가져오기 버튼이 있으며 Finder에서 PNG, JPEG, WebP, GIF, TIFF, HEIC, HEIF 파일을 하나 이상 끌어 놓을 수 있습니다. 음악 생성 중에는 미디어 소스가 섞이지 않도록 이미지 가져오기를 비활성화합니다. 이미지 생성에서 원본 이미지를 선택하면 기본 버튼이 이미지→이미지 프로필을 사용하고, 선택하지 않으면 텍스트→이미지 프로필을 사용합니다.
 - 이미지와 비디오 비율 항목은 드롭다운으로 제공됩니다. 이미지→이미지에서는 원본 이미지를 선택한 뒤에만 `원본 해상도`가 표시되며, 원본 크기를 Runtime에서 사용할 수 있는 16의 배수로 변환합니다.
@@ -244,8 +255,9 @@ scripts/
 
 ## 라이선스
 
-이 프로젝트는 GPLv3와 상용 라이선스의 이중 라이선스 방식을 사용합니다.
+이 프로젝트에는 [GenMedia 소스 공개·상업적 판매 금지 라이선스 v1.1](LICENSE.ko.md)이 적용됩니다.
 
-- 오픈 소스 사용은 [GNU General Public License v3.0](LICENSE)에 따라 허가됩니다.
-- 비공개 소스 통합, 독점 제품 배포, 맞춤형 상용 조건 등 GPLv3를 준수할 수 없거나 준수하지 않으려는 경우 저작권자에게 별도의 상용 라이선스를 요청하세요.
-- 내장 FFmpeg와 LAME은 각각의 LGPL 조건을 유지합니다. 라이선스 본문, 정확한 소스 버전, 빌드 정보는 App의 `Contents/Resources/Licenses/`에 포함됩니다.
+- 라이선스 조건에 따라 비판매 목적의 사용, 연구, 수정, 무료 공유 및 조직 내부 사용을 허용합니다.
+- 판매, 유료 호스팅/SaaS, 유료 지원, 유료 제품 통합 등 제한되는 수익화에는 별도의 서면 라이선스가 필요합니다. [상업적 판매 금지 정책](COMMERCIAL-LICENSE.md)을 참조하세요.
+- 자체 소스 공개 라이선스이며 OSI 오픈 소스 정의에 부합한다고 주장하지 않습니다. 내용이 다르면 번체 중국어 라이선스 전문이 우선합니다.
+- 제삼자 라이브러리와 모델에는 각각의 라이선스가 적용됩니다. 내장 FFmpeg/LAME의 LGPL 전문, 소스 버전 및 빌드 정보는 `Contents/Resources/Licenses/`에 포함됩니다.

@@ -3,20 +3,22 @@ import GenImageCore
 import ImageIO
 
 public actor Qwen2511ImageToImageService: ImageToImageGenerating {
-    private var outputDirectory: URL
+    private nonisolated let outputLocation: OutputDirectoryStorage
+    private var outputDirectory: URL { outputLocation.url }
 
     public init(outputDirectory: URL) {
-        self.outputDirectory = outputDirectory
+        self.outputLocation = OutputDirectoryStorage(outputDirectory)
     }
 
-    public func setOutputDirectory(_ outputDirectory: URL) {
-        self.outputDirectory = outputDirectory
+    public nonisolated func setOutputDirectory(_ outputDirectory: URL) {
+        outputLocation.update(to: outputDirectory)
     }
 
     public func generate(
         request: ImageToImageRequest,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> MediaAsset {
+        let outputDirectory = self.outputDirectory
         guard request.profile.capability == .imageToImage else {
             throw Qwen2511RuntimeError.incompatibleProfile
         }
@@ -186,12 +188,7 @@ public actor Qwen2511ImageToImageService: ImageToImageGenerating {
 
     // Worker 的 log 是一行一個 JSON 事件，所以進度與錯誤訊息都從事件取，取不到才退回純文字。
     private nonisolated static func latestProgress(in log: RuntimeLog) -> Double? {
-        guard let data = log.data() else { return nil }
-        return data.split(separator: 0x0A).compactMap { line -> Double? in
-            guard let event = try? JSONDecoder().decode(WorkerEvent.self, from: Data(line)),
-                  event.type == "progress" else { return nil }
-            return event.value
-        }.max()
+        log.latestProgress(useMaximum: true)
     }
 
     private nonisolated static func logMessage(in log: RuntimeLog) -> String {

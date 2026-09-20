@@ -31,6 +31,9 @@ public final class MCPHTTPServer: @unchecked Sendable {
         host: String = MCPHTTPServer.defaultHost,
         port rawPort: UInt16 = MCPHTTPServer.defaultPort
     ) throws -> URL {
+        guard ["127.0.0.1", "localhost"].contains(host.lowercased()) else {
+            throw MCPHTTPServerError.invalidEndpoint(host: host, port: rawPort)
+        }
         lock.lock()
         if let listener, listener.state != .cancelled, let endpointURL {
             lock.unlock()
@@ -44,10 +47,10 @@ public final class MCPHTTPServer: @unchecked Sendable {
         }
 
         let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(host), port: port)
+        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(Self.defaultHost), port: port)
         let listener = try NWListener(using: parameters)
         listener.newConnectionHandler = { [weak self] connection in
-            self?.accept(connection)
+            self?.accept(connection, port: rawPort)
         }
         listener.stateUpdateHandler = { [weak self, weak listener] state in
             guard let self, let listener else { return }
@@ -80,11 +83,13 @@ public final class MCPHTTPServer: @unchecked Sendable {
         emit(.stopped)
     }
 
-    private func accept(_ connection: NWConnection) {
+    private func accept(_ connection: NWConnection, port: UInt16) {
         let identifier = ObjectIdentifier(connection)
         let session = MCPHTTPConnection(
             connection: connection,
             dispatcher: dispatcher,
+            queue: queue,
+            port: port,
             endpointPath: Self.endpointPath
         ) { [weak self] in
             self?.removeConnection(identifier)
@@ -92,7 +97,7 @@ public final class MCPHTTPServer: @unchecked Sendable {
         lock.lock()
         connections[identifier] = session
         lock.unlock()
-        session.start(on: queue)
+        session.start()
     }
 
     private func removeConnection(_ identifier: ObjectIdentifier) {
@@ -183,6 +188,8 @@ private struct MCPHTTPPayloadResponse: Sendable {
         case 202: "Accepted"
         case 204: "No Content"
         case 400: "Bad Request"
+        case 403: "Forbidden"
+        case 415: "Unsupported Media Type"
         case 404: "Not Found"
         case 405: "Method Not Allowed"
         case 413: "Payload Too Large"
@@ -197,6 +204,8 @@ private final class MCPHTTPConnection: @unchecked Sendable {
     private let connection: NWConnection
     private let dispatcher: MCPHTTPDispatcher
     private let endpointPath: String
+    private let queue: DispatchQueue
+    private let port: UInt16
     private let completion: @Sendable () -> Void
     private var buffer = Data()
     private var isFinished = false
@@ -204,16 +213,20 @@ private final class MCPHTTPConnection: @unchecked Sendable {
     init(
         connection: NWConnection,
         dispatcher: MCPHTTPDispatcher,
+        queue: DispatchQueue,
+        port: UInt16,
         endpointPath: String,
         completion: @escaping @Sendable () -> Void
     ) {
         self.connection = connection
         self.dispatcher = dispatcher
+        self.queue = queue
+        self.port = port
         self.endpointPath = endpointPath
         self.completion = completion
     }
 
-    func start(on queue: DispatchQueue) {
+    func start() {
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
             case .failed, .cancelled:
@@ -227,7 +240,7 @@ private final class MCPHTTPConnection: @unchecked Sendable {
     }
 
     func cancel() {
-        finish()
+        queue.async { [self] in finish() }
     }
 
     private func receive() {
@@ -259,17 +272,14 @@ private final class MCPHTTPConnection: @unchecked Sendable {
             send(.json(status: 404, object: Self.errorObject("Not found")))
             return
         }
-        if method == "OPTIONS" {
-            send(MCPHTTPPayloadResponse(status: 204, reason: "No Content", body: Data()))
-            return
-        }
         guard method == "POST" else {
             send(.json(status: 405, object: Self.errorObject("Use POST for JSON-RPC requests")))
             return
         }
         Task { [weak self, dispatcher] in
             let response = await dispatcher.response(for: body)
-            self?.send(response)
+            guard let self else { return }
+            queue.async { [self] in send(response) }
         }
     }
 
@@ -299,8 +309,8 @@ private final class MCPHTTPConnection: @unchecked Sendable {
             guard !name.isEmpty else {
                 return .failure(400, "Invalid HTTP header")
             }
-            if name == "content-length", headers[name] != nil {
-                return .failure(400, "Duplicate Content-Length header")
+            if ["content-length", "host", "origin", "content-type"].contains(name), headers[name] != nil {
+                return .failure(400, "Duplicate HTTP header")
             }
             if let existing = headers[name] {
                 headers[name] = "\(existing), \(value)"
@@ -308,7 +318,26 @@ private final class MCPHTTPConnection: @unchecked Sendable {
                 headers[name] = value
             }
         }
-        let contentLength = Int(headers["content-length"] ?? "0") ?? 0
+        // This endpoint is for native local MCP clients, not browser pages.
+        // Reject browser origins even for simple requests; CORS alone cannot
+        // prevent a cross-origin POST from executing a tool.
+        let allowedHosts = Set(["127.0.0.1:\(port)", "localhost:\(port)"]
+            + (port == 80 ? ["127.0.0.1", "localhost"] : []))
+        guard let host = headers["host"]?.lowercased(), allowedHosts.contains(host),
+              headers["origin"] == nil else {
+            return .failure(403, "Only native local MCP clients are allowed")
+        }
+        if method == "POST" {
+            let contentType = headers["content-type"]?.split(separator: ";").first?
+                .trimmingCharacters(in: .whitespaces).lowercased()
+            guard contentType == "application/json" else {
+                return .failure(415, "Content-Type must be application/json")
+            }
+        }
+        guard headers["transfer-encoding"] == nil,
+              let contentLength = Int(headers["content-length"] ?? "0") else {
+            return .failure(400, "Invalid HTTP body framing")
+        }
         guard contentLength >= 0, contentLength <= Self.maximumRequestBytes else {
             return .failure(413, "Payload too large")
         }
@@ -329,9 +358,6 @@ private final class MCPHTTPConnection: @unchecked Sendable {
         Content-Type: \(contentType)\r
         Content-Length: \(response.body.count)\r
         Cache-Control: no-store\r
-        Access-Control-Allow-Origin: *\r
-        Access-Control-Allow-Headers: Content-Type, Accept, MCP-Protocol-Version\r
-        Access-Control-Allow-Methods: POST, OPTIONS\r
         Connection: close\r
         \r
 

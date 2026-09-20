@@ -205,6 +205,15 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         self.supportsGeneration = supportsGeneration
     }
 
+    public func duplicated() -> InferenceProfile {
+        InferenceProfile(
+            name: "\(name) 副本", capability: capability, modelID: modelID,
+            modelRevision: modelRevision, architecture: architecture, defaults: defaults,
+            music: music, loras: loras, profileRevision: 1, notes: notes,
+            isBuiltIn: false, supportsGeneration: supportsGeneration
+        )
+    }
+
     public var requiredModelIDs: [String] {
         ([modelID] + loras.map(\.modelID)).reduce(into: []) { result, modelID in
             if !result.contains(modelID) { result.append(modelID) }

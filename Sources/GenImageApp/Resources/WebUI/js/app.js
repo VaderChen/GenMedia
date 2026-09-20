@@ -1,4 +1,5 @@
-import { invoke, onClipboardImage, onState } from "./bridge.js";
+import { invoke, onActivity, onClipboardImage, onState } from "./bridge.js";
+import { mergeActivityState } from "./activity-state.js";
 import { createAutomaticFlowPlan } from "./automatic-flow.js";
 import {
   refreshModelProgressDOM,
@@ -178,7 +179,24 @@ onClipboardImage((image) => {
   handleClipboardImage(image.dataURL, image.name).catch(showBridgeError);
 });
 
-onState((nextState) => {
+onActivity((activity) => {
+  if (!state) return;
+  const { nextState, structureChanged } = mergeActivityState(state, activity);
+  if (structureChanged) {
+    applyNativeState(nextState);
+    return;
+  }
+  if (nextState.statusMessage !== state.statusMessage) scheduleStatusMessageDismiss(nextState.statusMessage);
+  state = nextState;
+  refreshModelProgressDOM(state, root);
+  updateSystemMetricsDOM(state, root);
+  refreshJobsPanel(workspaceStateForActiveTab(ui, state), root);
+  refreshToastDOM(state, root);
+});
+
+onState(applyNativeState);
+
+function applyNativeState(nextState) {
   if (nextState.schemaVersion !== 1) {
     showBridgeError(new Error(`Unsupported Bridge schema: ${nextState.schemaVersion}`));
     return;
@@ -276,7 +294,7 @@ onState((nextState) => {
     restoreActiveWorkspaceSelection(nextState);
     syncActiveWorkspaceTabDraftToNative().catch(showBridgeError);
   }
-});
+}
 
 invoke("bootstrap").catch(showBridgeError);
 

@@ -401,7 +401,7 @@ def dump_decode(arguments: argparse.Namespace) -> None:
         {"latent": latent, "audio": audio},
         metadata={
             "stage": "decode_chunks",
-            "model": str(arguments.model_dir),
+            "model": model_directory.name,
             "seed": str(arguments.seed),
             "input_dtype": arguments.input_dtype,
             "sampling_rate": "44100",
@@ -527,7 +527,7 @@ def dump_decode_chunks(arguments: argparse.Namespace) -> None:
     metadata = {
         "stage": "decode_chunks",
         "reference": "Blaizzy/mlx-audio@784b29e2691a93ca7483147d86f61859dfaa6296",
-        "model": str(model_directory),
+        "model": model_directory.name,
         "seed": str(arguments.seed),
         "audio_duration": str(arguments.audio_duration),
         "steps": str(arguments.steps),

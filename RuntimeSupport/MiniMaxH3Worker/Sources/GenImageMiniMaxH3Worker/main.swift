@@ -280,11 +280,10 @@ private enum GenImageMiniMaxH3Worker {
             encodingHeartbeat.resume()
             defer { encodingHeartbeat.cancel() }
 
-            let images = try MiniMaxH3VideoWriter.images(from: result.pixels)
             let outputURL = URL(fileURLWithPath: request.outputPath)
             let audioConfiguration = MiniMaxH3AudioVAEConfiguration.default
             try MiniMaxH3VideoWriter.writeMP4(
-                images,
+                pixels: result.pixels,
                 to: outputURL,
                 frameRate: request.frameRate,
                 audio: result.audio.map {
@@ -301,9 +300,9 @@ private enum GenImageMiniMaxH3Worker {
             )
 
             emitter.emit(.completed(
-                durationSeconds: Double(images.count) / Double(max(request.frameRate, 1)),
+                durationSeconds: Double(result.pixels.shape[2]) / Double(max(request.frameRate, 1)),
                 sampleRate: result.audio == nil ? 0 : audioConfiguration.sampleRate,
-                numFrames: images.count,
+                numFrames: result.pixels.shape[2],
                 pixelWidth: request.width,
                 pixelHeight: request.height
             ))

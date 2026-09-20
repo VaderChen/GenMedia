@@ -1,5 +1,6 @@
 import Foundation
 import GenImageCore
+import GenImageRuntime
 import UniformTypeIdentifiers
 @preconcurrency import WebKit
 
@@ -7,17 +8,32 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
     private struct AssetReference: Sendable {
         let fileURL: URL
         let isTimedMedia: Bool
+        let isImage: Bool
         let subtitleSidecar: SubtitleSidecar?
     }
 
     private final class State: @unchecked Sendable {
         let lock = NSLock()
         var assetReferences: [String: AssetReference] = [:]
-        var stoppedTaskIDs = Set<ObjectIdentifier>()
+        var tasks: [ObjectIdentifier: URLSchemeTaskReference] = [:]
     }
 
     private final class URLSchemeTaskReference: @unchecked Sendable {
         let task: any WKURLSchemeTask
+        private let lock = NSLock()
+        private var active = true
+
+        var isActive: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return active
+        }
+
+        func cancel() {
+            lock.lock()
+            active = false
+            lock.unlock()
+        }
 
         init(_ task: any WKURLSchemeTask) {
             self.task = task
@@ -25,6 +41,7 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
     }
 
     private let state = State()
+    private let thumbnails = ImageThumbnailCache()
 
     func updateAssets(_ assets: [GenImageCore.MediaAsset]) {
         state.lock.lock()
@@ -36,6 +53,7 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
                         AssetReference(
                             fileURL: $0,
                             isTimedMedia: asset.kind.isTimedMedia,
+                            isImage: asset.kind.isImage,
                             subtitleSidecar: Self.subtitleSidecar(for: asset, among: assets)
                         )
                     )
@@ -51,7 +69,7 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
             urlSchemeTask.didFailWithError(URLError(.badURL))
             return
         }
-        guard requestURL.path.isEmpty || requestURL.path == "/" || requestURL.path == "/subtitle" else {
+        guard requestURL.path.isEmpty || requestURL.path == "/" || requestURL.path == "/subtitle" || requestURL.path == "/thumbnail" else {
             urlSchemeTask.didFailWithError(URLError(.badURL))
             return
         }
@@ -59,7 +77,6 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
         state.lock.lock()
         let reference = state.assetReferences[host]
         let taskID = ObjectIdentifier(urlSchemeTask as AnyObject)
-        state.stoppedTaskIDs.remove(taskID)
         state.lock.unlock()
 
         guard let reference else {
@@ -68,6 +85,9 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
         }
 
         let taskReference = URLSchemeTaskReference(urlSchemeTask)
+        state.lock.lock()
+        state.tasks[taskID] = taskReference
+        state.lock.unlock()
         DispatchQueue.global(qos: .userInitiated).async { [weak self, taskReference] in
             self?.serve(
                 reference: reference,
@@ -81,8 +101,9 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
     func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
         let taskID = ObjectIdentifier(urlSchemeTask as AnyObject)
         state.lock.lock()
-        state.stoppedTaskIDs.insert(taskID)
+        let task = state.tasks.removeValue(forKey: taskID)
         state.lock.unlock()
+        task?.cancel()
     }
 
     nonisolated private func serve(
@@ -92,8 +113,9 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
         taskID: ObjectIdentifier
     ) {
         defer {
+            task.cancel()
             state.lock.lock()
-            state.stoppedTaskIDs.remove(taskID)
+            if state.tasks[taskID] === task { state.tasks.removeValue(forKey: taskID) }
             state.lock.unlock()
         }
 
@@ -112,7 +134,8 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
                 if didAccess { resourceURL.stopAccessingSecurityScopedResource() }
             }
 
-            guard !isStopped(taskID) else { return }
+            guard task.isActive else { return }
+            guard requestURL.path != "/thumbnail" || reference.isImage else { throw URLError(.badURL) }
             if requestURL.path == "/subtitle" {
                 try serveSubtitle(
                     sidecar: reference.subtitleSidecar!,
@@ -131,9 +154,13 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
                         taskID: taskID
                     )
                 } else {
-                    let data = try Data(contentsOf: reference.fileURL)
-                    guard !isStopped(taskID) else { return }
-                    let contentType = contentType(for: reference.fileURL)
+                    let isThumbnail = requestURL.path == "/thumbnail"
+                    guard !isThumbnail || reference.isImage else { throw URLError(.badURL) }
+                    let data = try isThumbnail
+                        ? thumbnails.data(for: reference.fileURL)
+                        : Data(contentsOf: reference.fileURL)
+                    guard task.isActive else { return }
+                    let contentType = isThumbnail ? "image/png" : contentType(for: reference.fileURL)
                     let response = URLResponse(
                         url: requestURL,
                         mimeType: contentType,
@@ -281,12 +308,14 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
         task: URLSchemeTaskReference,
         _ delivery: @escaping @Sendable (any WKURLSchemeTask) -> Void
     ) -> Bool {
-        guard !isStopped(taskID) else { return false }
-        DispatchQueue.main.async { [weak self, task, delivery] in
-            guard let self, !self.isStopped(taskID) else { return }
+        guard task.isActive else { return false }
+        // serve runs on a background queue. Waiting for each delivery bounds
+        // pending media data to one chunk and orders callbacks with WebKit stop.
+        return DispatchQueue.main.sync {
+            guard task.isActive else { return false }
             delivery(task.task)
+            return task.isActive
         }
-        return true
     }
 
     nonisolated private func requestedRange(
@@ -298,8 +327,10 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
               header.lowercased().hasPrefix("bytes=") else {
             throw URLError(.cannotParseResponse)
         }
-        let value = header.dropFirst("bytes=".count)
-            .split(separator: ",", maxSplits: 1, omittingEmptySubsequences: true)[0]
+        guard let value = header.dropFirst("bytes=".count)
+            .split(separator: ",", maxSplits: 1, omittingEmptySubsequences: true).first else {
+            throw URLError(.cannotParseResponse)
+        }
         let components = value.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
         guard components.count == 2,
               let start = Int64(components[0].trimmingCharacters(in: .whitespaces)),
@@ -331,9 +362,4 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
             ?? "application/octet-stream"
     }
 
-    nonisolated private func isStopped(_ taskID: ObjectIdentifier) -> Bool {
-        state.lock.lock()
-        defer { state.lock.unlock() }
-        return state.stoppedTaskIDs.contains(taskID)
-    }
 }

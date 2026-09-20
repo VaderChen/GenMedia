@@ -5,9 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="${0:A:h}"
 cd "$SCRIPT_DIR"
 
-export COPYFILE_DISABLE=1
-
 FFMPEG_ROOT="${GENMEDIA_FFMPEG_ROOT:-$SCRIPT_DIR/third_party/ffmpeg}"
+APP_LICENSE_FILES=(LICENSE.md LICENSE.en.md LICENSE.ja.md LICENSE.ko.md COMMERCIAL-LICENSE.md)
 
 bundled_ffmpeg_ready() {
   local source_bin_dir="$FFMPEG_ROOT/bin"
@@ -131,7 +130,6 @@ prepare_bundled_ffmpeg() {
   for library in "${source_libraries[@]}"; do
     /bin/cp -P "$library" "$resource_lib_dir/${library:t}"
   done
-  find "$resource_bin_dir" "$resource_lib_dir" -name '._*' -delete
 
   typeset -A required_licenses
   required_licenses=(
@@ -158,7 +156,7 @@ prepare_bundled_ffmpeg() {
       /usr/bin/otool -L "$library" \
         | sed -n 's/^[[:space:]]*\([^[:space:]]*\.dylib\).*$/\1/p'
     )
-  done < <(find "$resource_lib_dir" -maxdepth 1 -type f -name '*.dylib' ! -name '._*' -print)
+  done < <(find "$resource_lib_dir" -maxdepth 1 -type f -name '*.dylib' -print)
 
   for tool in ffmpeg ffprobe; do
     /usr/bin/install_name_tool \
@@ -208,6 +206,12 @@ if [[ "$PACKAGE_APP" == true && ! -x /usr/bin/codesign ]]; then
 fi
 
 if [[ "$PACKAGE_APP" == true ]]; then
+  for license_file in "${APP_LICENSE_FILES[@]}"; do
+    if [[ ! -s "$SCRIPT_DIR/$license_file" ]]; then
+      print -u2 "錯誤：缺少 App 授權文件：$license_file"
+      exit 1
+    fi
+  done
   ensure_bundled_ffmpeg
 fi
 
@@ -484,7 +488,8 @@ if [[ "$PACKAGE_APP" == true ]]; then
     exit 1
   fi
 
-  STAGING_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/genimage-app.XXXXXX")"
+  mkdir -p "$DIST_DIR"
+  STAGING_ROOT="$(mktemp -d "$DIST_DIR/.genimage-app.XXXXXX")"
   STAGED_APP_BUNDLE="$STAGING_ROOT/$APP_NAME.app"
   APP_BUNDLE="$STAGED_APP_BUNDLE"
   CONTENTS_DIR="$APP_BUNDLE/Contents"
@@ -560,8 +565,6 @@ if [[ "$PACKAGE_APP" == true ]]; then
   done
   /usr/bin/iconutil -c icns "$ICONSET_ROOT" -o "$ICON_PATH"
 
-  # Copy executable files directly so a stale AppleDouble sidecar from a
-  # previous SwiftPM build cannot be treated as an App subcomponent.
   /bin/cp "$BIN_DIR/GenImage" "$MACOS_DIR/GenImage"
   /bin/cp "$BIN_DIR/GenImageMCP" "$HELPERS_DIR/GenImageMCP"
   /bin/cp "$QWEN_WORKER" "$HELPERS_DIR/GenImageQwen2511Worker"
@@ -589,8 +592,8 @@ if [[ "$PACKAGE_APP" == true ]]; then
     print -u2 "錯誤：找不到 WebUI 資源：$WEBUI_SOURCE"
     exit 1
   fi
-  /usr/bin/ditto --norsrc --noqtn "$WEBUI_SOURCE" "$RESOURCES_DIR/WebUI"
-  if [[ ! -s "$RESOURCES_DIR/WebUI/index.html" ]] || ! /usr/bin/diff -qr -x '._*' "$WEBUI_SOURCE" "$RESOURCES_DIR/WebUI" >/dev/null; then
+  /usr/bin/ditto --noqtn "$WEBUI_SOURCE" "$RESOURCES_DIR/WebUI"
+  if [[ ! -s "$RESOURCES_DIR/WebUI/index.html" ]] || ! /usr/bin/diff -qr "$WEBUI_SOURCE" "$RESOURCES_DIR/WebUI" >/dev/null; then
     print -u2 "錯誤：WebUI 資源複製不完整。"
     exit 1
   fi
@@ -603,36 +606,38 @@ if [[ "$PACKAGE_APP" == true ]]; then
   fi
   for resource_bundle in "${RESOURCE_BUNDLES[@]}"; do
     if [[ "$resource_bundle" != "$APP_RESOURCE_BUNDLE" ]]; then
-      /usr/bin/ditto --norsrc --noqtn "$resource_bundle" "$SWIFTPM_RESOURCES_DIR/${resource_bundle:t}"
+      /usr/bin/ditto --noqtn "$resource_bundle" "$SWIFTPM_RESOURCES_DIR/${resource_bundle:t}"
     fi
   done
 
   typeset -a QWEN_RESOURCE_BUNDLES
   QWEN_RESOURCE_BUNDLES=("$QWEN_WORKER_BIN_DIR"/*.bundle(N))
   for resource_bundle in "${QWEN_RESOURCE_BUNDLES[@]}"; do
-    /usr/bin/ditto --norsrc --noqtn "$resource_bundle" "$QWEN_RESOURCES_DIR/${resource_bundle:t}"
+    /usr/bin/ditto --noqtn "$resource_bundle" "$QWEN_RESOURCES_DIR/${resource_bundle:t}"
   done
   typeset -a MINIMAX_RESOURCE_BUNDLES
   MINIMAX_RESOURCE_BUNDLES=("$MINIMAX_WORKER_BIN_DIR"/*.bundle(N))
   for resource_bundle in "${MINIMAX_RESOURCE_BUNDLES[@]}"; do
-    /usr/bin/ditto --norsrc --noqtn "$resource_bundle" "$HELPERS_DIR/${resource_bundle:t}"
+    /usr/bin/ditto --noqtn "$resource_bundle" "$HELPERS_DIR/${resource_bundle:t}"
   done
   typeset -a LTX_RESOURCE_BUNDLES
   LTX_RESOURCE_BUNDLES=("$LTX_WORKER_BIN_DIR"/*.bundle(N))
   for resource_bundle in "${LTX_RESOURCE_BUNDLES[@]}"; do
-    /usr/bin/ditto --norsrc --noqtn "$resource_bundle" "$HELPERS_DIR/${resource_bundle:t}"
+    /usr/bin/ditto --noqtn "$resource_bundle" "$HELPERS_DIR/${resource_bundle:t}"
   done
   typeset -a H3_RESOURCE_BUNDLES
   H3_RESOURCE_BUNDLES=("$H3_WORKER_BIN_DIR"/*.bundle(N))
   for resource_bundle in "${H3_RESOURCE_BUNDLES[@]}"; do
-    /usr/bin/ditto --norsrc --noqtn "$resource_bundle" "$HELPERS_DIR/${resource_bundle:t}"
+    /usr/bin/ditto --noqtn "$resource_bundle" "$HELPERS_DIR/${resource_bundle:t}"
   done
   typeset -a ZIMAGE_RESOURCE_BUNDLES
   ZIMAGE_RESOURCE_BUNDLES=("$ZIMAGE_WORKER_BIN_DIR"/*.bundle(N))
   for resource_bundle in "${ZIMAGE_RESOURCE_BUNDLES[@]}"; do
-    /usr/bin/ditto --norsrc --noqtn "$resource_bundle" "$ZIMAGE_HELPERS_DIR/${resource_bundle:t}"
+    /usr/bin/ditto --noqtn "$resource_bundle" "$ZIMAGE_HELPERS_DIR/${resource_bundle:t}"
   done
-  /usr/bin/ditto --norsrc --noqtn "$SCRIPT_DIR/LICENSE" "$LICENSES_DIR/GPL-3.0.txt"
+  for license_file in "${APP_LICENSE_FILES[@]}"; do
+    /usr/bin/ditto --noqtn "$SCRIPT_DIR/$license_file" "$LICENSES_DIR/$license_file"
+  done
   prepare_bundled_ffmpeg
 
   # SwiftPM emits resource-only directories with a .bundle suffix but no
@@ -670,7 +675,6 @@ if [[ "$PACKAGE_APP" == true ]]; then
   /usr/bin/plutil -insert NSHighResolutionCapable -bool YES "$PLIST_PATH"
   /usr/bin/plutil -insert NSPrincipalClass -string "NSApplication" "$PLIST_PATH"
 
-  find "$APP_BUNDLE" -name '._*' -delete
   find "$APP_BUNDLE" -name '.DS_Store' -delete
   find "$APP_BUNDLE" -name '_CodeSignature' -type d -prune -exec rm -rf {} + 2>/dev/null || true
   find "$APP_BUNDLE" -name 'CodeResources' -type f -delete 2>/dev/null || true
@@ -706,7 +710,7 @@ if [[ "$PACKAGE_APP" == true ]]; then
 
   while IFS= read -r dynamic_library; do
     /usr/bin/codesign "${FFMPEG_SIGNING_ARGUMENTS[@]}" "$dynamic_library"
-  done < <(find "$RESOURCES_DIR/lib" -maxdepth 1 -type f -name '*.dylib' ! -name '._*' -print)
+  done < <(find "$RESOURCES_DIR/lib" -maxdepth 1 -type f -name '*.dylib' -print)
 
   for ffmpeg_tool in \
     "$RESOURCES_DIR/bin/ffmpeg" \

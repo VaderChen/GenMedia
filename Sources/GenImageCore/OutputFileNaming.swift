@@ -2,9 +2,9 @@ import Foundation
 
 /// Generates stable, human-readable names for files produced by inference.
 ///
-/// The timestamp is intentionally minute-based for easy sorting and sharing. If
-/// more than one output is created during the same minute, a numeric suffix is
-/// appended to avoid overwriting the previous file.
+/// The timestamp is minute-based for sorting. A fresh UUID distinguishes
+/// unwritten batch outputs and concurrent App / MCP processes without reserving
+/// empty files that a runtime might mistake for completed outputs.
 public enum OutputFileNaming {
     public static func imageURL(
         in directory: URL,
@@ -80,14 +80,12 @@ public enum OutputFileNaming {
 
         let sanitizedExtension = pathExtension.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
         let baseName = "\(prefix)-\(formatter.string(from: date))"
-        var candidate = directory.appendingPathComponent(baseName).appendingPathExtension(sanitizedExtension)
-        var suffix = 1
-        while fileManager.fileExists(atPath: candidate.path) {
+        var candidate: URL
+        repeat {
             candidate = directory
-                .appendingPathComponent("\(baseName)-\(suffix)")
+                .appendingPathComponent("\(baseName)-\(UUID().uuidString.lowercased())")
                 .appendingPathExtension(sanitizedExtension)
-            suffix += 1
-        }
+        } while fileManager.fileExists(atPath: candidate.path)
         return candidate
     }
 }

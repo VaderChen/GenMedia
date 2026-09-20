@@ -231,7 +231,9 @@ final class AppStore: ObservableObject {
     @Published var models: [ModelDescriptor]
     @Published var loras: [LoRADescriptor]
     @Published var installations: [String: ModelInstallation]
-    @Published var profiles: [InferenceProfile]
+    @Published var profiles: [InferenceProfile] {
+        didSet { persistCustomProfiles() }
+    }
     @Published var disabledProfileIDs: Set<UUID>
     @Published var activeProfileIDs: [ModelCapability: UUID]
     @Published var previewMode: PreviewMode = .grid
@@ -247,6 +249,12 @@ final class AppStore: ObservableObject {
     var jobTasks: [UUID: Task<Void, Never>] = [:]
     var cancellationRequestedJobIDs: Set<UUID> = []
     var lastJobProgressUpdate: [UUID: Date] = [:]
+    let modelDiscovery = ModelDiscoveryController()
+    let loraDiscovery = ModelDiscoveryController(discover: {
+        DiscoveredModelCatalog(loras: LocalModelDiscovery.discoverLoRAs(at: $0))
+    })
+    let modelOperationQueue = SerialTaskQueue<String>()
+    var modelRemovalTokens: [String: UUID] = [:]
     var modelTasks: [String: Task<Void, Never>] = [:]
     var modelTaskTokens: [String: UUID] = [:]
     var systemMetricsTask: Task<Void, Never>?
@@ -261,7 +269,9 @@ final class AppStore: ObservableObject {
     var mediaCompositionService: MediaCompositionService
     let modelInstaller = HuggingFaceModelInstaller()
     private let projectWorkspaceURL: URL
+    private let workspaceWriter: ProjectWorkspaceWriter
     private var projectWorkspacePersistenceEnabled = false
+    private var customProfilePersistenceEnabled = false
 
     static let recipeSettingsKey = "GenImage.recipeSettings.v1"
     static let videoOutputSettingsKey = "GenImage.videoOutputSettings.v1"
@@ -299,7 +309,9 @@ final class AppStore: ObservableObject {
         // 工作區索引曾經寫在另一個根目錄下，先接回來再讀取，否則升級後會看不到既有的專案。
         ApplicationSupport.adoptLegacyDirectories()
         projectWorkspaceURL = ProjectWorkspacePersistence.defaultURL()
-        let restoredWorkspace = try? ProjectWorkspacePersistence.load(from: projectWorkspaceURL)
+        workspaceWriter = ProjectWorkspaceWriter(url: projectWorkspaceURL)
+        let workspaceRestoration = ProjectWorkspacePersistence.restore(from: projectWorkspaceURL)
+        let restoredWorkspace = workspaceRestoration.snapshot
         let defaultGeneratedDirectory = ApplicationSupport.directory(.generated)
         let configuredOutputDirectory = ProcessInfo.processInfo.environment["GENIMAGE_OUTPUT_DIRECTORY"]
             ?? UserDefaults.standard.string(forKey: Self.outputDirectoryKey)
@@ -339,11 +351,19 @@ final class AppStore: ObservableObject {
         let configuredModelRoot = ProcessInfo.processInfo.environment["GENIMAGE_MODEL_ROOT"]
             ?? UserDefaults.standard.string(forKey: Self.modelRootKey)
         let modelRootURL = ModelStorage.rootURL(explicitPath: configuredModelRoot)
-        let discovered = LocalModelDiscovery.discover(
-            at: modelRootURL
-        )
+        // Render the initial UI before touching the model volume.
+        let discovered = DiscoveredModelCatalog()
         let catalog = Self.mergedModels(discovered: discovered)
-        let profileCatalog = Self.mergedProfiles(discovered: discovered)
+        let savedCustomProfiles: [InferenceProfile]
+        let customProfileError: String?
+        do {
+            savedCustomProfiles = try CustomProfilePersistence.load()
+            customProfileError = nil
+        } catch {
+            savedCustomProfiles = []
+            customProfileError = error.localizedDescription
+        }
+        let profileCatalog = Self.mergedProfiles(discovered: discovered) + savedCustomProfiles
         let savedRecipeSettings = Self.loadRecipeSettings()
         let savedVideoOutputSettings = Self.loadVideoOutputSettings()
         let savedMusicOutputSettings = Self.loadMusicOutputSettings()
@@ -403,7 +423,7 @@ final class AppStore: ObservableObject {
                 fallback: generationProfile.defaults.outputCount ?? 4
             ),
             seed: savedRecipeSettings?.seed ?? UInt64.random(in: 0...UInt64.max),
-            lora: Self.validatedPersistedLoRA(savedRecipeSettings?.lora, available: discovered.loras)
+            lora: savedRecipeSettings?.lora
         )
         recipe = initialRecipe
         let initialVideoOutputSettings = Self.validatedVideoOutputSettings(
@@ -425,11 +445,14 @@ final class AppStore: ObservableObject {
             initialProjectIDs.contains($0.projectID)
         }
         let referencedAssetIDs = Set(restoredAssets.map(\.id))
-        for orphanURL in ApplicationSupport.orphanMediaCacheFiles(
-            in: ApplicationSupport.directory(.mediaCache),
-            referencedAssetIDs: referencedAssetIDs
-        ) {
-            try? FileManager.default.removeItem(at: orphanURL)
+        if workspaceRestoration.allowsCacheCleanup {
+            for orphanURL in ApplicationSupport.orphanMediaCacheFiles(
+                in: ApplicationSupport.directory(.mediaCache),
+                referencedAssetIDs: referencedAssetIDs,
+                referencedFileURLs: MediaAssetFiles.references(in: restoredAssets)
+            ) {
+                try? FileManager.default.removeItem(at: orphanURL)
+            }
         }
         let restoredAssetIDs = Set(restoredAssets.map(\.id))
         assets = restoredAssets
@@ -442,10 +465,29 @@ final class AppStore: ObservableObject {
         operations = (restoredWorkspace?.operations ?? []).filter {
             initialProjectIDs.contains($0.projectID)
         }
-        projectWorkspacePersistenceEnabled = true
+        projectWorkspacePersistenceEnabled = workspaceRestoration.allowsPersistence
+        customProfilePersistenceEnabled = customProfileError == nil
+        let restorationWarnings = [
+            workspaceRestoration.errorMessage.map {
+                "工作區讀取失敗，已保留原始索引及媒體快取；本次工作區變更不會自動儲存，請修復後重新啟動：\($0)"
+            },
+            customProfileError.map {
+                "自訂 Profile 讀取失敗，已保留原始設定；本次 Profile 變更不會儲存，請修復後重新啟動：\($0)"
+            }
+        ].compactMap { $0 }
+        if !restorationWarnings.isEmpty {
+            statusMessage = restorationWarnings.joined(separator: "\n")
+        }
         persistProjectWorkspace()
         startSystemMetricsUpdates()
+        loadModelCatalog(at: modelRootURL, initialLoad: true, allowMissingRoot: configuredModelRoot == nil)
         checkForUpdates()
+    }
+
+    private func persistCustomProfiles() {
+        guard customProfilePersistenceEnabled else { return }
+        do { try CustomProfilePersistence.save(profiles) }
+        catch { statusMessage = "無法保存自訂 Profile：\(error.localizedDescription)" }
     }
 
     private func persistProjectWorkspace() {
@@ -458,11 +500,16 @@ final class AppStore: ObservableObject {
             selectedAssetID: selectedAssetID,
             comparisonAssetID: comparisonAssetID
         )
-        do {
-            try ProjectWorkspacePersistence.save(snapshot, to: projectWorkspaceURL)
-        } catch {
-            statusMessage = "無法保存開啟中的生成專案：\(error.localizedDescription)"
+        workspaceWriter.schedule(snapshot) { [weak self] message in
+            Task { @MainActor [weak self] in
+                self?.statusMessage = "無法保存開啟中的生成專案：\(message)"
+            }
         }
+    }
+
+    func flushProjectWorkspace() {
+        do { try workspaceWriter.flush() }
+        catch { statusMessage = "無法保存開啟中的生成專案：\(error.localizedDescription)" }
     }
 
     static func makeMusicGenerationService(

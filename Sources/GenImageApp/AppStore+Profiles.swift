@@ -4,6 +4,14 @@ import GenImageCore
 // Profile 的選用、相容性檢查與增刪改。
 extension AppStore {
     func ensureInferenceIdle() -> Bool {
+        guard modelRemovalTokens.isEmpty else {
+            statusMessage = "模型正在移除，請等待檔案清理完成。"
+            return false
+        }
+        guard !modelDiscovery.isLoading else {
+            statusMessage = "請等待模型目錄掃描完成。"
+            return false
+        }
         guard !jobs.contains(where: { [.queued, .running, .cancelling].contains($0.state) }) else {
             statusMessage = "已有生成或辨識任務正在執行，請完成或取消後再開始新任務。"
             return false
@@ -13,6 +21,10 @@ extension AppStore {
 
     func selectProfile(_ profileID: UUID, for capability: ModelCapability) {
         guard let profile = profiles.first(where: { $0.id == profileID && $0.capability == capability }) else {
+            return
+        }
+        guard ProfileVisibility.isVisible(profile, models: models) else {
+            statusMessage = "此 Profile 的建議記憶體超過 64 GB，目前暫不開放。"
             return
         }
         guard profile.supportsGeneration else {
@@ -48,7 +60,7 @@ extension AppStore {
     /// 切換 Profile 時避免多個大型 Runtime 同時常駐。記憶體讀值超過
     /// 90% 才執行釋放，而且保留目前切換到的能力所需 Runtime。
     private func releaseNonFocusedModelsIfNeeded(focusing capability: ModelCapability) {
-        guard let ramUsage = SystemMetricsReader.read().ramUsage,
+        guard let ramUsage = systemMetrics.ramUsage,
               ramUsage > 0.90 else {
             return
         }
@@ -139,47 +151,30 @@ extension AppStore {
             return "找不到權重路徑：\(url.path)"
         }
 
-        let candidates: [URL]
-        if isDirectory.boolValue {
-            candidates = (FileManager.default.enumerator(
-                at: url,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            )?.compactMap { $0 as? URL }.filter { candidate in
-                (try? candidate.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
-            }) ?? []
-        } else {
-            candidates = [url]
-        }
-
         var sawReadableHeader = false
-        for candidate in candidates {
-            guard let keys = safetensorHeaderKeys(at: candidate) else { continue }
+        func isCompatible(_ candidate: URL) -> Bool {
+            guard let header = try? SafetensorsHeader.read(from: candidate),
+                  let object = try? header.dictionary() else { return false }
             sawReadableHeader = true
-            if hasLoRAPairs(keys) { return nil }
+            return hasLoRAPairs(object.keys.filter { $0 != "__metadata__" })
+        }
+        if isDirectory.boolValue {
+            if let enumerator = FileManager.default.enumerator(
+                at: url, includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) {
+                for case let candidate as URL in enumerator {
+                    guard candidate.pathExtension.lowercased() == "safetensors",
+                          (try? candidate.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+                    if isCompatible(candidate) { return nil }
+                }
+            }
+        } else if isCompatible(url) {
+            return nil
         }
         return sawReadableHeader
             ? "找不到可套用的 LoRA 權重配對（A/B 或 LoKr）。"
-            : "無法讀取可辨識的權重標頭。"
-    }
-
-    private func safetensorHeaderKeys(at url: URL) -> [String]? {
-        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), data.count >= 8 else {
-            return nil
-        }
-        var headerLength: UInt64 = 0
-        for (index, byte) in data.prefix(8).enumerated() {
-            headerLength |= UInt64(byte) << UInt64(index * 8)
-        }
-        guard headerLength <= UInt64(data.count - 8), headerLength <= UInt64(Int.max) else {
-            return nil
-        }
-        let start = data.index(data.startIndex, offsetBy: 8)
-        let end = data.index(start, offsetBy: Int(headerLength))
-        guard let header = try? JSONSerialization.jsonObject(with: data[start..<end]) as? [String: Any] else {
-            return nil
-        }
-        return header.keys.filter { $0 != "__metadata__" }
+            : "無法讀取可辨識的權重標頭（JSON 上限 16 MiB）。"
     }
 
     private func hasLoRAPairs(_ keys: [String]) -> Bool {
@@ -245,19 +240,7 @@ extension AppStore {
     }
 
     func duplicateProfile(_ profile: InferenceProfile) {
-        let copy = InferenceProfile(
-            name: "\(profile.name) 副本",
-            capability: profile.capability,
-            modelID: profile.modelID,
-            modelRevision: profile.modelRevision,
-            architecture: profile.architecture,
-            defaults: profile.defaults,
-            loras: profile.loras,
-            profileRevision: 1,
-            notes: profile.notes,
-            isBuiltIn: false,
-            supportsGeneration: profile.supportsGeneration
-        )
+        let copy = profile.duplicated()
         profiles.append(copy)
         selectProfile(copy.id, for: copy.capability)
     }
@@ -301,6 +284,7 @@ extension AppStore {
             modelID: modelID,
             architecture: architecture,
             defaults: defaults,
+            music: isMusicCapability ? templateProfile?.music : nil,
             loras: isVideoCapability ? (templateProfile?.loras ?? []) : [],
             notes: capability == .imageToImage || isVideoCapability || isMusicCapability
                 ? "請設定支援此生成能力的模型版本與推論架構。"
@@ -381,6 +365,7 @@ extension AppStore {
             let replacement = profiles.first { candidate in
                 candidate.capability == profile.capability
                     && !disabledProfileIDs.contains(candidate.id)
+                    && ProfileVisibility.isVisible(candidate, models: models)
                     && missingProfileModels(candidate).isEmpty
             }
             activeProfileIDs[profile.capability] = replacement?.id

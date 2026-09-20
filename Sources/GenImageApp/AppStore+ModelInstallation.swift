@@ -4,6 +4,25 @@ import GenImageRuntime
 
 // 模型的安裝、暫停、移除與修復。
 extension AppStore {
+    private func enqueueModelTask(
+        _ modelID: String, token: UUID,
+        operation: @escaping @MainActor () async -> Void
+    ) {
+        modelTaskTokens[modelID] = token
+        modelTasks[modelID] = modelOperationQueue.replace(for: modelID, operation: operation) { [weak self] in
+            guard let self else { return }
+            if self.modelRemovalTokens[modelID] == token { self.modelRemovalTokens[modelID] = nil }
+            guard self.modelTaskTokens[modelID] == token else { return }
+            if Task.isCancelled, var installation = self.installations[modelID],
+               [.queued, .downloading, .verifying].contains(installation.phase) {
+                installation.phase = .paused
+                self.installations[modelID] = installation
+            }
+            self.modelTasks[modelID] = nil
+            self.modelTaskTokens[modelID] = nil
+        }
+    }
+
     func installation(for modelID: String) -> ModelInstallation {
         installations[modelID] ?? ModelInstallation()
     }
@@ -13,6 +32,10 @@ extension AppStore {
         civitaiToken: String? = nil,
         huggingFaceToken: String? = nil
     ) {
+        guard !modelDiscovery.isLoading else {
+            statusMessage = "請等待模型目錄掃描完成。"
+            return
+        }
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return }
         let requiredModels = profile.requiredModelIDs.compactMap { requiredModelID in
             models.first { $0.id == requiredModelID }
@@ -43,6 +66,14 @@ extension AppStore {
         civitaiToken: String? = nil,
         huggingFaceToken: String? = nil
     ) {
+        guard !modelDiscovery.isLoading else {
+            statusMessage = "請等待模型目錄掃描完成。"
+            return
+        }
+        guard modelTasks[model.id] == nil, modelRemovalTokens[model.id] == nil else {
+            statusMessage = "「\(model.displayName)」已有模型操作正在執行。"
+            return
+        }
         let resolvedHuggingFaceToken = huggingFaceToken ?? HuggingFaceTokenStore.token()
         if model.localURL != nil {
             installations[model.id] = ModelInstallation(
@@ -58,10 +89,6 @@ extension AppStore {
             statusMessage = message
             return
         }
-        guard modelTasks[model.id] == nil else {
-            statusMessage = "「\(model.displayName)」已有下載任務正在執行。"
-            return
-        }
         let taskToken = UUID()
         modelTaskTokens[model.id] = taskToken
         let startProgress = min(1, max(0, installations[model.id]?.progress ?? 0))
@@ -72,16 +99,11 @@ extension AppStore {
         )
         let progressGate = ModelProgressGate(interval: Self.modelProgressUpdateInterval)
 
-        modelTasks[model.id] = Task { @MainActor [weak self] in
+        let rootURL = URL(fileURLWithPath: modelRootPath, isDirectory: true)
+        enqueueModelTask(model.id, token: taskToken) { [weak self] in
             guard let self else { return }
-            defer {
-                if modelTaskTokens[model.id] == taskToken {
-                    modelTasks[model.id] = nil
-                    modelTaskTokens[model.id] = nil
-                }
-            }
             do {
-                let rootURL = URL(fileURLWithPath: modelRootPath, isDirectory: true)
+                try Task.checkCancellation()
                 let localURL = try await modelInstaller.install(
                     modelID: model.id,
                     rootURL: rootURL,
@@ -90,13 +112,14 @@ extension AppStore {
                     progress: { [weak self] update in
                         guard progressGate.shouldEmit(update) else { return }
                         Task { @MainActor [weak self] in
-                            guard let self, modelTaskTokens[model.id] == taskToken else { return }
+                            guard let self, modelTaskTokens[model.id] == taskToken,
+                                  installations[model.id]?.phase == .downloading else { return }
                             // The resolved Hugging Face file list is authoritative;
                             // keep the catalog estimate in sync so repositories that
                             // add or remove shards do not show e.g. 9.6 GB / 7.6 GB.
                             let resolvedTotalGB = Double(update.totalBytes) / 1_073_741_824
                             if resolvedTotalGB > 0,
-                               abs(models.first(where: { $0.id == model.id })?.approximateDownloadGB ?? 0
+                               abs((models.first(where: { $0.id == model.id })?.approximateDownloadGB ?? 0)
                                    - resolvedTotalGB) > 0.01 {
                                 if let index = models.firstIndex(where: { $0.id == model.id }) {
                                     models[index].approximateDownloadGB = resolvedTotalGB
@@ -120,11 +143,14 @@ extension AppStore {
                     progress: 1,
                     downloadedGB: resolvedDownloadGB
                 )
-                _ = try HuggingFaceModelInstaller.verify(modelID: model.id, rootURL: rootURL)
+                _ = try await BackgroundTask.run {
+                    try HuggingFaceModelInstaller.verify(modelID: model.id, rootURL: rootURL)
+                }
+                guard modelTaskTokens[model.id] == taskToken, modelRootPath == rootURL.path else { return }
                 if let index = models.firstIndex(where: { $0.id == model.id }) {
                     models[index].localURL = localURL
                 }
-                loras = LocalModelDiscovery.discover(at: rootURL).loras
+                refreshLoRAs(at: rootURL)
                 installations[model.id] = ModelInstallation(
                     phase: .installed,
                     progress: 1,
@@ -158,6 +184,10 @@ extension AppStore {
     }
 
     func pauseModel(_ model: ModelDescriptor) {
+        guard modelRemovalTokens[model.id] == nil else {
+            statusMessage = "模型正在移除，請等待檔案清理完成。"
+            return
+        }
         modelTaskTokens[model.id] = nil
         modelTasks[model.id]?.cancel()
         modelTasks[model.id] = nil
@@ -167,45 +197,50 @@ extension AppStore {
     }
 
     func removeModel(_ model: ModelDescriptor) {
-        modelTaskTokens[model.id] = nil
-        modelTasks[model.id]?.cancel()
-        modelTasks[model.id] = nil
-        do {
-            if HuggingFaceModelInstaller.supports(modelID: model.id) {
-                let rootURL = URL(fileURLWithPath: modelRootPath, isDirectory: true)
-                try HuggingFaceModelInstaller.remove(modelID: model.id, rootURL: rootURL)
-            } else if let localURL = model.localURL {
-                let rootURL = URL(fileURLWithPath: modelRootPath, isDirectory: true)
-                    .resolvingSymlinksInPath()
-                    .standardizedFileURL
-                let targetURL = localURL
-                    .resolvingSymlinksInPath()
-                    .standardizedFileURL
-                let rootPath = rootURL.path.hasSuffix("/") ? rootURL.path : "\(rootURL.path)/"
-                guard targetURL.path != rootURL.path,
-                      targetURL.path.hasPrefix(rootPath) else {
-                    throw NSError(
-                        domain: "GenImage.ModelRemoval",
-                        code: 1,
-                        userInfo: [NSLocalizedDescriptionKey: "模型檔案不在目前的模型目錄內，為避免誤刪除已取消操作。"]
-                    )
+        guard !modelDiscovery.isLoading else {
+            statusMessage = "請等待模型目錄掃描完成。"
+            return
+        }
+        guard ensureInferenceIdle() else { return }
+        let rootURL = URL(fileURLWithPath: modelRootPath, isDirectory: true)
+        let token = UUID()
+        modelRemovalTokens[model.id] = token
+        installations[model.id] = ModelInstallation(phase: .verifying)
+        statusMessage = "正在停止相關任務並移除「\(model.displayName)」…"
+        enqueueModelTask(model.id, token: token) { [weak self] in
+            guard let self else { return }
+            do {
+                try await BackgroundTask.run {
+                    if HuggingFaceModelInstaller.supports(modelID: model.id) {
+                        try HuggingFaceModelInstaller.remove(modelID: model.id, rootURL: rootURL)
+                    } else if let localURL = model.localURL {
+                        let root = rootURL.resolvingSymlinksInPath().standardizedFileURL
+                        let target = localURL.resolvingSymlinksInPath().standardizedFileURL
+                        let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+                        guard target.path != root.path, target.path.hasPrefix(prefix) else {
+                            throw NSError(domain: "GenImage.ModelRemoval", code: 1,
+                                userInfo: [NSLocalizedDescriptionKey: "模型檔案不在目前的模型目錄內，為避免誤刪除已取消操作。"])
+                        }
+                        try Task.checkCancellation()
+                        try FileManager.default.removeItem(at: target)
+                    }
                 }
-                try FileManager.default.removeItem(at: targetURL)
+                guard modelTaskTokens[model.id] == token, modelRootPath == rootURL.path else { return }
+                if let index = models.firstIndex(where: { $0.id == model.id }) {
+                    models[index].localURL = nil
+                }
+                deactivateProfiles(usingModelID: model.id)
+                refreshLoRAs(at: rootURL)
+                installations[model.id] = ModelInstallation()
+                statusMessage = "已移除「\(model.displayName)」。"
+            } catch is CancellationError {
+                guard modelTaskTokens[model.id] == token else { return }
+                installations[model.id]?.phase = .paused
+            } catch {
+                guard modelTaskTokens[model.id] == token, modelRootPath == rootURL.path else { return }
+                installations[model.id] = ModelInstallation(phase: .failed, errorMessage: error.localizedDescription)
+                statusMessage = "移除模型失敗：\(error.localizedDescription)"
             }
-            if let index = models.firstIndex(where: { $0.id == model.id }) {
-                models[index].localURL = nil
-            }
-            deactivateProfiles(usingModelID: model.id)
-            let rootURL = URL(fileURLWithPath: modelRootPath, isDirectory: true)
-            loras = LocalModelDiscovery.discover(at: rootURL).loras
-            installations[model.id] = ModelInstallation()
-            statusMessage = "已移除「\(model.displayName)」。"
-        } catch {
-            installations[model.id] = ModelInstallation(
-                phase: .failed,
-                errorMessage: error.localizedDescription
-            )
-            statusMessage = "移除模型失敗：\(error.localizedDescription)"
         }
     }
 
@@ -214,36 +249,57 @@ extension AppStore {
         civitaiToken: String? = nil,
         huggingFaceToken: String? = nil
     ) {
+        guard !modelDiscovery.isLoading else {
+            statusMessage = "請等待模型目錄掃描完成。"
+            return
+        }
+        guard modelTasks[model.id] == nil else {
+            statusMessage = "請等待目前的模型安裝任務完成。"
+            return
+        }
         if HuggingFaceModelInstaller.supports(modelID: model.id) {
             let rootURL = URL(fileURLWithPath: modelRootPath, isDirectory: true)
-            do {
-                let localURL = try HuggingFaceModelInstaller.verify(
-                    modelID: model.id,
-                    rootURL: rootURL
-                )
-                if let index = models.firstIndex(where: { $0.id == model.id }) {
-                    models[index].localURL = localURL
+            let token = UUID()
+            modelTaskTokens[model.id] = token
+            installations[model.id] = ModelInstallation(phase: .verifying, progress: 1,
+                downloadedGB: model.approximateDownloadGB)
+            enqueueModelTask(model.id, token: token) { [weak self] in
+                guard let self else { return }
+                do {
+                    let localURL = try await BackgroundTask.run {
+                        try HuggingFaceModelInstaller.verify(modelID: model.id, rootURL: rootURL)
+                    }
+                    guard modelTaskTokens[model.id] == token, modelRootPath == rootURL.path else { return }
+                    if let index = models.firstIndex(where: { $0.id == model.id }) {
+                        models[index].localURL = localURL
+                    }
+                    installations[model.id] = ModelInstallation(phase: .installed, progress: 1,
+                        downloadedGB: model.approximateDownloadGB)
+                    refreshLoRAs(at: rootURL)
+                    statusMessage = "「\(model.displayName)」驗證完成。"
+                } catch is CancellationError {
+                    guard modelTaskTokens[model.id] == token else { return }
+                    installations[model.id]?.phase = .paused
+                } catch {
+                    guard modelTaskTokens[model.id] == token, modelRootPath == rootURL.path else { return }
+                    guard !modelDiscovery.isLoading else {
+                        installations[model.id]?.phase = .paused
+                        return
+                    }
+                    // Release this verification slot before creating its replacement download.
+                    modelTasks[model.id] = nil
+                    modelTaskTokens[model.id] = nil
+                    installations[model.id] = ModelInstallation(phase: .queued)
+                    deactivateProfiles(usingModelID: model.id)
+                    statusMessage = "偵測到缺少檔案，開始續傳修復。"
+                    if let index = models.firstIndex(where: { $0.id == model.id }) {
+                        models[index].localURL = nil
+                    }
+                    var downloadableModel = model
+                    downloadableModel.localURL = nil
+                    installModel(downloadableModel, civitaiToken: civitaiToken,
+                        huggingFaceToken: huggingFaceToken)
                 }
-                installations[model.id] = ModelInstallation(
-                    phase: .installed,
-                    progress: 1,
-                    downloadedGB: model.approximateDownloadGB
-                )
-                statusMessage = "「\(model.displayName)」驗證完成。"
-            } catch {
-                installations[model.id] = ModelInstallation(phase: .queued)
-                deactivateProfiles(usingModelID: model.id)
-                statusMessage = "偵測到缺少檔案，開始續傳修復。"
-                if let index = models.firstIndex(where: { $0.id == model.id }) {
-                    models[index].localURL = nil
-                }
-                var downloadableModel = model
-                downloadableModel.localURL = nil
-                installModel(
-                    downloadableModel,
-                    civitaiToken: civitaiToken,
-                    huggingFaceToken: huggingFaceToken
-                )
             }
             return
         }

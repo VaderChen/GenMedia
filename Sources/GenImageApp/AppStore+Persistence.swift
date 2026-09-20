@@ -112,7 +112,8 @@ extension AppStore {
     }
 
     private static func profileSignature(_ profile: InferenceProfile) -> String {
-        [
+        if !profile.isBuiltIn { return "custom:\(profile.id.uuidString)" }
+        return [
             profile.capability.rawValue,
             profile.modelID,
             profile.modelRevision,
@@ -157,6 +158,7 @@ extension AppStore {
                           $0.capability == capability && profileSignature($0) == signature
                       }),
                       profile.supportsGeneration,
+                      ProfileVisibility.isVisible(profile, models: models),
                       profile.requiredModelIDs.allSatisfy({ requiredModelID in
                           models.contains(where: {
                               $0.id == requiredModelID && $0.localURL != nil

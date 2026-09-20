@@ -31,6 +31,23 @@ public struct ProjectWorkspaceSnapshot: Codable, Sendable {
 }
 
 public enum ProjectWorkspacePersistence {
+    public struct Restoration: Sendable {
+        public let snapshot: ProjectWorkspaceSnapshot?
+        public let errorMessage: String?
+        public var allowsPersistence: Bool { errorMessage == nil }
+        public var allowsCacheCleanup: Bool { errorMessage == nil }
+    }
+
+    /// A missing workspace starts a new session; an unreadable one must never
+    /// be overwritten or used as an empty asset list for orphan cleanup.
+    public static func restore(from url: URL) -> Restoration {
+        do {
+            return Restoration(snapshot: try load(from: url), errorMessage: nil)
+        } catch {
+            return Restoration(snapshot: nil, errorMessage: error.localizedDescription)
+        }
+    }
+
     public static func defaultURL(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default
@@ -50,8 +67,9 @@ public enum ProjectWorkspacePersistence {
     }
 
     public static func load(from url: URL) throws -> ProjectWorkspaceSnapshot? {
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        let data = try Data(contentsOf: url)
+        let data: Data
+        do { data = try Data(contentsOf: url) }
+        catch let error as CocoaError where error.code == .fileReadNoSuchFile { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let snapshot = try decoder.decode(ProjectWorkspaceSnapshot.self, from: data)

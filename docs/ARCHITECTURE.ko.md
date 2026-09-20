@@ -2,6 +2,17 @@
 
 [繁體中文](ARCHITECTURE.md) | [English](ARCHITECTURE.en.md) | [日本語](ARCHITECTURE.ja.md) | 한국어
 
+## Runtime 및 영속성 업데이트 (2026-09-21)
+
+- `ModelDiscoveryController`는 백그라운드에서 검색하고 최신 요청만 반영합니다. `SerialTaskQueue`는 모델별 작업 순서를 보장하며 취소 정리가 끝난 후 다음 작업이나 디렉터리 검색을 시작합니다.
+- `FileDownloadDelegate`는 재개 정보 저장이 끝나야 취소를 반환합니다. 다운로드 및 하드 링크 재사용은 `ModelFileReplacement`로 교체하며 실패하면 기존 파일을 보존합니다.
+- `SafetensorsHeader`의 JSON 읽기 상한은 16 MiB이며 LoRA 가중치는 1 MiB 단위로 복사합니다. Worker 입력은 취소 가능하고 종료 시 크기가 제한된 로그를 끝까지 읽어 결과를 판단합니다.
+- `OutputDirectoryStorage`는 출력 위치를 동기적으로 갱신하고 각 작업은 시작 시 경로를 유지합니다. `MediaAssetFiles`는 공유 파일을 보호하고 이름 변경을 모든 참조에 반영합니다. 자동 삭제는 참조되지 않는 MediaCache 프록시로 제한합니다.
+- `ProjectWorkspaceWriter`는 백그라운드 저장을 통합하고 종료 시 flush합니다. 읽기 실패 시 인덱스와 캐시를 보존하고 자동 저장을 중지합니다. 사용자 Profile은 전체 정의와 고정 ID를 저장합니다.
+- Bridge는 진행률과 콘텐츠 갱신을 분리하고 썸네일 및 미디어 전송 메모리를 제한합니다. 권장 메모리가 64 GB를 넘는 Profile은 숨깁니다.
+
+루트 빌드와 Swift 테스트 141개를 통과했습니다. 방법과 제한은 [검증](VALIDATION.md), [성능 기록](PERFORMANCE_CHANGES.md), [상세 보고서](PROJECT_REVIEW_2026-09-20.md)(번체 중국어)를 참조하세요.
+
 ## 설계 목표
 
 1. 텍스트→이미지, 이미지→텍스트, 이미지→이미지, 비디오 생성, 음악 생성, 자막 생성, 업스케일은 서로 의존하지 않는 독립 기능입니다.

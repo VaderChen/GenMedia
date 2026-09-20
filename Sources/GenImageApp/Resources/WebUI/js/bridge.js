@@ -1,5 +1,6 @@
 const pending = new Map();
 const stateListeners = new Set();
+const activityListeners = new Set();
 const clipboardImageListeners = new Set();
 let sequence = 0;
 
@@ -26,6 +27,11 @@ export function onState(listener) {
   return () => stateListeners.delete(listener);
 }
 
+export function onActivity(listener) {
+  activityListeners.add(listener);
+  return () => activityListeners.delete(listener);
+}
+
 export function onClipboardImage(listener) {
   clipboardImageListeners.add(listener);
   return () => clipboardImageListeners.delete(listener);
@@ -43,6 +49,10 @@ window.GenImageNative = {
 
   receiveState(state) {
     stateListeners.forEach((listener) => listener(state));
+  },
+
+  receiveActivity(activity) {
+    activityListeners.forEach((listener) => listener(activity));
   },
 
   receiveClipboardImage(image) {

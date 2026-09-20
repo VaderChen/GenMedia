@@ -12,7 +12,7 @@
 - Job queue, cancellation, progress, estimated remaining time, generation time, model caching, and manual memory release.
 - Each workspace tab acts as a persistent generation project and restores assets, operations, selection, and profile snapshots after relaunch.
 - Regional creation-panel rendering, caret and IME protection, and uninterrupted audio/video playback.
-- `Image-YYYYMMDD-HHmm`, `Video-YYYYMMDD-HHmm`, and `Music-YYYYMMDD-HHmm` output naming with same-minute collision suffixes.
+- Output names use `Image-YYYYMMDD-HHmm-UUID`, `Video-YYYYMMDD-HHmm-UUID`, and `Music-YYYYMMDD-HHmm-UUID` to prevent batch and same-minute collisions.
 - Release app bundle, MLX metallib, native MCP inference tools, and a separate DMG signing/notarization workflow.
 
 ## Current Phase: Stability and Validation

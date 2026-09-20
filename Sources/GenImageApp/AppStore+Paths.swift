@@ -25,20 +25,15 @@ extension AppStore {
             return false
         }
 
-        outputDirectoryPath = outputURL.path
-        UserDefaults.standard.set(outputURL.path, forKey: Self.outputDirectoryKey)
-        let textToImageService = textToImageService
-        let imageToImageService = imageToImageService
-        let upscaleService = upscaleService
-        let subtitleGenerationService = subtitleGenerationService
-        Task {
-            await textToImageService.setOutputDirectory(outputURL)
-            await imageToImageService.setOutputDirectory(outputURL)
-            await upscaleService.setOutputDirectory(outputURL)
-            await subtitleGenerationService.setOutputDirectory(outputURL)
-        }
+        textToImageService.setOutputDirectory(outputURL)
+        imageToImageService.setOutputDirectory(outputURL)
+        upscaleService.setOutputDirectory(outputURL)
+        subtitleGenerationService.setOutputDirectory(outputURL)
         videoGenerationService = VideoGenerationRouter(outputDirectory: outputURL)
         musicGenerationService = Self.makeMusicGenerationService(outputDirectory: outputURL)
+        mediaCompositionService = MediaCompositionService(outputDirectory: outputURL)
+        outputDirectoryPath = outputURL.path
+        UserDefaults.standard.set(outputURL.path, forKey: Self.outputDirectoryKey)
         statusMessage = "輸出目錄已更新：\(outputURL.path)"
         return true
     }
@@ -65,20 +60,50 @@ extension AppStore {
         }
 
         let rootURL = URL(fileURLWithPath: expandedPath, isDirectory: true).standardizedFileURL
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory),
-              isDirectory.boolValue else {
-            statusMessage = "找不到模型目錄：\(rootURL.path)"
-            return false
-        }
+        loadModelCatalog(at: rootURL)
+        return true
+    }
 
-        let discovered = LocalModelDiscovery.discover(at: rootURL)
+    func loadModelCatalog(at rootURL: URL, initialLoad: Bool = false, allowMissingRoot: Bool = false) {
+        let scanningMessage = "正在掃描模型目錄：\(rootURL.path)"
+        if !initialLoad || statusMessage == nil { statusMessage = scanningMessage }
+        // Removal may already be inside an uninterruptible filesystem call.
+        // Let it publish its final state before scanning, even if the new root fails.
+        modelOperationQueue.cancelAll(except: Set(modelRemovalTokens.keys))
+        modelDiscovery.load(at: rootURL, allowMissingRoot: allowMissingRoot,
+            beforeDiscovery: { [modelOperationQueue] in await modelOperationQueue.waitForAll() }
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case let .success(discovered):
+                self.applyModelCatalog(discovered, rootURL: rootURL)
+                if self.statusMessage == scanningMessage || self.statusMessage == "請等待模型目錄掃描完成。" {
+                    self.statusMessage = "模型掃描完成，偵測到 \(discovered.models.count) 個本機模型與 \(discovered.loras.count) 個 LoRA。"
+                }
+            case let .failure(error):
+                let message = "無法讀取模型目錄：\(rootURL.path)；\(error.localizedDescription)"
+                if !initialLoad || self.statusMessage == scanningMessage || self.statusMessage == nil {
+                    self.statusMessage = message
+                } else if initialLoad {
+                    self.statusMessage = (self.statusMessage ?? "") + "\n" + message
+                }
+            }
+        }
+    }
+
+    private func applyModelCatalog(_ discovered: DiscoveredModelCatalog, rootURL: URL) {
         let refreshedModels = Self.mergedModels(discovered: discovered)
         let customProfiles = profiles.filter { !$0.isBuiltIn }
         let refreshedProfiles = Self.mergedProfiles(discovered: discovered) + customProfiles
-        let previousInstallations = installations
-        let refreshedDisabledProfileIDs = Self.disabledProfileIDs(in: refreshedProfiles)
-
+        var previousInstallations = modelRootPath == rootURL.path ? installations : [:]
+        for modelID in modelTasks.keys {
+            if var installation = previousInstallations[modelID] {
+                installation.phase = .paused
+                previousInstallations[modelID] = installation
+            }
+        }
+        loraDiscovery.cancel()
+        modelOperationQueue.cancelAll()
         modelTasks.values.forEach { $0.cancel() }
         modelTasks.removeAll()
         modelTaskTokens.removeAll()
@@ -87,13 +112,9 @@ extension AppStore {
         models = refreshedModels
         loras = discovered.loras
         profiles = refreshedProfiles
-        disabledProfileIDs = refreshedDisabledProfileIDs
+        disabledProfileIDs = Self.disabledProfileIDs(in: refreshedProfiles)
         installations = Self.installations(for: refreshedModels, preserving: previousInstallations)
-        activeProfileIDs = Self.persistedActiveProfileIDs(
-            in: refreshedProfiles,
-            models: refreshedModels
-        )
-
+        activeProfileIDs = Self.persistedActiveProfileIDs(in: refreshedProfiles, models: refreshedModels)
         recipe.lora = Self.validatedPersistedLoRA(recipe.lora, available: discovered.loras)
         if let generationProfile = activeProfile(for: .textToImage) {
             recipe.profileID = generationProfile.id
@@ -101,17 +122,27 @@ extension AppStore {
         } else {
             recipe.profileID = nil
         }
-        statusMessage = "已切換模型路徑，偵測到 \(discovered.models.count) 個本機模型與 \(discovered.loras.count) 個 LoRA。"
-        return true
+    }
+
+    func refreshLoRAs(at rootURL: URL) {
+        loraDiscovery.load(at: rootURL) { [weak self] result in
+            guard let self, self.modelRootPath == rootURL.path else { return }
+            if case let .success(catalog) = result {
+                self.loras = catalog.loras
+                self.recipe.lora = Self.validatedPersistedLoRA(self.recipe.lora, available: catalog.loras)
+            }
+        }
     }
 
     func startSystemMetricsUpdates() {
-        systemMetrics = SystemMetricsReader.read()
         systemMetricsTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
+                let snapshot = await Task.detached(priority: .utility) {
+                    SystemMetricsReader.read()
+                }.value
+                guard !Task.isCancelled, let store = self else { return }
+                store.systemMetrics = snapshot
                 try? await Task.sleep(for: .seconds(1))
-                if Task.isCancelled { return }
-                self?.systemMetrics = SystemMetricsReader.read()
             }
         }
     }

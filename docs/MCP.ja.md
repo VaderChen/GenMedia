@@ -26,6 +26,8 @@ GenMedia.app の「設定 → MCP 連携」を有効にすると、次の URL �
 http://127.0.0.1:12181/mcp
 ```
 
+HTTP エンドポイントはネイティブのローカルクライアント専用です。`127.0.0.1` にバインドし、`Host` は `127.0.0.1:<port>` または `localhost:<port>`、POST の `Content-Type` は `application/json`（charset 付きも可）が必要です。`Origin` を含むリクエストは null やローカルの Origin も含めて 403 を返します。ブラウザーのプリフライトは拒否し、CORS ヘッダーは返しません。Origin のない OPTIONS は 405、未対応の Content-Type は 415 を返します。ローカルのネイティブプロセスは信頼対象であり、この検証はクライアント認証ではありません。外部公開プロキシを介して公開しないでください。
+
 このエンドポイントは localhost のみにバインドし、HTTP `POST` の JSON-RPC を受け付けます。スイッチを切ると直ちに待受を停止します。HTTP transport は stdio と同じ `MCPServer` ツールコアを直接呼び出し、stdio 子プロセスを起動せず、別サービスへのプロキシでもありません。App 内蔵モードのため利用中は GenMedia.app を起動したままにし、headless 連携では独立 stdio 実行ファイルを使用してください。
 
 ## MCP メソッド

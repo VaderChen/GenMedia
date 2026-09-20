@@ -5,27 +5,30 @@ import GenImageCore
 import Vision
 
 public actor CoreMLUpscaleService: ImageUpscaling {
-    private var outputDirectory: URL
+    private nonisolated let outputLocation: OutputDirectoryStorage
+    private var outputDirectory: URL { outputLocation.url }
     private let context = CIContext(options: [.cacheIntermediates: false])
     private var models: [String: MLModel] = [:]
 
     public init(outputDirectory: URL) {
-        self.outputDirectory = outputDirectory
+        self.outputLocation = OutputDirectoryStorage(outputDirectory)
     }
 
-    public func setOutputDirectory(_ outputDirectory: URL) {
-        self.outputDirectory = outputDirectory
+    public nonisolated func setOutputDirectory(_ outputDirectory: URL) {
+        outputLocation.update(to: outputDirectory)
     }
 
     /// 釋放已載入的 Core ML 模型，供記憶體壓力保護使用。
     public func unload() {
         models.removeAll(keepingCapacity: false)
+        context.clearCaches()
     }
 
     public func upscale(
         request: UpscaleRequest,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> MediaAsset {
+        let outputDirectory = self.outputDirectory
         guard request.profile.capability == .upscale else {
             throw CoreMLUpscaleError.incompatibleProfile
         }
@@ -66,6 +69,7 @@ public actor CoreMLUpscaleService: ImageUpscaling {
 
         progress(0.02)
         let model = try loadModel(at: modelURL)
+        let visionModel = try VNCoreMLModel(for: model)
         progress(0.08)
         let tileSize = request.profile.defaults.tileSize ?? 512
         guard tileSize == 512 else {
@@ -81,62 +85,69 @@ public actor CoreMLUpscaleService: ImageUpscaling {
             width: sourceWidth * request.scale,
             height: sourceHeight * request.scale
         )
-        var composed = CIImage(color: .clear).cropped(to: outputExtent)
+        let canvas = try UpscaleBitmapCanvas(width: Int(outputExtent.width), height: Int(outputExtent.height))
         var completedTiles = 0
 
         for yIndex in 0..<yTiles {
             for xIndex in 0..<xTiles {
-                try Task.checkCancellation()
+                try autoreleasepool {
+                    try Task.checkCancellation()
 
-                let x = xIndex * tileSize
-                let y = yIndex * tileSize
-                let tileWidth = min(tileSize, sourceWidth - x)
-                let tileHeight = min(tileSize, sourceHeight - y)
-                let sourceRect = CGRect(x: x, y: y, width: tileWidth, height: tileHeight)
-                let tile = sourceImage
-                    .cropped(to: sourceRect)
-                    .transformed(by: CGAffineTransform(translationX: -CGFloat(x), y: -CGFloat(y)))
-                let paddedExtent = CGRect(x: 0, y: 0, width: tileSize, height: tileSize)
-                let padded = tile.composited(
-                    over: CIImage(color: .black).cropped(to: paddedExtent)
-                )
-
-                guard let tileCGImage = context.createCGImage(padded, from: paddedExtent) else {
-                    throw CoreMLUpscaleError.cannotCreateTile
-                }
-                let outputTile = try predict(cgImage: tileCGImage, model: model)
-                let scaledOutput: CIImage
-                if request.scale == 2 {
-                    scaledOutput = outputTile.applyingFilter(
-                        "CILanczosScaleTransform",
-                        parameters: [
-                            kCIInputScaleKey: 0.5,
-                            kCIInputAspectRatioKey: 1.0
-                        ]
+                    let x = xIndex * tileSize
+                    let y = yIndex * tileSize
+                    let tileWidth = min(tileSize, sourceWidth - x)
+                    let tileHeight = min(tileSize, sourceHeight - y)
+                    let sourceRect = CGRect(x: x, y: y, width: tileWidth, height: tileHeight)
+                    let tile = sourceImage
+                        .cropped(to: sourceRect)
+                        .transformed(by: CGAffineTransform(translationX: -CGFloat(x), y: -CGFloat(y)))
+                    let paddedExtent = CGRect(x: 0, y: 0, width: tileSize, height: tileSize)
+                    let padded = tile.composited(
+                        over: CIImage(color: .black).cropped(to: paddedExtent)
                     )
-                } else {
-                    scaledOutput = outputTile
-                }
-                let croppedOutput = scaledOutput
-                    .cropped(
-                        to: CGRect(
-                            x: 0,
-                            y: 0,
-                            width: tileWidth * request.scale,
-                            height: tileHeight * request.scale
+
+                    guard let tileCGImage = context.createCGImage(padded, from: paddedExtent) else {
+                        throw CoreMLUpscaleError.cannotCreateTile
+                    }
+                    let outputTile = try predict(cgImage: tileCGImage, model: visionModel)
+                    let scaledOutput: CIImage
+                    if request.scale == 2 {
+                        scaledOutput = outputTile.applyingFilter(
+                            "CILanczosScaleTransform",
+                            parameters: [
+                                kCIInputScaleKey: 0.5,
+                                kCIInputAspectRatioKey: 1.0
+                            ]
                         )
-                    )
-                    .transformed(
-                        by: CGAffineTransform(
-                            translationX: CGFloat(x * request.scale),
-                            y: CGFloat(y * request.scale)
+                    } else {
+                        scaledOutput = outputTile
+                    }
+                    let croppedOutput = scaledOutput
+                        .cropped(
+                            to: CGRect(
+                                x: 0,
+                                y: 0,
+                                width: tileWidth * request.scale,
+                                height: tileHeight * request.scale
+                            )
                         )
-                    )
-                composed = croppedOutput.composited(over: composed)
+                        .transformed(
+                            by: CGAffineTransform(
+                                translationX: CGFloat(x * request.scale),
+                                y: CGFloat(y * request.scale)
+                            )
+                        )
+                    let destination = CGRect(x: x * request.scale, y: y * request.scale,
+                        width: tileWidth * request.scale, height: tileHeight * request.scale)
+                    guard let rendered = context.createCGImage(croppedOutput, from: destination) else {
+                        throw CoreMLUpscaleError.cannotCreateTile
+                    }
+                    canvas.draw(rendered, in: destination)
 
-                completedTiles += 1
-                let tileProgress = Double(completedTiles) / Double(totalTiles)
-                progress(0.08 + tileProgress * 0.84)
+                    completedTiles += 1
+                    let tileProgress = Double(completedTiles) / Double(totalTiles)
+                    progress(0.08 + tileProgress * 0.84)
+                }
             }
         }
 
@@ -148,7 +159,7 @@ public actor CoreMLUpscaleService: ImageUpscaling {
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         progress(0.94)
         try context.writePNGRepresentation(
-            of: composed,
+            of: CIImage(cgImage: try canvas.image()),
             to: outputURL,
             format: .RGBA8,
             colorSpace: colorSpace
@@ -185,9 +196,8 @@ public actor CoreMLUpscaleService: ImageUpscaling {
         return model
     }
 
-    private func predict(cgImage: CGImage, model: MLModel) throws -> CIImage {
-        let visionModel = try VNCoreMLModel(for: model)
-        let visionRequest = VNCoreMLRequest(model: visionModel)
+    private func predict(cgImage: CGImage, model: VNCoreMLModel) throws -> CIImage {
+        let visionRequest = VNCoreMLRequest(model: model)
         visionRequest.imageCropAndScaleOption = .scaleFill
         let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up)
         try handler.perform([visionRequest])

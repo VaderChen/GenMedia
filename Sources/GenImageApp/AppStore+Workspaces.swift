@@ -39,7 +39,9 @@ extension AppStore {
             : projects.index(after: deletedIndex)
         let replacementID = projects[replacementIndex].id
 
+        let removedAssets = assets.filter { $0.projectID == id }
         assets.removeAll { $0.projectID == id }
+        _ = removeCompatibilityFiles(for: removedAssets)
         operations.removeAll { $0.projectID == id }
         if selectedProjectID == id {
             selectedProjectID = replacementID
