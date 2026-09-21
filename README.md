@@ -25,7 +25,9 @@ LoRA 權重轉換改用 1 MiB 分塊，Worker 日誌增量讀取且能處理正�
 
 ## 預覽
 
-![GenMedia 媒體智能生成介面](images/cap001.jpg)
+![GenMedia 操作示範 GIF](images/operation-demo.gif)
+
+操作導覽：提示詞與輸出設定 → 影片與音樂設定 → 模型搜尋 → 建立簡單 MV 流程。以目前 WebUI 與示範資料錄製，未執行模型推論。
 
 ## 執行
 

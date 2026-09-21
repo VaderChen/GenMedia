@@ -25,7 +25,9 @@ LoRA conversion copies weights in 1 MiB chunks. Worker logs are read incremental
 
 ## Preview
 
-![GenMedia intelligent media generation interface](images/cap001.jpg)
+![GenMedia interface walkthrough GIF](images/operation-demo.gif)
+
+Walkthrough: prompt and output settings → video and music settings → model search → create a simple MV workflow. Recorded from the current WebUI with demo data; model inference is not performed. The interface is shown in Traditional Chinese.
 
 ## Run
 

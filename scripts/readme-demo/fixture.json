@@ -1,0 +1,368 @@
+{
+  "schemaVersion": 1,
+  "projectName": "README 操作示範",
+  "workspaces": [
+    {
+      "id": "E1AC3B6C-FB71-51EB-8645-D8ED850B0008",
+      "name": "README 操作示範",
+      "isDefault": false
+    }
+  ],
+  "selectedWorkspaceID": "E1AC3B6C-FB71-51EB-8645-D8ED850B0008",
+  "modelRootPath": "/Demo/GenMedia/Models",
+  "outputDirectoryPath": "/Demo/GenMedia/Outputs",
+  "civitaiTokenConfigured": false,
+  "huggingFaceTokenConfigured": false,
+  "assets": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "parentAssetID": null,
+      "kind": "imported",
+      "title": "匯入範例 · GenMedia App 圖示",
+      "fileName": "GenImage-AppIcon.png",
+      "pixelWidth": 1254,
+      "pixelHeight": 1254,
+      "createdAt": "2026-09-21T00:00:00Z",
+      "previewURL": "/assets/GenImage-AppIcon.png",
+      "thumbnailURL": "/assets/GenImage-AppIcon.png"
+    }
+  ],
+  "selectedAssetID": "00000000-0000-4000-8000-000000000001",
+  "comparisonAssetID": null,
+  "recipe": {
+    "id": "2B848283-0805-5977-9829-26DD8ACCCA48",
+    "name": "操作示範配方",
+    "prompt": "",
+    "negativePrompt": "",
+    "modelID": "mzbac/z-image-turbo-8bit",
+    "profileID": null,
+    "width": 1024,
+    "height": 1024,
+    "steps": 9,
+    "outputCount": 4,
+    "seed": "42",
+    "loraID": null,
+    "loraScale": 1
+  },
+  "videoOutputSettings": {
+    "width": 1280,
+    "height": 720,
+    "steps": 8,
+    "outputCount": 1,
+    "frameCount": 97,
+    "frameRate": 24,
+    "seed": "42"
+  },
+  "musicOutputSettings": {
+    "prompt": "",
+    "lyrics": "",
+    "style": "pop",
+    "durationSeconds": 30,
+    "steps": 8,
+    "seed": "42",
+    "format": "mp3"
+  },
+  "jobs": [],
+  "models": [
+    {
+      "descriptor": {
+        "id": "mzbac/z-image-turbo-8bit",
+        "displayName": "Z-Image Turbo 8-bit",
+        "publisher": "mzbac / Tongyi-MAI",
+        "summary": "適合一般 Apple Silicon Mac 的量化文生圖版本。",
+        "licenseName": "Apache-2.0",
+        "capabilities": [
+          "textToImage"
+        ],
+        "quantization": "8-bit",
+        "approximateDownloadGB": 12.4,
+        "recommendedMemoryGB": 16,
+        "sourceURL": "https://huggingface.co/mzbac/z-image-turbo-8bit",
+        "localURL": null,
+        "isRecommended": true
+      },
+      "installation": {
+        "phase": "notInstalled",
+        "progress": 0,
+        "downloadedGB": 0,
+        "errorMessage": null
+      }
+    },
+    {
+      "descriptor": {
+        "id": "lmstudio-community/Qwen3.5-4B-MLX-4bit",
+        "displayName": "Qwen3.5 4B MLX 4-bit",
+        "publisher": "LM Studio Community / Qwen",
+        "summary": "Apple Silicon 原生 MLX 多模態模型，支援圖片理解、字幕翻譯、摘要、改寫與文字生成。",
+        "licenseName": "Apache-2.0",
+        "capabilities": [
+          "imageToText",
+          "textToText"
+        ],
+        "quantization": "4-bit",
+        "approximateDownloadGB": 2.85,
+        "recommendedMemoryGB": 16,
+        "sourceURL": "https://huggingface.co/lmstudio-community/Qwen3.5-4B-MLX-4bit",
+        "localURL": null,
+        "isRecommended": true
+      },
+      "installation": {
+        "phase": "notInstalled",
+        "progress": 0,
+        "downloadedGB": 0,
+        "errorMessage": null
+      }
+    },
+    {
+      "descriptor": {
+        "id": "qwen-image-edit-2511@mlx-int4",
+        "displayName": "Qwen Image Edit 2511 INT4",
+        "publisher": "Qwen / xocialize",
+        "summary": "官方 2511 基礎模型搭配預量化 Swift/MLX INT4 權重，可直接在 Apple Silicon 載入。",
+        "licenseName": "Apache-2.0",
+        "capabilities": [
+          "imageToImage"
+        ],
+        "quantization": "4-bit",
+        "approximateDownloadGB": 35.8,
+        "recommendedMemoryGB": 32,
+        "sourceURL": "https://huggingface.co/Qwen/Qwen-Image-Edit-2511",
+        "localURL": null,
+        "isRecommended": true
+      },
+      "installation": {
+        "phase": "notInstalled",
+        "progress": 0,
+        "downloadedGB": 0,
+        "errorMessage": null
+      }
+    },
+    {
+      "descriptor": {
+        "id": "dgrauet/ltx-2.3-mlx-q4",
+        "displayName": "LTX-2.3 MLX Q4",
+        "publisher": "dgrauet / LTX-2 MLX",
+        "summary": "原生 MLX INT4 圖生影模型，在 Apple Silicon 上透過 Metal 執行；包含影片、立體聲音訊與 Gemma 3 12B 文字編碼器。",
+        "licenseName": "LTX-2 Community License / MLX Port MIT",
+        "capabilities": [
+          "imageToVideo",
+          "textToVideo"
+        ],
+        "quantization": "4-bit",
+        "approximateDownloadGB": 42.0,
+        "recommendedMemoryGB": 48,
+        "sourceURL": "https://huggingface.co/dgrauet/ltx-2.3-mlx-q4",
+        "localURL": null,
+        "isRecommended": true
+      },
+      "installation": {
+        "phase": "notInstalled",
+        "progress": 0,
+        "downloadedGB": 0,
+        "errorMessage": null
+      }
+    },
+    {
+      "descriptor": {
+        "id": "ACE-Step/Ace-Step1.5",
+        "displayName": "ACE-Step 1.5 Turbo MLX",
+        "publisher": "ACE Studio / StepFun",
+        "summary": "Apple Silicon 原生 MLX 文生音樂模型，支援 Prompt、選填歌詞與最長 300 秒純音樂或歌曲生成。",
+        "licenseName": "MIT",
+        "capabilities": [
+          "textToMusic"
+        ],
+        "quantization": "BF16",
+        "approximateDownloadGB": 6.8,
+        "recommendedMemoryGB": 16,
+        "sourceURL": "https://huggingface.co/ACE-Step/Ace-Step1.5",
+        "localURL": null,
+        "isRecommended": true
+      },
+      "installation": {
+        "phase": "notInstalled",
+        "progress": 0,
+        "downloadedGB": 0,
+        "errorMessage": null
+      }
+    },
+    {
+      "descriptor": {
+        "id": "argmaxinc/whisperkit-coreml@large-v3-turbo",
+        "displayName": "Whisper Large v3 Turbo Core ML",
+        "publisher": "Argmax / OpenAI",
+        "summary": "支援多語言與自動語言偵測的 WhisperKit Core ML 模型，可從影片或音訊產生字幕時間軸。",
+        "licenseName": "MIT / Apache-2.0",
+        "capabilities": [
+          "videoToText"
+        ],
+        "quantization": "Core ML",
+        "approximateDownloadGB": 0.96,
+        "recommendedMemoryGB": 16,
+        "sourceURL": "https://huggingface.co/argmaxinc/whisperkit-coreml",
+        "localURL": null,
+        "isRecommended": false
+      },
+      "installation": {
+        "phase": "notInstalled",
+        "progress": 0,
+        "downloadedGB": 0,
+        "errorMessage": null
+      }
+    }
+  ],
+  "loras": [],
+  "profiles": [
+    {
+      "name": "快速文生圖 · Z-Image 8-bit",
+      "modelID": "mzbac/z-image-turbo-8bit",
+      "modelRevision": "main",
+      "notes": "16GB Mac 的建議預設。",
+      "id": "D67EB3CD-7414-521C-97DD-19C910790A1F",
+      "capability": "textToImage",
+      "architecture": "mlxSwift",
+      "profileRevision": 1,
+      "isBuiltIn": true,
+      "supportsGeneration": true,
+      "loras": [],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 9,
+        "outputCount": 4
+      }
+    },
+    {
+      "name": "圖生文 · Qwen3.5 4B MLX 4-bit",
+      "modelID": "lmstudio-community/Qwen3.5-4B-MLX-4bit",
+      "modelRevision": "c43ee1d65576a5d98de1e8405cac93c371a655c1",
+      "notes": "建議的原生 MLX 多模態圖生文 Profile。",
+      "id": "C922A8AC-4B44-5154-AE79-93115A66B480",
+      "capability": "imageToText",
+      "architecture": "mlxSwift",
+      "profileRevision": 1,
+      "isBuiltIn": true,
+      "supportsGeneration": true,
+      "loras": [],
+      "defaults": {
+        "maxTokens": 512,
+        "languageCode": "zh-Hant"
+      }
+    },
+    {
+      "name": "文生文 · Qwen3.5 4B MLX 4-bit",
+      "modelID": "lmstudio-community/Qwen3.5-4B-MLX-4bit",
+      "modelRevision": "c43ee1d65576a5d98de1e8405cac93c371a655c1",
+      "notes": "多模態 VLM Runtime 的純文字模式；停用 thinking，適合字幕翻譯、摘要、改寫與一般文字生成。",
+      "id": "4CED9ABB-DFDF-5A3D-927A-8BE3078126D3",
+      "capability": "textToText",
+      "architecture": "mlxSwift",
+      "profileRevision": 1,
+      "isBuiltIn": true,
+      "supportsGeneration": true,
+      "loras": [],
+      "defaults": {
+        "maxTokens": 2048,
+        "languageCode": "auto"
+      }
+    },
+    {
+      "name": "圖生圖 · Qwen Image Edit INT4",
+      "modelID": "qwen-image-edit-2511@mlx-int4",
+      "modelRevision": "main",
+      "notes": "Qwen Image Edit 2511 原生 Swift/MLX；建議 32GB 以上 Apple Silicon Mac。",
+      "id": "780AB0FB-83C5-5D1E-A03D-C18CDF324F67",
+      "capability": "imageToImage",
+      "architecture": "externalCLI",
+      "profileRevision": 1,
+      "isBuiltIn": true,
+      "supportsGeneration": true,
+      "loras": [],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 20,
+        "outputCount": 1
+      }
+    },
+    {
+      "name": "文生影 · LTX-2.3 MLX Q4",
+      "modelID": "dgrauet/ltx-2.3-mlx-q4",
+      "modelRevision": "main",
+      "notes": "原生 MLX INT4 LTX-2.3 文生影 Profile；由 LTX Swift Worker 使用 Apple Silicon Metal 執行。建議 48GB 以上記憶體。",
+      "id": "86EF64D0-00E8-5DC8-B7F4-E9FB6EA69C1D",
+      "capability": "textToVideo",
+      "architecture": "externalCLI",
+      "profileRevision": 1,
+      "isBuiltIn": true,
+      "supportsGeneration": true,
+      "loras": [],
+      "defaults": {
+        "width": 1280,
+        "height": 720,
+        "steps": 8,
+        "outputCount": 1,
+        "frameCount": 97,
+        "frameRate": 24
+      }
+    },
+    {
+      "name": "文生音樂 · ACE-Step 1.5 Turbo MLX",
+      "modelID": "ACE-Step/Ace-Step1.5",
+      "modelRevision": "19671f406d603126926c1b7e2adc169acbcade22",
+      "notes": "ACE-Step 1.5 Turbo Apple Silicon 原生 Swift／MLX Profile；支援音樂 Prompt、選填歌詞與純音樂生成，長度 10–300 秒。輸出由 App 內建 FFmpeg 轉為 MP3、M4A、AAC 或 FLAC。",
+      "id": "7FA32F33-DA1F-59DA-BEFF-1ADFD24CAD46",
+      "capability": "textToMusic",
+      "architecture": "mlxSwift",
+      "profileRevision": 1,
+      "isBuiltIn": true,
+      "supportsGeneration": true,
+      "loras": [],
+      "defaults": {
+        "steps": 8,
+        "outputCount": 1,
+        "durationSeconds": 30
+      },
+      "music": {
+        "minimumDurationSeconds": 10,
+        "maximumDurationSeconds": 300,
+        "durationSemantics": "target"
+      }
+    },
+    {
+      "name": "多語字幕 · Whisper Large v3 Turbo",
+      "modelID": "argmaxinc/whisperkit-coreml@large-v3-turbo",
+      "modelRevision": "0f63a7800b00dd0226abd051b906c246e1907482",
+      "notes": "多語言 Core ML Profile；自動偵測來源語言並輸出字幕時間軸。",
+      "id": "5FA499C3-7A9E-5AAC-A405-5C7F54A77E06",
+      "capability": "videoToText",
+      "architecture": "coreML",
+      "profileRevision": 1,
+      "isBuiltIn": true,
+      "supportsGeneration": true,
+      "loras": [],
+      "defaults": {
+        "languageCode": "auto"
+      }
+    }
+  ],
+  "disabledProfileIDs": [],
+  "activeProfileIDs": {},
+  "operations": [],
+  "statusMessage": null,
+  "availableUpdate": null,
+  "systemMetrics": {
+    "ramUsage": null,
+    "gpuUsage": null,
+    "npuUsage": null,
+    "ramUsedBytes": 0,
+    "ramTotalBytes": 0
+  },
+  "isReleasingMemory": false,
+  "mcpService": {
+    "isEnabled": false,
+    "isRunning": false,
+    "endpointURL": null,
+    "errorMessage": null
+  }
+}
