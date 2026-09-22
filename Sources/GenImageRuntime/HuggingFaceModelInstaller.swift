@@ -715,6 +715,14 @@ public actor HuggingFaceModelInstaller {
             "processor/", "scheduler/", "text_encoder/", "tokenizer/", "transformer/", "vae/"
         ]
         switch modelID {
+        case QwenImage21Model.id:
+            return InstallPlan(
+                directoryName: QwenImage21Model.directoryName,
+                requiredRuntimeFiles: QwenImage21Model.requiredFiles,
+                sources: [SourcePlan(repository: QwenImage21Model.id, revision: QwenImage21Model.revision,
+                    destinationSubdirectory: "", prefixes: [],
+                    exactFiles: QwenImage21Model.requiredFiles.union(["README.md"]))]
+            )
         case zImage8BitModelID:
             return InstallPlan(
                 directoryName: "z-image-turbo-8bit",

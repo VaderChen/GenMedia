@@ -25,6 +25,7 @@ public enum LocalModelDiscovery {
             discoverCaptioner,
             discoverNSFWCaptioner,
             discoverManagedMultimodalModels,
+            discoverQwenImage21,
             discoverQwenImageEdit,
             discoverLTX23,
             discoverLTX23MLXQ4,
@@ -1351,6 +1352,23 @@ public enum LocalModelDiscovery {
                 )
             )
         }
+    }
+
+    private static func discoverQwenImage21(
+        root: URL, fileManager: FileManager, result: inout DiscoveredModelCatalog
+    ) {
+        let directory = root.appendingPathComponent(QwenImage21Model.directoryName, isDirectory: true)
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent("genimage-model.json")),
+              let manifest = try? JSONDecoder().decode(ManagedModelManifest.self, from: data),
+              manifest.modelID == QwenImage21Model.id,
+              QwenImage21Model.requiredFiles.allSatisfy({ path in
+                  let url = directory.appendingPathComponent(path)
+                  return (try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]))
+                      .map { $0.isRegularFile == true && ($0.fileSize ?? 0) > 0 } ?? false
+              }) else { return }
+        var model = QwenImage21Model.descriptor
+        model.localURL = directory
+        result.models.append(model)
     }
 
     private static func discoverQwenImageEdit(

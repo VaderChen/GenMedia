@@ -47,6 +47,7 @@ Web UI 只能透過 Bridge 使用本機能力，不可直接讀取任意檔案�
 
 ### Web UI 更新策略
 
+- 文生圖與圖生圖按鈕各自檢查對應 Profile；選取生成結果只改變預覽／來源，不替換文生圖按鈕。待執行、執行與取消中的工作停用按鈕，完成、失敗與取消完成的活動更新會重新判定。建立區塊的操作按鈕可在窄面板換行。
 - `WebAppState` 負責完整內容同步；`WebActivityState` 僅同步任務、安裝狀態、系統資源、訊息與記憶體釋放狀態。純進度更新不重算資產或全畫面內容簽章，階段切換才重新檢查相關控制項。
 - 系統資源讀取在背景執行；`WebAsset` 與資產 URL 索引依資產值快取。App 再次成為前景時清除索引，以更新外部修改的字幕。
 - 圖片格線與底片列透過 `/thumbnail` 取得最大 384 px 的 ImageIO 縮圖，採延遲載入；原圖預覽仍讀完整檔案。PNG 縮圖保留透明度及 EXIF 方向，記憶體快取限制為 16 MiB／256 張。
@@ -201,3 +202,16 @@ Upscale 由 `CoreMLUpscaleService` 執行 Real-ESRGAN 512 tile 與 4× 拼接。
 `scripts/build-ffmpeg-macos.sh` 產生 Apple Silicon、LGPL-only、動態連結且可重新替換的 FFmpeg 發佈目錄。`build.command` 驗證未啟用 GPL／nonfree 編碼器，複製 `ffmpeg`、`ffprobe`、dylib 與授權文件，將 install name 改為 `@rpath`，依序簽署 dylib、工具與 App，再交由既有 DMG 公證流程處理。Developer ID 測試確認 FFmpeg dylib 與工具使用相同 Team ID 時不需額外 library-validation entitlement；本機 ad-hoc 建置則不對 FFmpeg 啟用 hardened runtime。預建二進位位於被 Git 忽略的 `third_party/ffmpeg/`，不進入 GitHub Source archive。
 
 MLX metallib 依 MLX Swift 版本分開管理。主程式、Qwen、MiniMax Music 3 與 LTX Worker 使用 `mlx-swift 0.31.6`，建置時由 `RuntimeSupport/mlx-swift-0.31.6.metallib` 複製到各自的 Release 執行目錄；Z-Image Worker 因相依套件限制使用 `mlx-swift 0.30.6`，則使用 `RuntimeSupport/mlx-swift-0.30.6-zimage.metallib`，並放在 App Bundle 的 `Contents/Helpers/ZImage/`。`build.command` 會從各套件的 `Package.resolved` 讀取版本、檢查相容 Worker 版本一致，再以 MLX kernel 與 lockfile 指紋決定是否重建，避免不同版本共用或誤用未標版本的 `mlx.metallib`。發佈前仍需完成模型授權檢查與 16/24/32GB 壓力測試。
+
+
+## Qwen-Image 2.1 Swift Runtime
+
+`ImageGenerationRouter` 按 Profile、配方與模型索引分流 Z-Image、Qwen Edit 2511 和 Qwen-Image 2.1。App 文生圖與圖生圖共用同一 router，切換到 2.1 前會卸載 Z-Image 暖機行程。MCP 也由模型目錄的 `QwenImage21Pipeline` 索引識別 2.1，避免使用者自訂目錄名稱造成錯誤分流。
+
+`Qwen21ImageService` 以既有 `RuntimeProcess` 執行根套件的 `GenImageQwen21Worker`，沿用取消／終止與 JSON 進度讀取。工作開始時固定輸出目錄；失敗或取消會清除此次不完整輸出，成功前檢查 PNG 尺寸。Worker 與 App 共用同版 MLX Metal library，封裝於 `Contents/Helpers`。
+
+`QwenImage21Runtime` 包含 Qwen3-VL 前正規化條件編碼、單流 DiT、三軸 RoPE、區塊因果注意力、FlowMatch Euler 取樣與 64 通道 RGBA VAE。參考圖同時進入視覺編碼器及 VAE；視覺 image slot 在 DiT 中展開成四個 latent token。模型依編碼、去噪、解碼分階段載入；未實作條件 KV cache、VAE tiling 或多參考圖 API。
+
+`Patches/Qwen3VL-Image-Conditioning.patch` 對固定的 mlx-swift-lm 3.31.4 加入 `encodeImageConditioning`，直接取得最後一層、最終 RMSNorm 之前的特徵，不執行 LM head。一般聊天／圖生文仍使用原本的正規化及 LM head 路徑。建置腳本以 pin 與 marker 驗證此 patch。模型來源、限制與數值驗證見 [Qwen-Image 2.1](QWEN_IMAGE_21.md)。
+
+參考圖片透過 `Qwen21ImageProcessing` 先轉成 sRGB 像素，再於 MLX tensor 中正規化／patchify，避免在 Core Image 的線性光工作色域內直接套 mean/std。VAE 保留原始 alpha；Qwen3-VL 的視覺輸入則先合成到白底。

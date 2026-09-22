@@ -12,16 +12,22 @@ GenMedia 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App�
 - 獨立設定頁支援繁體中文、英文、日文、韓文及六套可持久保存的配色。
 - 設定頁可用 Switch 啟動只綁定本機的 MCP HTTP API；另保留可在 App 未啟動時獨立運作的 JSON-RPC 2.0 stdio server。
 
-## 近期修正與驗證（2026-09-21）
+## 近期修正與驗證（2026-09-22）
+
+文生圖與圖生圖改為獨立按鈕，生成結果被選取後仍可再次文生圖；窄視窗會自動換行。修正 `run.command` 建置完成卻找不到主程式的問題，逐一建置並檢查四個根套件出貨產品。12 項腳本測試、6 項 Web UI 測試及四語 WebKit 排版檢查通過。
 
 模型掃描、下載後驗證與移除在背景執行；同一模型的暫停、續傳、修復與移除會等待前一個操作完成清理。切換輸出目錄後，新工作使用新路徑，進行中的工作保留開始時的路徑。
 
 共用媒體仍被其他資產或工作區引用時會保留；改名同步更新全部對應參照。自動清理只處理未被引用的 MediaCache 代理。工作區讀取失敗時保留原始索引與快取，並停用該次執行的工作區自動存檔。
 
-LoRA 權重轉換改用 1 MiB 分塊，Worker 日誌增量讀取且能處理正常退出前的大量日誌。完整根套件編譯及 **141 項 Swift 測試**通過；合成 LoRA 量測與尚未驗證的範圍見[效能紀錄](docs/PERFORMANCE_CHANGES.md)。這不代表所有大型模型或硬體組合都已驗證。
+LoRA 權重轉換改用 1 MiB 分塊，Worker 日誌增量讀取且能處理正常退出前的大量日誌。完整根套件編譯及 **163 項 Swift 測試**通過；合成 LoRA 量測與尚未驗證的範圍見[效能紀錄](docs/PERFORMANCE_CHANGES.md)。這不代表所有大型模型或硬體組合都已驗證。
 
 - [驗證方式與結果](docs/VALIDATION.md)
 - [完整檢查與修正報告](docs/PROJECT_REVIEW_2026-09-20.md)
+
+## Qwen-Image 2.1（Swift／MLX）
+
+模型中心新增 **Qwen-Image 2.1 MLX 4-bit**，同一份模型提供文生圖與實驗性單圖編輯 Profile。512×512 文生圖及 256×256 單圖編輯已實測；先前 512 編輯的顆粒問題仍保留追蹤。推論採用 Swift／MLX，輸出保留 RGBA 透明度，不需要 Python Worker。使用方式、建置前置修正與實測範圍見 [Qwen-Image 2.1 文件](docs/QWEN_IMAGE_21.md)。
 
 ## 預覽
 
@@ -38,7 +44,7 @@ LoRA 權重轉換改用 1 MiB 分塊，Worker 日誌增量讀取且能處理正�
 ./run.command
 ```
 
-`build.command` 會建立 Release 執行檔，並在 `dist/` 輸出標準 `GenMedia.app`。App 內含 WebUI 資源、MLX Metal runtime、MCP server、模型診斷工具，以及 LGPL 動態版 `ffmpeg`／`ffprobe` 統一媒體相容層。第一次建立 App bundle 時，`build.command` 會自動下載來源並建立內建 FFmpeg，不需先手動準備 FFmpeg 或安裝 `pkg-config`。
+`build.command` 會建立 Release 執行檔，並在 `dist/` 輸出標準 `GenMedia.app`。App 內含 WebUI 資源、MLX Metal runtime、MCP server，以及 LGPL 動態版 `ffmpeg`／`ffprobe` 統一媒體相容層。第一次建立 App bundle 時，`build.command` 會自動下載來源並建立內建 FFmpeg，不需先手動準備 FFmpeg 或安裝 `pkg-config`。
 
 ```bash
 # 建置 Release 執行檔與 App
@@ -54,6 +60,8 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 `run.command` 會自動使用 `--no-app`，日常啟動不會重複建立 App bundle。對外發佈的 DMG 由獨立本機流程完成 Developer ID Application 簽章、Apple Notarization、Staple 與 Gatekeeper 驗證。
 
 建置直接在本機專案目錄執行；App 與 DMG 的暫存封裝位於 `dist/`，備份暫存位於 `Backups/`。App 完成簽章驗證後才替換舊版。
+
+專案若放在 ExFAT 磁碟，請將簽章 App 的輸出位置設為內部 APFS，例如 `GENIMAGE_DIST_DIR="$HOME/Downloads/GenMedia-dist" ./build.command`。這可避免 AppleDouble 中繼資料干擾 macOS 巢狀 bundle 簽章；完成的 DMG 可再複製回外接磁碟。
 
 ### FFmpeg 建置問題排除
 
@@ -129,9 +137,10 @@ Qwen3-VL、Qwen3.5 與 Qwen3.8 屬於多模態模型，因此模型中心會同�
 - 每個開啟的工作區分頁視為一個生成專案；資產與 lineage 會原子寫入 Application Support，App 關閉後仍可恢復。只有明確關閉分頁時才移除該專案的工作區索引，已輸出的媒體檔仍保留於磁碟。
 - App 管理資料預設位於 `~/Library/Application Support/GenImage/`（`Models`、`Runtime`、`Workspace`、`Pasted`、`Generated`），由 `GenImageCore/ApplicationSupport.swift` 統一定義。工作區索引曾寫在 `GenMedia/`，啟動時會自動接回目前的根目錄；同名項目一律保留現有的，不覆蓋也不合併。目錄名稱維持 `GenImage` 而非改為與 App 一致的 `GenMedia`，以相容既有模型與舊版 Runtime 資料。模型與生成輸出可在設定中另選目錄；匯入的使用者檔案保留在原位置。
 - Prompt 與歌詞編輯期間會保留游標、選取範圍及輸入法組字狀態；生成類型、Prompt、歌詞與輸出設定 TAB 只局部更新創作面板。必要的完整畫面更新會沿用播放中的音訊或影片節點，避免中斷播放。
-- 工作區底片列提供圖片匯入按鈕，並支援從 Finder 拖放一張或多張 PNG、JPEG、WebP、GIF、TIFF、HEIC 與 HEIF 圖片；音樂生成模式會停用圖片匯入，避免混用媒體來源。圖片生成時若已選取來源圖片，主按鈕會自動使用圖生圖 Profile，未選取時則使用文生圖 Profile。
+- 工作區底片列提供圖片匯入按鈕，並支援從 Finder 拖放一張或多張 PNG、JPEG、WebP、GIF、TIFF、HEIC 與 HEIF 圖片；音樂生成模式會停用圖片匯入，避免混用媒體來源。「文生圖」按鈕固定保留；選取圖片後另外顯示「圖生圖」，兩者分別依自己的 Profile 啟用。生成完成後不需取消選取結果即可繼續文生圖。
 - 圖片與影片比例選項改為下拉選單；圖生圖選取來源圖片後才會顯示「原解析度」，並依來源尺寸換算為符合 Runtime 的 16 倍數寬高。
-- 圖生圖的寬高設定會實際傳入 Qwen Image Edit Runtime。當指定比例不同於來源圖片時，來源圖會保持自身解析度並以邊緣延展補足為輸出比例的畫布，再進行生成，以保留完整來源內容。
+- 以下條件畫布及 1024² 生成面積規則適用於 Qwen Image Edit 2511；Qwen-Image 2.1 直接使用設定尺寸，規則見[專用文件](docs/QWEN_IMAGE_21.md)。
+- 圖生圖的寬高設定會實際傳入 Qwen Image Edit 2511 Runtime。當指定比例不同於來源圖片時，來源圖會保持自身解析度並以邊緣延展補足為輸出比例的畫布，再進行生成，以保留完整來源內容。
 - 條件影像會以生成解析度編碼，使條件網格與輸出網格的 RoPE 位置完全對齊；若沿用固定 1024² 面積的條件網格，模型只會對準來源中央，輸出即成為裁切後的放大結果。
 - 生成解析度與輸出解析度分離：指定面積小於 1024² 時，Runtime 會以指定比例、1024² 面積生成（與 diffusers 參考實作相同的約 4096 個 latent token），再以 Lanczos 縮放為指定尺寸輸出。DiT 的 token 數遠低於訓練規模時去噪會劣化並崩解成條紋，因此 `128 × 192` 這類低解析度改由縮放產生，畫質明顯較佳。
 - 指定面積達到或超過 1024² 時直接以指定尺寸生成，不再縮放；解析度越高，Runtime 的記憶體用量與生成時間也會同步增加。低於 1024² 的輸出仍以 1024² 面積生成，因此生成時間不會隨輸出尺寸縮小而減少。

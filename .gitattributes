@@ -1,2 +1,5 @@
 # 保留 GitHub 上的輸出範例，但排除 GitHub 自動產生的 Source ZIP／tar.gz。
 /Outputs export-ignore
+
+# Unified patches retain a context-prefix space on otherwise blank lines.
+Patches/*.patch whitespace=-blank-at-eol

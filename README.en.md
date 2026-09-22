@@ -12,16 +12,22 @@ GenMedia is a local AI media generation app with **native Apple Silicon support*
 - A dedicated settings page supports Traditional Chinese, English, Japanese, Korean, and six persistent color themes.
 - Settings provides a switch for a localhost-only MCP HTTP API, while a standalone JSON-RPC 2.0 stdio server remains available when the app is not running.
 
-## Recent fixes and validation (2026-09-21)
+## Recent fixes and validation (2026-09-22)
+
+Text-to-image and image-to-image now have separate buttons, so selecting a completed output keeps text-to-image available. Buttons wrap in narrow windows. The launcher builds and checks all four root-package shipping products separately, fixing the missing main executable after a successful build. Validation includes 12 script tests, 6 Web UI tests, and WebKit layout checks in all four languages.
 
 Model discovery, verification, and removal run in the background. Pause, resume, repair, and removal of the same model wait for earlier operations to finish cleanup. After an output-directory change, new jobs use the new location and running jobs keep their original destination.
 
 Files still referenced by another asset or workspace are retained; renaming updates all matching references. Automatic cleanup is limited to unreferenced MediaCache proxies. An unreadable workspace preserves its index and cache and disables workspace autosave for that session.
 
-LoRA conversion copies weights in 1 MiB chunks. Worker logs are read incrementally, including large logs written before a normal exit. The complete root package builds and **141 Swift tests pass**. See the [performance record](docs/PERFORMANCE_CHANGES.md) (Traditional Chinese) for the synthetic LoRA measurement and validation limits; this does not establish compatibility with every model or hardware configuration.
+LoRA conversion copies weights in 1 MiB chunks. Worker logs are read incrementally, including large logs written before a normal exit. The complete root package builds and **163 Swift tests pass**. See the [performance record](docs/PERFORMANCE_CHANGES.md) (Traditional Chinese) for the synthetic LoRA measurement and validation limits; this does not establish compatibility with every model or hardware configuration.
 
 - [Validation instructions and results](docs/VALIDATION.md) (Traditional Chinese)
 - [Detailed review and fixes](docs/PROJECT_REVIEW_2026-09-20.md) (Traditional Chinese)
+
+## Qwen-Image 2.1 (Swift/MLX)
+
+Model Center includes **Qwen-Image 2.1 MLX 4-bit**, shared by text-to-image and experimental single-image editing profiles. Inference uses a bundled native Swift/MLX Worker and preserves RGBA output; Python is not required. Text-to-image has been tested at 512×512 and editing at 256×256. Earlier grain in 512×512 edits remains unresolved; it was not retested after the latest precision fixes. See the [Qwen-Image 2.1 guide](docs/QWEN_IMAGE_21.md) (Traditional Chinese) for setup and validation.
 
 ## Preview
 
@@ -38,7 +44,7 @@ Requirements: Apple Silicon; the package deployment target starts at macOS 14. B
 ./run.command
 ```
 
-`build.command` creates the release executables and a standard `GenMedia.app` in `dist/`. The app contains WebUI resources, the MLX Metal runtime, the MCP server, model diagnostic tools, and shared LGPL `ffmpeg`/`ffprobe` binaries as its media compatibility layer. On the first app-bundle build, `build.command` automatically downloads the sources and prepares the bundled FFmpeg distribution; neither a manual FFmpeg preparation step nor `pkg-config` is required.
+`build.command` creates the release executables and a standard `GenMedia.app` in `dist/`. The app contains WebUI resources, the MLX Metal runtime, the MCP server and shared LGPL `ffmpeg`/`ffprobe` binaries as its media compatibility layer. On the first app-bundle build, `build.command` automatically downloads the sources and prepares the bundled FFmpeg distribution; neither a manual FFmpeg preparation step nor `pkg-config` is required.
 
 ```bash
 # Build the release executables and app
@@ -52,6 +58,8 @@ GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
 ```
 
 `run.command` automatically uses `--no-app`, so normal development runs do not repeatedly create the app bundle. Release DMGs are handled by a separate local workflow with Developer ID Application signing, Apple notarization, stapling, and Gatekeeper verification.
+
+For a project on ExFAT, place the signed app output on an internal APFS volume, for example `GENIMAGE_DIST_DIR="$HOME/Downloads/GenMedia-dist" ./build.command`. This avoids AppleDouble metadata interfering with nested bundle signatures. The completed DMG can be copied back to the external volume.
 
 ### FFmpeg Build Troubleshooting
 
@@ -124,9 +132,10 @@ For legacy headless launch scripts, `CIVITAI_TOKEN` remains supported as a compa
 - Each open workspace tab is treated as a generation project. Assets and lineage are atomically stored under Application Support and restored after the app relaunches. Explicitly closing a tab removes that project's workspace index while keeping exported media files on disk.
 - App-managed data defaults to `~/Library/Application Support/GenImage/` (`Models`, `Runtime`, `Workspace`, `Pasted`, `Generated`), defined in one place by `GenImageCore/ApplicationSupport.swift`. The workspace index used to be written under `GenMedia/`; it is adopted into the current root at launch, and an entry that already exists is kept rather than overwritten or merged. The directory keeps the name `GenImage` rather than matching the app's `GenMedia` to preserve compatibility with existing models and legacy runtime data. Models and generated outputs can use directories selected in Settings; imported user files remain at their original locations.
 - Prompt and lyrics editors preserve the caret, selection, and IME composition while native state updates arrive. Generation type, Prompt, Lyrics, and output-setting tabs rerender only the creation panel. Unavoidable full updates reuse playing audio and video nodes instead of interrupting playback.
-- The workspace filmstrip provides an image import button and supports dropping one or more PNG, JPEG, WebP, GIF, TIFF, HEIC, or HEIF files from Finder. Image import is disabled during music generation to keep media sources separate. In image generation mode, selecting a source image automatically routes the main button to the image-to-image profile; without a source image it uses the text-to-image profile.
+- The workspace filmstrip provides an image import button and supports dropping one or more PNG, JPEG, WebP, GIF, TIFF, HEIC, or HEIF files from Finder. Image import is disabled during music generation to keep media sources separate. Text-to-image stays available; selecting an image adds a separate image-to-image button. Each button uses its own active profile, so a selected output does not block another text-to-image job.
 - Image and video aspect-ratio choices are dropdowns. Image-to-image shows `Original Resolution` only after a source image is selected, using source dimensions quantized to Runtime-compatible multiples of 16.
-- Image-to-image width and height are passed to the Qwen Image Edit Runtime. When the requested aspect ratio differs from the source, the source keeps its own resolution and is edge-extended onto a canvas of the output aspect before generation, preserving the complete source content.
+- The following conditioning-canvas and 1024² generation-area rules apply to Qwen Image Edit 2511. Qwen-Image 2.1 uses the requested dimensions directly; see its [guide](docs/QWEN_IMAGE_21.md).
+- Image-to-image width and height are passed to the Qwen Image Edit 2511 Runtime. When the requested aspect ratio differs from the source, the source keeps its own resolution and is edge-extended onto a canvas of the output aspect before generation, preserving the complete source content.
 - The conditioning image is encoded at the generation resolution so the conditioning grid and the output grid share identical RoPE positions. Pinning the conditioning grid to a fixed 1024²-area size would align the model over the centre of the source only, and the output would be a cropped, magnified region.
 - Generation resolution is decoupled from output resolution. When the requested area is below 1024², the Runtime generates at 1024² area in the requested aspect — the same ~4096 latent tokens the diffusers reference uses — and Lanczos-resamples down to the requested size. Far below the trained token count the DiT's denoise degrades and then collapses into striping, so low resolutions such as `128 × 192` are produced by resampling and look markedly better.
 - Requests at or above 1024² area are generated at the requested size with no resampling; higher resolutions raise Runtime memory use and generation time accordingly. Outputs below 1024² still generate at 1024² area, so generation time does not drop as the output gets smaller.

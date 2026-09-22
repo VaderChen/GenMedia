@@ -6,7 +6,7 @@ SCRIPT_DIR="${0:A:h}"
 cd "$SCRIPT_DIR"
 
 FFMPEG_ROOT="${GENMEDIA_FFMPEG_ROOT:-$SCRIPT_DIR/third_party/ffmpeg}"
-APP_LICENSE_FILES=(LICENSE.md LICENSE.en.md LICENSE.ja.md LICENSE.ko.md COMMERCIAL-LICENSE.md)
+APP_LICENSE_FILES=(LICENSE.md LICENSE.en.md LICENSE.ja.md LICENSE.ko.md COMMERCIAL-LICENSE.md THIRD_PARTY_NOTICES.md)
 
 bundled_ffmpeg_ready() {
   local source_bin_dir="$FFMPEG_ROOT/bin"
@@ -156,7 +156,7 @@ prepare_bundled_ffmpeg() {
       /usr/bin/otool -L "$library" \
         | sed -n 's/^[[:space:]]*\([^[:space:]]*\.dylib\).*$/\1/p'
     )
-  done < <(find "$resource_lib_dir" -maxdepth 1 -type f -name '*.dylib' -print)
+  done < <(find "$resource_lib_dir" -maxdepth 1 -type f -name '*.dylib' ! -name '._*' -print)
 
   for tool in ffmpeg ffprobe; do
     /usr/bin/install_name_tool \
@@ -282,10 +282,15 @@ print "MLX metallib 版本：主路徑 mlx-swift $ROOT_MLX_SWIFT_VERSION；Z-Ima
 
 touch "$SCRIPT_DIR/Sources/GenImageApp/Resources/WebUI"
 print "正在編譯 GenImage Release 版本（僅出貨產品）…"
-swift build -c release \
-  --product GenImage \
-  --product GenImageMCP \
-  --product GenImageDoctor
+BIN_DIR="$(swift build -c release --show-bin-path)"
+# --product 只接受單一產品；重複指定只會建置最後一項。
+for product in GenImage GenImageMCP GenImageDoctor GenImageQwen21Worker; do
+  swift build -c release --product "$product"
+  if [[ ! -x "$BIN_DIR/$product" ]]; then
+    print -u2 "錯誤：建置完成後找不到可執行產品：$BIN_DIR/$product"
+    exit 1
+  fi
+done
 
 print "正在編譯 Z-Image Runtime Worker（mlx-swift ${ZIMAGE_MLX_SWIFT_VERSION}）…"
 swift build --package-path "$ZIMAGE_WORKER_PACKAGE" -c release \
@@ -450,7 +455,6 @@ if ! /usr/bin/cmp -s "$QWEN_METALLIB" "$H3_METALLIB"; then
   exit 1
 fi
 
-BIN_DIR="$(swift build -c release --show-bin-path)"
 METALLIB_SOURCE="$SCRIPT_DIR/RuntimeSupport/mlx-swift-${WORKER_METALLIB_VERSION}.metallib"
 METALLIB_TARGET="$BIN_DIR/mlx.metallib"
 
@@ -476,7 +480,7 @@ if [[ "$PACKAGE_APP" == true ]]; then
   BUNDLE_ID="${GENIMAGE_BUNDLE_ID:-com.vader.genimage}"
   BUILD_NUMBER="${GENIMAGE_BUILD_NUMBER:-$(date '+%H%M')}"
   CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
-  DIST_DIR="$SCRIPT_DIR/dist"
+  DIST_DIR="${GENIMAGE_DIST_DIR:-$SCRIPT_DIR/dist}"
   FINAL_APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 
   if [[ ! "$APP_VERSION" =~ '^[0-9]+([.][0-9]+)*$' ]]; then
@@ -567,6 +571,7 @@ if [[ "$PACKAGE_APP" == true ]]; then
 
   /bin/cp "$BIN_DIR/GenImage" "$MACOS_DIR/GenImage"
   /bin/cp "$BIN_DIR/GenImageMCP" "$HELPERS_DIR/GenImageMCP"
+  /bin/cp "$BIN_DIR/GenImageQwen21Worker" "$HELPERS_DIR/GenImageQwen21Worker"
   /bin/cp "$QWEN_WORKER" "$HELPERS_DIR/GenImageQwen2511Worker"
   /bin/cp "$MINIMAX_WORKER" "$HELPERS_DIR/GenImageMiniMaxMusic3Worker"
   /bin/cp "$LTX_WORKER" "$HELPERS_DIR/GenImageLTXVideoWorker"
@@ -580,11 +585,14 @@ if [[ "$PACKAGE_APP" == true ]]; then
   chmod 755 \
     "$MACOS_DIR/GenImage" \
     "$HELPERS_DIR/GenImageMCP" \
+    "$HELPERS_DIR/GenImageQwen21Worker" \
     "$HELPERS_DIR/GenImageQwen2511Worker" \
     "$HELPERS_DIR/GenImageMiniMaxMusic3Worker" \
     "$HELPERS_DIR/GenImageLTXVideoWorker" \
     "$HELPERS_DIR/GenImageMiniMaxH3Worker" \
     "$ZIMAGE_HELPERS_DIR/GenImageZImageWorker"
+
+  /usr/bin/ditto --noqtn "$SCRIPT_DIR/docs/licenses" "$LICENSES_DIR/QwenImage21"
 
   APP_RESOURCE_BUNDLE="$BIN_DIR/GenImage_GenImageApp.bundle"
   WEBUI_SOURCE="$SCRIPT_DIR/Sources/GenImageApp/Resources/WebUI"
@@ -593,7 +601,10 @@ if [[ "$PACKAGE_APP" == true ]]; then
     exit 1
   fi
   /usr/bin/ditto --noqtn "$WEBUI_SOURCE" "$RESOURCES_DIR/WebUI"
-  if [[ ! -s "$RESOURCES_DIR/WebUI/index.html" ]] || ! /usr/bin/diff -qr "$WEBUI_SOURCE" "$RESOURCES_DIR/WebUI" >/dev/null; then
+  # AppleDouble/Finder metadata may change during copying on external volumes.
+  # Compare every application resource while excluding only filesystem metadata.
+  if [[ ! -s "$RESOURCES_DIR/WebUI/index.html" ]] || ! /usr/bin/diff -qr \
+    -x '._*' -x '.DS_Store' "$WEBUI_SOURCE" "$RESOURCES_DIR/WebUI" >/dev/null; then
     print -u2 "錯誤：WebUI 資源複製不完整。"
     exit 1
   fi
@@ -710,7 +721,7 @@ if [[ "$PACKAGE_APP" == true ]]; then
 
   while IFS= read -r dynamic_library; do
     /usr/bin/codesign "${FFMPEG_SIGNING_ARGUMENTS[@]}" "$dynamic_library"
-  done < <(find "$RESOURCES_DIR/lib" -maxdepth 1 -type f -name '*.dylib' -print)
+  done < <(find "$RESOURCES_DIR/lib" -maxdepth 1 -type f -name '*.dylib' ! -name '._*' -print)
 
   for ffmpeg_tool in \
     "$RESOURCES_DIR/bin/ffmpeg" \
@@ -722,6 +733,7 @@ if [[ "$PACKAGE_APP" == true ]]; then
     "$MACOS_DIR/mlx.metallib" \
     "$ZIMAGE_HELPERS_DIR/mlx.metallib" \
     "$HELPERS_DIR/GenImageMCP" \
+    "$HELPERS_DIR/GenImageQwen21Worker" \
     "$HELPERS_DIR/GenImageQwen2511Worker" \
     "$HELPERS_DIR/GenImageMiniMaxMusic3Worker" \
     "$HELPERS_DIR/GenImageLTXVideoWorker" \

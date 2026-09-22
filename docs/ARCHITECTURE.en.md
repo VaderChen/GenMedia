@@ -2,7 +2,7 @@
 
 [繁體中文](ARCHITECTURE.md) | English | [日本語](ARCHITECTURE.ja.md) | [한국어](ARCHITECTURE.ko.md)
 
-## Runtime and persistence updates (2026-09-21)
+## Runtime and persistence updates (2026-09-22)
 
 - `ModelDiscoveryController` scans in the background and accepts only the latest request. `SerialTaskQueue` orders operations per model and waits for cancellation cleanup before replacements or directory scans.
 - `FileDownloadDelegate` waits for resume metadata before cancellation returns. Downloads and reused hard links use `ModelFileReplacement` so replacement failures preserve existing files.
@@ -11,7 +11,13 @@
 - `ProjectWorkspaceWriter` coalesces background writes and flushes at shutdown. An unreadable workspace preserves the original index/cache and disables autosave for that session. Custom profiles retain their complete definitions and stable IDs.
 - Bridge activity messages carry metrics and progress separately from content; thumbnails and media delivery have bounded caches/buffers. Profiles above the 64 GB recommendation threshold remain hidden.
 
-The root build and 141 Swift tests passed. See [validation](VALIDATION.md), [performance measurements](PERFORMANCE_CHANGES.md), and the [detailed review](PROJECT_REVIEW_2026-09-20.md) (Traditional Chinese) for methods and limits.
+The root build and 163 Swift tests passed. See [validation](VALIDATION.md), [performance measurements](PERFORMANCE_CHANGES.md), and the [detailed review](PROJECT_REVIEW_2026-09-20.md) (Traditional Chinese) for methods and limits.
+
+## Qwen-Image 2.1 and repeated generation (2026-09-22)
+
+`ImageGenerationRouter` implements both image-generation protocols. App and MCP share routing among Z-Image, Qwen Image Edit 2511, and `Qwen21ImageService`. The Qwen 2.1 service launches the bundled `GenImageQwen21Worker`; `QwenImage21Runtime` loads Qwen3-VL, a 32-layer single-stream DiT, and a 64-channel RGBA VAE in stages. Production inference uses Swift/MLX. Version-pinned patches expose conditioning before the final text RMSNorm and align the vision GELU activation.
+
+Text-to-image and image-to-image buttons check their profiles independently. Selecting a completed output only chooses the preview/source; it does not replace text-to-image. Queued, running, and cancelling jobs disable both buttons, while terminal activity transitions refresh their availability. Header actions wrap in narrow panels. Qwen 2.1 editing remains experimental; see [implementation and validation limits](QWEN_IMAGE_21.md) (Traditional Chinese).
 
 ## Design Goals
 

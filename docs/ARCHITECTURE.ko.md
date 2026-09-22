@@ -2,7 +2,7 @@
 
 [繁體中文](ARCHITECTURE.md) | [English](ARCHITECTURE.en.md) | [日本語](ARCHITECTURE.ja.md) | 한국어
 
-## Runtime 및 영속성 업데이트 (2026-09-21)
+## Runtime 및 영속성 업데이트 (2026-09-22)
 
 - `ModelDiscoveryController`는 백그라운드에서 검색하고 최신 요청만 반영합니다. `SerialTaskQueue`는 모델별 작업 순서를 보장하며 취소 정리가 끝난 후 다음 작업이나 디렉터리 검색을 시작합니다.
 - `FileDownloadDelegate`는 재개 정보 저장이 끝나야 취소를 반환합니다. 다운로드 및 하드 링크 재사용은 `ModelFileReplacement`로 교체하며 실패하면 기존 파일을 보존합니다.
@@ -11,7 +11,13 @@
 - `ProjectWorkspaceWriter`는 백그라운드 저장을 통합하고 종료 시 flush합니다. 읽기 실패 시 인덱스와 캐시를 보존하고 자동 저장을 중지합니다. 사용자 Profile은 전체 정의와 고정 ID를 저장합니다.
 - Bridge는 진행률과 콘텐츠 갱신을 분리하고 썸네일 및 미디어 전송 메모리를 제한합니다. 권장 메모리가 64 GB를 넘는 Profile은 숨깁니다.
 
-루트 빌드와 Swift 테스트 141개를 통과했습니다. 방법과 제한은 [검증](VALIDATION.md), [성능 기록](PERFORMANCE_CHANGES.md), [상세 보고서](PROJECT_REVIEW_2026-09-20.md)(번체 중국어)를 참조하세요.
+루트 빌드와 Swift 테스트 163개를 통과했습니다. 방법과 제한은 [검증](VALIDATION.md), [성능 기록](PERFORMANCE_CHANGES.md), [상세 보고서](PROJECT_REVIEW_2026-09-20.md)(번체 중국어)를 참조하세요.
+
+## Qwen-Image 2.1 및 연속 생성 (2026-09-22)
+
+`ImageGenerationRouter`가 두 이미지 생성 프로토콜을 구현하며 App과 MCP에서 Z-Image, Qwen Image Edit 2511, `Qwen21ImageService`로의 분배를 공유합니다. Qwen 2.1은 내장 `GenImageQwen21Worker`를 사용하고, `QwenImage21Runtime`이 Qwen3-VL, 32층 단일 스트림 DiT, 64채널 RGBA VAE를 단계별로 로드합니다. 추론은 Swift/MLX로 수행합니다. 버전이 고정된 patch는 텍스트의 최종 RMSNorm 이전 조건을 제공하고 시각 GELU를 맞춥니다.
+
+텍스트→이미지와 이미지→이미지 버튼은 각각의 Profile을 확인합니다. 생성 결과 선택은 미리보기/원본 선택이며 텍스트→이미지 버튼을 대체하지 않습니다. 대기·실행·취소 중에는 비활성화하고 종료 상태 알림에서 다시 판단합니다. 좁은 패널에서는 줄바꿈됩니다. Qwen 2.1 편집은 실험 단계입니다. [구현 및 검증 범위](QWEN_IMAGE_21.md)(번체 중국어)를 참고하세요.
 
 ## 설계 목표
 

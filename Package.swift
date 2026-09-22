@@ -8,6 +8,7 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
+        .executable(name: "GenImageQwen21Worker", targets: ["GenImageQwen21Worker"]),
         .executable(name: "GenImage", targets: ["GenImageApp"]),
         .executable(name: "GenImageDoctor", targets: ["GenImageDoctor"]),
         .executable(name: "GenImageMCP", targets: ["GenImageMCP"]),
@@ -46,6 +47,19 @@ let package = Package(
     ],
     targets: [
         .target(name: "GenImageCore"),
+        .target(name: "QwenImage21Runtime", dependencies: [
+            .product(name: "MLX", package: "mlx-swift"),
+            .product(name: "MLXFast", package: "mlx-swift"),
+            .product(name: "MLXNN", package: "mlx-swift"),
+            .product(name: "MLXVLM", package: "mlx-swift-lm"),
+            .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+            .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
+            .product(name: "Hub", package: "swift-transformers"),
+            .product(name: "Tokenizers", package: "swift-transformers")
+        ]),
+        .executableTarget(name: "GenImageQwen21Worker", dependencies: ["QwenImage21Runtime",
+            .product(name: "MLX", package: "mlx-swift")]),
+        .testTarget(name: "QwenImage21RuntimeTests", dependencies: ["QwenImage21Runtime"], resources: [.copy("Fixtures")]),
         .target(
             name: "GenImageGGUF",
             dependencies: [

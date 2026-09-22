@@ -169,16 +169,26 @@
 }
 
 .creation-panel.collapsed {
-  height: 52px;
+  height: auto;
 }
 
 .creation-header {
   align-items: center;
   display: flex;
-  flex: 0 0 52px;
+  flex: 0 0 auto;
   gap: 14px;
   justify-content: space-between;
+  min-height: 52px;
   padding: 8px 18px;
+}
+
+.creation-actions {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .creation-scroll,

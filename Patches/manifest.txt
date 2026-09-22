@@ -21,3 +21,6 @@ RuntimeSupport/ZImageWorker | z-image.swift | 28bfcf3148c041a554629247170eb54d9a
 RuntimeSupport/Qwen2511Worker | qwen-image-edit-swift | 0.7.2 | qwen-image-edit-swift | Qwen-Image-Edit-Output-Size.patch | Sources/QwenImageEdit/Pipeline.swift | width: Int? = nil | Qwen Image Edit 輸出解析度 API
 RuntimeSupport/Qwen2511Worker | qwen-image-edit-swift | 0.7.2 | qwen-image-edit-swift | Qwen-Image-Edit-Target-Size.patch | Sources/QwenImageEdit/Pipeline.swift | let (tw, th): (Int, Int) | Qwen Image Edit 目標尺寸
 RuntimeSupport/Qwen2511Worker | qwen-image-edit-swift | 0.7.2 | qwen-image-edit-swift | Qwen-Image-Edit-Cond-Grid.patch | Sources/QwenImageEdit/Pipeline.swift | for (imageIndex, image) in images.enumerated() | Qwen Image Edit 條件網格對齊
+
+. | mlx-swift-lm | 3.31.4 | mlx-swift-lm | Qwen3VL-Image-Conditioning.patch | Libraries/MLXVLM/Models/Qwen3VL.swift | public func encodeImageConditioning | Qwen-Image 2.1 視覺條件編碼 API
+. | mlx-swift-lm | 3.31.4 | mlx-swift-lm | Qwen3VL-Vision-GELU.patch | Libraries/MLXVLM/Models/Qwen3VL.swift | GELU(approximation: .precise) | Qwen3-VL 視覺 GELU 對齊模型設定

@@ -250,6 +250,7 @@ export function renderCreationPanel(state, ui) {
   const toggleLabel = collapsed ? t("workspace.expandCreation") : t("workspace.collapseCreation");
   const showGenerateText = generationType === "image" && hasActiveProfile(state, "imageToText");
   const showGenerateImage = generationType === "image";
+  const showEditImage = showGenerateImage && selectedSourceImage(state) !== null;
   const showGenerateVideo = generationType === "video";
   const showGenerateMusic = generationType === "music";
   const showGenerateSubtitles = generationType === "subtitle";
@@ -257,20 +258,18 @@ export function renderCreationPanel(state, ui) {
   const showMergeMedia = generationType === "mediaMerge";
   const imageLoopSources = resolvedImageLoopSourceAssets(state, ui);
   const mergeSources = resolvedMediaMergeSources(state, ui);
-  const imageGenerationAction = selectedSourceImage(state) ? "imageToImage" : "generate";
+  // Selecting a completed output is for preview; it must not replace text-to-image.
   const imageGenerationReady = isProfileInstalled(
     state,
-    activeProfile(state, imageGenerationAction === "imageToImage" ? "imageToImage" : "textToImage"),
+    activeProfile(state, "textToImage"),
   );
+  const imageEditingReady = isProfileInstalled(state, activeProfile(state, "imageToImage"));
   const videoGenerationReady = isProfileInstalled(
     state,
     activeProfile(state, selectedSourceImage(state) ? "imageToVideo" : "textToVideo"),
   );
   const musicGenerationReady = isProfileInstalled(state, activeProfile(state, "textToMusic"));
   const subtitleGenerationReady = isProfileInstalled(state, activeProfile(state, "videoToText"));
-  const imageGenerationLabel = imageGenerationAction === "imageToImage"
-    ? t("cap.imageToImage")
-    : t("workspace.generate");
   return `
     <aside class="creation-panel ${collapsed ? "collapsed" : ""}">
       <div class="creation-header">
@@ -280,7 +279,7 @@ export function renderCreationPanel(state, ui) {
           aria-expanded="${collapsed ? "false" : "true"}"
           title="${toggleLabel}"
         ><span aria-hidden="true">${collapsed ? "▴" : "▾"}</span>${toggleLabel}</button>
-        <div class="toolbar-spacer"></div>
+        <div class="creation-actions">
         ${
           showGenerateText
             ? `<button
@@ -294,9 +293,18 @@ export function renderCreationPanel(state, ui) {
           showGenerateImage
             ? `<button
                 class="primary-button creation-generate-button creation-generate-image"
-                data-action="${imageGenerationAction}"
+                data-action="generate"
                 ${inferenceBusy || !imageGenerationReady ? "disabled" : ""}
-              >✦ ${imageGenerationLabel}</button>`
+              >✦ ${t("cap.textToImage")}</button>`
+            : ""
+        }
+        ${
+          showEditImage
+            ? `<button
+                class="secondary-button creation-generate-button creation-generate-image"
+                data-action="imageToImage"
+                ${inferenceBusy || !imageEditingReady ? "disabled" : ""}
+              >▧ ${t("cap.imageToImage")}</button>`
             : ""
         }
         ${
@@ -344,6 +352,7 @@ export function renderCreationPanel(state, ui) {
               >⎌ ${t("workspace.mergeMedia")}</button>`
             : ""
         }
+        </div>
       </div>
 
       ${

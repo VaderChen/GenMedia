@@ -1,0 +1,85 @@
+--- a/Libraries/MLXVLM/Models/Qwen3VL.swift
++++ b/Libraries/MLXVLM/Models/Qwen3VL.swift
+@@ -1147,7 +1147,8 @@
+             mask: MLXArray?,
+             positionIds: MLXArray?,
+             visualMask: MLXArray?,
+-            deepstackEmbeds: [MLXArray]?
++            deepstackEmbeds: [MLXArray]?,
++            returnPreNormHiddenStates: Bool = false
+         ) -> MLXArray {
+             var hidden: MLXArray
+             if let inputEmbeddings {
+@@ -1178,7 +1179,7 @@
+                 }
+             }
+ 
+-            return norm(hidden)
++            return returnPreNormHiddenStates ? hidden : norm(hidden)
+         }
+ 
+         private func applyDeepstack(
+@@ -1244,7 +1245,8 @@
+             deepstackEmbeds: [MLXArray]?,
+             pixelValues: MLXArray?,
+             imageGridTHW: [THW]?,
+-            videoGridTHW: [THW]?
++            videoGridTHW: [THW]?,
++            returnPreNormHiddenStates: Bool = false
+         ) -> LMOutput {
+             var state = state ?? .init()
+ 
+@@ -1312,8 +1314,10 @@
+                 mask: nil,
+                 positionIds: positionIds,
+                 visualMask: visualMask,
+-                deepstackEmbeds: deepstackEmbeds)
+-
++                deepstackEmbeds: deepstackEmbeds,
++                returnPreNormHiddenStates: returnPreNormHiddenStates)
++
++            if returnPreNormHiddenStates { return LMOutput(logits: output, state: state) }
+             if let lmHead {
+                 output = lmHead(output)
+             } else {
+@@ -1611,6 +1615,21 @@
+         cache: [any KVCache],
+         windowSize _: Int?
+     ) throws -> PrepareResult {
++        try prepareConditioning(input, cache: cache, returnPreNormHiddenStates: false)
++    }
++
++    /// Qwen-Image 2.1 consumes the last decoder output BEFORE final RMSNorm.
++    /// This entry point also applies Qwen3-VL vision/deepstack conditioning without the LM head.
++    public func encodeImageConditioning(_ input: LMInput) throws -> MLXArray {
++        guard case .logits(let output) = try prepareConditioning(
++            input, cache: [], returnPreNormHiddenStates: true)
++        else { preconditionFailure("Conditioning must return hidden states") }
++        return output.logits
++    }
++
++    private func prepareConditioning(
++        _ input: LMInput, cache: [any KVCache], returnPreNormHiddenStates: Bool
++    ) throws -> PrepareResult {
+         let inputIds = input.text.tokens
+ 
+         var pixelValues: MLXArray?
+@@ -1671,7 +1690,7 @@
+             }
+         }
+ 
+-        let typedCache = castCache(cache)
++        let typedCache = cache.isEmpty ? nil : castCache(cache)
+ 
+         let languageOutput = languageModel(
+             inputIds,
+@@ -1684,7 +1703,8 @@
+             deepstackEmbeds: deepstackEmbeds,
+             pixelValues: pixelValues,
+             imageGridTHW: imageFrames,
+-            videoGridTHW: videoFrames)
++            videoGridTHW: videoFrames,
++            returnPreNormHiddenStates: returnPreNormHiddenStates)
+ 
+         return .logits(languageOutput)
+     }

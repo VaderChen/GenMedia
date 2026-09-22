@@ -320,7 +320,7 @@ struct GenImageDoctor {
             outputCount: 1,
             seed: 1
         )
-        let service = ZImageTextToImageService(outputDirectory: outputDirectory)
+        let service = ImageGenerationRouter(outputDirectory: outputDirectory)
 
         do {
             let outputs = try await service.generate(

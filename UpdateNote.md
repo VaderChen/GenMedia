@@ -4,6 +4,18 @@
 
 ## Unreleased
 
+尚無新的變更。
+
+## 1.26.0922 — 2026-09-22
+
+- 新增 Qwen-Image 2.1 MLX 4-bit 純 Swift／MLX Runtime、獨立 Worker、模型安裝／驗證、文生圖與單圖編輯 Profile，並整合 App、Doctor 與 MCP；模型權重另外下載。
+- Qwen 2.1 以 Qwen3-VL、32 層單流 DiT、64 通道 RGBA VAE 執行推論；文生圖與小尺寸編輯已實跑，512×512 圖像編輯顆粒問題仍保留追蹤。編輯功能維持實驗性，尚不支援多圖、負面提示詞或 LoRA。
+- 修正生成結果自動選取後，唯一按鈕切成圖生圖並停用的問題；文生圖與圖生圖分開顯示，窄視窗自動換行。
+- 修正根套件重複指定 `swift build --product` 只產生最後一個 Worker，導致 `run.command` 找不到主程式；改為逐一建置並檢查四個出貨產品。
+- 修正外接磁碟打包：WebUI 內容驗證排除 AppleDouble／Finder 中繼資料，FFmpeg dylib 修正與簽章只處理實際函式庫，避免把 `._*.dylib` 當成 Mach-O。新增 `GENIMAGE_DIST_DIR`，ExFAT 專案可將 App 輸出與簽章暫存指定至內部 APFS。
+- README 靜態預覽改為操作 GIF，四語 README 同步新的按鈕行為、Qwen 2.1 使用範圍與驗證結果；加入第三方程式碼聲明及隨 App 提供的授權副本。
+- 最新驗證：163 項 Swift 測試、12 項腳本測試、6 項 Web UI 測試通過；WebKit 檢查四語、兩種寬度的按鈕排列。完整範圍見 `docs/VALIDATION.md`。
+
 - 四語 README、架構、Web Bridge 與路線文件同步近期修正、UUID 輸出命名及可自訂模型／輸出目錄；修正 README 的過期 GPL 說明與失效連結，改為引用現有授權 v1.1。新增驗證指南，記錄完整根套件 141 項 Swift 測試通過及驗證範圍。
 - 修正常駐 Worker 在大量日誌後正常結束，卻因尚未讀完完成事件被判定失敗；維持每輪 1 MiB／單行 64 KiB 上限，讀完最後事件後才判斷結果，並處理無換行的最後一行。子行程啟動前與返回前會檢查取消。
 - 媒體刪除會檢查所有工作區的來源與播放參照；共用檔案仍被使用時保留並顯示原因。重新命名同步更新其他資產的同一路徑，任務執行或取消中拒絕刪除、改名及關閉結果分頁。
@@ -21,7 +33,7 @@
 - 工作區讀取失敗時保留原始索引與媒體快取，停用該次執行的工作區自動存檔並顯示原因。自訂 Profile 現在保存完整定義及穩定 ID，複製音樂 Profile 時保留長度限制與語意。
 - MCP HTTP 限定原生本機客戶端，驗證 Host、拒絕 Origin／瀏覽器預檢、移除萬用 CORS，POST 必須使用 application/json；stdio 整合方式不變。
 - 切換輸出目錄時同步更新影音合成服務。FFmpeg 下載、設定或中斷失敗時保留或還原既有安裝，不再由重複執行的 trap 刪除安裝。
-- App／DMG 打包改用目前五份授權文件，App 編譯前先檢查文件；備份與清理共用 Worker 套件列舉，排除所有編譯快取，清理保留 Backups、使用者資料及所有 .bak。
+- App／DMG 打包使用四語主授權、商業授權及第三方聲明，App 編譯前先檢查文件；備份與清理共用 Worker 套件列舉，排除所有編譯快取，清理保留 Backups、使用者資料及所有 .bak。
 - 專案移至內部磁碟後，移除外接磁碟專用的 AppleDouble 清理、COPYFILE_DISABLE 與 DMG 中繼資料轉換；App／DMG／備份改在專案內暫存，FFmpeg 直接使用專案快取與 pkg-config fallback。正常的簽章驗證與失敗回復仍保留。
 - 暫時隱藏所需模型建議記憶體超過 64 GB 的 Profile；64 GB 仍可選，既有設定與模型檔案保留，啟動時會排除已隱藏的預設選擇。
 - Z-Image 改用常駐 Worker 重用模型與 LoRA；閒置 5 分鐘或記憶體壓力時卸載，取消／失敗後重新建立 Worker，限制可重用 MLX buffer 為最多 512 MiB。

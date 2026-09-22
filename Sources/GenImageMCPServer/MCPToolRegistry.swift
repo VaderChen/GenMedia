@@ -33,35 +33,35 @@ public struct MCPToolRegistry {
             ),
             tool(
                 name: "genimage_generate_image",
-                description: "Generate an image with the native Z-Image MLX runtime and a local model path.",
+                description: "Generate an image with the native Z-Image or Qwen-Image 2.1 Swift/MLX runtime and a local model path.",
                 properties: [
                     "prompt": stringProperty("Text prompt."),
-                    "model_path": stringProperty("Absolute Z-Image Diffusers model directory."),
+                    "model_path": stringProperty("Absolute Z-Image or Qwen-Image 2.1 MLX model directory."),
                     "output_path": stringProperty("Optional absolute output PNG path."),
-                    "width": integerProperty("Output width, divisible by 16.", defaultValue: 1024),
-                    "height": integerProperty("Output height, divisible by 16.", defaultValue: 1024),
-                    "steps": integerProperty("Denoising steps.", defaultValue: 9),
+                    "width": integerProperty("Output width, divisible by 16 (32 for Qwen-Image 2.1).", defaultValue: 1024),
+                    "height": integerProperty("Output height, divisible by 16 (32 for Qwen-Image 2.1).", defaultValue: 1024),
+                    "steps": ["type": "integer", "description": "Denoising steps; defaults to 9 for Z-Image, 40 for Qwen-Image 2.1."],
                     "seed": integerProperty("Random seed.", defaultValue: 42),
-                    "lora_path": stringProperty("Optional absolute path to a local .safetensors LoRA file."),
+                    "lora_path": stringProperty("Optional absolute path to a local .safetensors LoRA file (Z-Image only)."),
                     "lora_scale": numberProperty("Optional LoRA weight from 0.0 to 1.0.", defaultValue: 1)
                 ],
                 required: ["prompt", "model_path"]
             ),
             tool(
                 name: "genimage_edit_image",
-                description: "Edit a local image with Qwen Image Edit 2511 on Apple Silicon.",
+                description: "Edit a local image with Qwen Image Edit 2511 or Qwen-Image 2.1 on Apple Silicon. Qwen 2.1 requires int4 and an empty negative prompt.",
                 properties: [
                     "input_path": stringProperty("Absolute input image path."),
-                    "model_path": stringProperty("Absolute GenImage Qwen 2511 installation directory."),
+                    "model_path": stringProperty("Absolute GenImage Qwen 2511 or Qwen-Image 2.1 MLX installation directory."),
                     "prompt": stringProperty("Image editing instruction."),
                     "negative_prompt": stringProperty("Optional negative prompt."),
                     "quantization": [
                         "type": "string",
-                        "description": "Installed Qwen 2511 tier.",
+                        "description": "Installed tier: Qwen 2511 supports int4/int8/fp16; Qwen-Image 2.1 requires int4.",
                         "enum": ["int4", "int8", "fp16"]
                     ],
                     "output_path": stringProperty("Optional absolute output PNG path."),
-                    "steps": integerProperty("Denoising steps.", defaultValue: 20),
+                    "steps": ["type": "integer", "description": "Denoising steps; defaults to 20 for Qwen 2511, 40 for Qwen-Image 2.1."],
                     "seed": integerProperty("Random seed.", defaultValue: 42)
                 ],
                 required: ["input_path", "model_path", "prompt", "quantization"]
@@ -226,7 +226,7 @@ public struct MCPToolRegistry {
 
         let width = integer(arguments["width"], defaultValue: 1024)
         let height = integer(arguments["height"], defaultValue: 1024)
-        let steps = integer(arguments["steps"], defaultValue: 9)
+        let steps = integer(arguments["steps"], defaultValue: QwenImage21Model.isModelDirectory(modelURL) ? 40 : 9)
         let seed = integer(arguments["seed"], defaultValue: 42)
         guard OutputGeometry.isSupported(width: width, height: height) else {
             throw MCPToolError.invalidArgument(
@@ -282,7 +282,7 @@ public struct MCPToolRegistry {
 
         let projectID = UUID()
         let profile = InferenceProfile(
-            name: "MCP Z-Image",
+            name: "MCP Image Generation",
             capability: .textToImage,
             modelID: modelURL.path,
             modelRevision: "mcp",
@@ -301,7 +301,7 @@ public struct MCPToolRegistry {
             seed: UInt64(max(seed, 0)),
             lora: loraSelection
         )
-        let service = ZImageTextToImageService(outputDirectory: outputDirectory)
+        let service = ImageGenerationRouter(outputDirectory: outputDirectory)
         let results = try await service.generate(
             request: TextToImageRequest(
                 projectID: projectID,
@@ -311,7 +311,7 @@ public struct MCPToolRegistry {
             progress: { _ in }
         )
         guard var outputURL = results.first?.fileURL else {
-            throw MCPToolError.runtime("Z-Image completed without an output path.")
+            throw MCPToolError.runtime("Image generation completed without an output path.")
         }
 
         if let requestedOutputURL, outputURL.standardizedFileURL != requestedOutputURL.standardizedFileURL {
@@ -391,7 +391,7 @@ public struct MCPToolRegistry {
         default:
             throw MCPToolError.invalidArgument("quantization must be int4, int8, or fp16")
         }
-        let steps = integer(arguments["steps"], defaultValue: 20)
+        let steps = integer(arguments["steps"], defaultValue: QwenImage21Model.isModelDirectory(modelURL) ? 40 : 20)
         let seed = integer(arguments["seed"], defaultValue: 42)
         guard (1...100).contains(steps) else {
             throw MCPToolError.invalidArgument("steps must be between 1 and 100")
@@ -425,11 +425,11 @@ public struct MCPToolRegistry {
             pixelHeight: 0
         )
         let profile = InferenceProfile(
-            name: "MCP Qwen Image Edit 2511",
+            name: "MCP Qwen Image Edit",
             capability: .imageToImage,
             modelID: modelURL.path,
-            modelRevision: "2511",
-            architecture: .externalCLI,
+            modelRevision: QwenImage21Model.isModelDirectory(modelURL) ? QwenImage21Model.revision : "2511",
+            architecture: QwenImage21Model.isModelDirectory(modelURL) ? .mlxSwift : .externalCLI,
             defaults: ProfileDefaults(width: 1024, height: 1024, steps: steps, outputCount: 1)
         )
         let recipe = GenerationRecipe(
@@ -444,7 +444,7 @@ public struct MCPToolRegistry {
             outputCount: 1,
             seed: UInt64(max(seed, 0))
         )
-        let result = try await Qwen2511ImageToImageService(outputDirectory: outputDirectory).generate(
+        let result = try await ImageGenerationRouter(outputDirectory: outputDirectory).generate(
             request: ImageToImageRequest(
                 projectID: projectID,
                 sourceAsset: asset,
@@ -456,7 +456,7 @@ public struct MCPToolRegistry {
             progress: { _ in }
         )
         guard var outputURL = result.fileURL else {
-            throw MCPToolError.runtime("Qwen 2511 completed without an output path.")
+            throw MCPToolError.runtime("Qwen image editing completed without an output path.")
         }
         if let requestedOutputURL, outputURL.standardizedFileURL != requestedOutputURL.standardizedFileURL {
             guard !FileManager.default.fileExists(atPath: requestedOutputURL.path) else {

@@ -73,9 +73,10 @@ extension AppStore {
 
         Task { @MainActor [weak self, textToImage, imageToText, upscale, subtitles] in
             var released: [String] = []
-            if capability != .textToImage {
+            // 文生圖與圖生圖共用路由，切換到任一能力都保留這個 Runtime。
+            if capability != .textToImage && capability != .imageToImage {
                 await textToImage.unload()
-                released.append("文生圖")
+                released.append("文生圖／圖生圖")
             }
             if capability != .imageToText {
                 await imageToText.unload()
@@ -109,15 +110,32 @@ extension AppStore {
             return "Profile「\(profile.name)」的模型不支援「\(profile.capability.title)」。"
         }
 
+        if let error = Self.profileArchitectureCompatibilityError(profile) {
+            return error
+        }
+
+        for configuration in profile.loras {
+            guard let loraModel = models.first(where: { $0.id == configuration.modelID }),
+                  let loraURL = loraModel.localURL else {
+                return "Profile「\(profile.name)」找不到 LoRA「\(configuration.modelID)」。"
+            }
+            if let error = loraCompatibilityError(at: loraURL) {
+                return "Profile「\(profile.name)」的 LoRA 不相容：\(error)"
+            }
+        }
+        return nil
+    }
+
+    nonisolated static func profileArchitectureCompatibilityError(_ profile: InferenceProfile) -> String? {
         let compatibleArchitectures: Set<InferenceArchitecture>?
         switch profile.capability {
         case .textToImage, .imageToText, .textToText:
             compatibleArchitectures = [.mlxSwift]
         case .upscale:
             compatibleArchitectures = [.coreML]
-        case .imageToImage, .imageToVideo, .textToVideo:
+        case .imageToVideo, .textToVideo:
             compatibleArchitectures = [.externalCLI]
-        case .textToMusic:
+        case .imageToImage, .textToMusic:
             compatibleArchitectures = [.mlxSwift, .externalCLI]
         case .videoToText:
             compatibleArchitectures = [.coreML]
@@ -133,15 +151,6 @@ extension AppStore {
             return "Profile「\(profile.name)」的架構「\(profile.architecture.title)」與目前 Runtime 不相容；需要「\(architectureNames)」。"
         }
 
-        for configuration in profile.loras {
-            guard let loraModel = models.first(where: { $0.id == configuration.modelID }),
-                  let loraURL = loraModel.localURL else {
-                return "Profile「\(profile.name)」找不到 LoRA「\(configuration.modelID)」。"
-            }
-            if let error = loraCompatibilityError(at: loraURL) {
-                return "Profile「\(profile.name)」的 LoRA 不相容：\(error)"
-            }
-        }
         return nil
     }
 

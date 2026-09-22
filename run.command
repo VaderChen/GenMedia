@@ -21,6 +21,10 @@ print "正在確認 GenImage 為最新版本…"
 
 BIN_DIR="$(swift build -c release --show-bin-path)"
 APP_EXECUTABLE="$BIN_DIR/GenImage"
+if [[ ! -x "$APP_EXECUTABLE" ]]; then
+  print -u2 "錯誤：建置完成後找不到 GenImage 主程式：$APP_EXECUTABLE"
+  exit 1
+fi
 QWEN_WORKER_PACKAGE="$SCRIPT_DIR/RuntimeSupport/Qwen2511Worker"
 QWEN_WORKER_BIN_DIR="$(swift build --package-path "$QWEN_WORKER_PACKAGE" -c release --show-bin-path)"
 export GENIMAGE_QWEN_WORKER="$QWEN_WORKER_BIN_DIR/GenImageQwen2511Worker"

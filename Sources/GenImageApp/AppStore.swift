@@ -259,9 +259,9 @@ final class AppStore: ObservableObject {
     var modelTaskTokens: [String: UUID] = [:]
     var systemMetricsTask: Task<Void, Never>?
     private var updateCheckTask: Task<Void, Never>?
-    var textToImageService: ZImageTextToImageService
+    var textToImageService: ImageGenerationRouter
     let imageToTextService: QwenVLImageDescriptionService
-    var imageToImageService: Qwen2511ImageToImageService
+    var imageToImageService: ImageGenerationRouter
     var upscaleService: CoreMLUpscaleService
     var videoGenerationService: any VideoGenerating
     var musicGenerationService: MusicGenerationRouter
@@ -330,9 +330,10 @@ final class AppStore: ObservableObject {
             at: generatedDirectory,
             withIntermediateDirectories: true
         )
-        textToImageService = ZImageTextToImageService(outputDirectory: generatedDirectory)
+        let imageRouter = ImageGenerationRouter(outputDirectory: generatedDirectory)
+        textToImageService = imageRouter
         imageToTextService = QwenVLImageDescriptionService()
-        imageToImageService = Qwen2511ImageToImageService(outputDirectory: generatedDirectory)
+        imageToImageService = imageRouter
         upscaleService = CoreMLUpscaleService(
             outputDirectory: generatedDirectory
         )

@@ -1,0 +1,12 @@
+--- a/Libraries/MLXVLM/Models/Qwen3VL.swift
++++ b/Libraries/MLXVLM/Models/Qwen3VL.swift
+@@ -573,7 +573,8 @@
+         init(dim: Int, hiddenDim: Int) {
+             _linear1.wrappedValue = Linear(dim, hiddenDim, bias: true)
+             _linear2.wrappedValue = Linear(hiddenDim, dim, bias: true)
+-            _activation.wrappedValue = GELU(approximation: .fast)
++            // Qwen3-VL uses gelu_pytorch_tanh, not the sigmoid fast approximation.
++            _activation.wrappedValue = GELU(approximation: .precise)
+         }
+ 
+         func callAsFunction(_ x: MLXArray) -> MLXArray {
