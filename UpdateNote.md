@@ -8,6 +8,8 @@
 
 ## 1.26.0922 — 2026-09-22
 
+Release 驗證（2026-09-23）：App 與 DMG 均完成 Developer ID 簽章、Apple Notarization、Staple 與 Gatekeeper 驗證。
+
 - 新增 Qwen-Image 2.1 MLX 4-bit 純 Swift／MLX Runtime、獨立 Worker、模型安裝／驗證、文生圖與單圖編輯 Profile，並整合 App、Doctor 與 MCP；模型權重另外下載。
 - Qwen 2.1 以 Qwen3-VL、32 層單流 DiT、64 通道 RGBA VAE 執行推論；文生圖與小尺寸編輯已實跑，512×512 圖像編輯顆粒問題仍保留追蹤。編輯功能維持實驗性，尚不支援多圖、負面提示詞或 LoRA。
 - 修正生成結果自動選取後，唯一按鈕切成圖生圖並停用的問題；文生圖與圖生圖分開顯示，窄視窗自動換行。

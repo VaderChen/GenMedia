@@ -1,6 +1,6 @@
 # 驗證方式與結果
 
-最近更新：2026-09-22。本文記錄可重複執行的檢查，以及各次結果的實際範圍。
+最近更新：2026-09-23。本文記錄可重複執行的檢查，以及各次結果的實際範圍。
 
 ## 最新結果
 
@@ -11,7 +11,7 @@
 | Swift Testing | 163 項通過 | Core 66、Runtime 64、MCP 6、GGUF 9、App 5、QwenImage21 13；另含參數化案例 |
 | 建置／啟動及維護腳本 | 12 項通過 | 四個出貨產品建置、失敗／缺檔攔截、啟動參數、備份／清理、FFmpeg 失敗回復及授權打包 |
 | Web UI | 6 項通過 | 活動狀態合併、結構變更通知、連續生成與獨立文生圖／圖生圖按鈕 |
-| 1.26.0922 App／DMG | 簽章通過，公證待完成 | APFS 製作，Developer ID、hardened runtime、secure timestamp 與 DMG 完整性通過；尚未完成 Apple 公證、Staple 及 Gatekeeper 發佈驗證 |
+| 1.26.0922 App／DMG | 簽章、公證及 Gatekeeper 通過 | APFS 製作，Developer ID、hardened runtime、secure timestamp、App／DMG 公證與 Staple、掛載後 App 驗證均通過 |
 
 使用 Apple Silicon、Swift 6.4 與 macOS 27 SDK。專案的最低部署目標與這次實際測試環境不同；此結果不代表舊版作業系統、工具鏈或所有模型組合均已驗證。
 
@@ -135,15 +135,18 @@ git diff --check
 
 實際主程式為 arm64 Mach-O，`codesign --verify --strict` 通過。所有 Worker checkout 已解析，完整 patch manifest 的 9 項修正也已通過 `--verify`，補足前輪尚未驗證的範圍。
 
-在實際專案目錄完成 `build.command --no-app`（exit 0），四個根套件執行檔與五個獨立 Worker 均成功建置。接著實際執行 `run.command`，確認 GenImage 程序存活，Core Graphics 回報該程序具有可見的 1440×900 主視窗。建置、啟動、視窗證據及腳本測試日誌保存於 `Outputs/launch-validation`（不納入 Git）。本次驗證為直接執行 Release 程式，未新增 App Bundle／DMG 打包結果。
+在實際專案目錄完成 `build.command --no-app`（exit 0），四個根套件執行檔與五個獨立 Worker 均成功建置。接著實際執行 `run.command`，確認 GenImage 程序存活，Core Graphics 回報該程序具有可見的 1440×900 主視窗。建置、啟動、視窗證據及腳本測試日誌保存於 `Outputs/launch-validation`（不納入 Git）。啟動修正階段直接執行 Release 程式；App Bundle／DMG 的後續結果見下節。
 
 
-### 1.26.0922 安裝包（2026-09-22）
+### 1.26.0922 安裝包（2026-09-22～23）
 
 以 `GENIMAGE_VERSION=1.26.0922`、Build `2357` 建立 Developer ID App，包含 Qwen 2.1 Worker、更新後 WebUI 與第三方授權。App 與所有 Worker 的 Team ID、hardened runtime、secure timestamp 均驗證通過；DMG 的完整性、簽章與唯讀掛載後的內含 App 簽章也通過。
 
 專案位於 ExFAT。此次打包修正 WebUI 比對及 dylib 處理對 AppleDouble 中繼資料的誤判，並新增 `GENIMAGE_DIST_DIR`，在內部 APFS 製作 App 與 DMG。WebUI 正常複本可通過內容檢查，刻意修改 HTML 後仍會拒絕；完整資源及深層簽章檢查沒有略過。DMG 複製回專案 `dist/` 後 SHA-256 一致。
 
-目前 **Apple 公證尚未完成**，因此不宣稱本次安裝包已通過 Staple 或 Gatekeeper 發佈驗證；Release 保持草稿。公證完成後需更新此狀態及最終安裝包 checksum。
+2026-09-23 完成 Apple 公證。App 與 DMG 均獲得 Accepted、附加公證票據並通過 Staple 驗證；Gatekeeper 顯示 `accepted`、`source=Notarized Developer ID`。複製回 ExFAT 的最終 DMG，以及從該 DMG 唯讀掛載的 App，也均通過票據與 Gatekeeper 驗證。
 
-簽章階段 DMG SHA-256：`e0c9100ada5566a2198b5f401bbd3fc1d7a94b7bfa698db5e211b953eaed0864`。本機建置、測試及安裝包日誌位於 `Outputs/release-1.26.0922`（不納入 Git）。
+- App 公證 ID：`df0a5eac-9278-4952-bf22-8240a9825d6c`。
+- DMG 公證 ID：`0b5c7965-a081-4b40-81e0-e82c0e8ec3fe`。
+
+最終 DMG SHA-256：`bf2d839ad9803da300f54387f57b42fda9cfef7e74255c8cd5d069f93fa51b03`。本機建置、測試及安裝包日誌位於 `Outputs/release-1.26.0922`（不納入 Git）。
