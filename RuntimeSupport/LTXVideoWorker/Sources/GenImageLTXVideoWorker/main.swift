@@ -10,11 +10,13 @@ private struct WorkerRequest: Decodable {
         let path: String
         let scale: Double
         let conditioningScale: Double?
+        let conditioning: String?
 
         enum CodingKeys: String, CodingKey {
             case path
             case scale
             case conditioningScale = "conditioning_scale"
+            case conditioning
         }
     }
 
@@ -176,7 +178,7 @@ private enum WorkerError: LocalizedError {
         case .unsupportedImageConditioning:
             "目前原生 LTX Swift Worker 尚未提供 image conditioning；不會退回其他 Runtime。"
         case .unsupportedLoRA:
-            "目前原生 LTX Swift Worker 尚未提供 LoRA fusion；不會退回其他 Runtime。"
+            "LTX-Video 0.9.6 尚未支援 LoRA；請使用 LTX-2.3 文生影 Profile。"
         case .missingOutput:
             "LTX Swift Worker 完成但沒有產生影片。"
         case let .invalidTensor(message):
@@ -247,9 +249,6 @@ private enum GenImageLTXVideoWorker {
         }
         guard request.imagePaths.isEmpty else {
             throw WorkerError.unsupportedImageConditioning
-        }
-        guard request.loras.isEmpty else {
-            throw WorkerError.unsupportedLoRA
         }
 
         let gemmaDirectory = try resolveGemmaDirectory(
@@ -348,7 +347,7 @@ private enum GenImageLTXVideoWorker {
         guard request.imagePaths.isEmpty else {
             throw WorkerError.unsupportedImageConditioning
         }
-        guard request.loras.isEmpty else {
+        guard variant != .ltx096 || request.loras.isEmpty else {
             throw WorkerError.unsupportedLoRA
         }
 
@@ -523,6 +522,10 @@ private enum GenImageLTXVideoWorker {
             modelDirectory: modelDirectory,
             computeDType: computeDType
         ).model
+        let adaptedLayers = try LTXLoRALoader.apply(request.loras.map {
+            LTXLoRAConfiguration(url: URL(fileURLWithPath: $0.path), scale: Float($0.scale))
+        }, to: transformer)
+        if adaptedLayers > 0 { emit(.progress(stage: "lora_loaded", value: 0.08)) }
         let videoStatistics = try LTXVideoVAEWeightLoader.loadEncoderStatistics(
             from: modelDirectory,
             computeDType: computeDType
@@ -581,6 +584,10 @@ private enum GenImageLTXVideoWorker {
             from: transformerURL,
             computeDType: computeDType
         ).model
+        let adaptedLayers = try LTXLoRALoader.apply(request.loras.map {
+            LTXLoRAConfiguration(url: URL(fileURLWithPath: $0.path), scale: Float($0.scale))
+        }, to: transformer)
+        if adaptedLayers > 0 { emit(.progress(stage: "lora_loaded", value: 0.08)) }
         let videoStatistics = try LTXVideoVAEWeightLoader.loadEncoderStatistics(
             from: modelDirectory,
             computeDType: computeDType
@@ -1060,6 +1067,16 @@ private enum GenImageLTXVideoWorker {
     }
 
     private static func validate(_ request: WorkerRequest) throws {
+        for lora in request.loras {
+            guard lora.scale.isFinite, (0...1).contains(lora.scale) else {
+                throw WorkerError.invalidRequest("LoRA 權重必須介於 0 到 1。")
+            }
+            guard lora.conditioning == nil, (lora.conditioningScale ?? 1) == 1 else {
+                throw WorkerError.unsupportedImageConditioning
+            }
+            let url = URL(fileURLWithPath: lora.path)
+            guard FileManager.default.fileExists(atPath: url.path) else { throw WorkerError.missingInput(url) }
+        }
         guard !request.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw WorkerError.invalidRequest("prompt 不可為空白。")
         }

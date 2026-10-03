@@ -158,24 +158,29 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
                     guard !isThumbnail || reference.isImage else { throw URLError(.badURL) }
                     let data = try isThumbnail
                         ? thumbnails.data(for: reference.fileURL)
-                        : Data(contentsOf: reference.fileURL)
+                        : nil
                     guard task.isActive else { return }
                     let contentType = isThumbnail ? "image/png" : contentType(for: reference.fileURL)
                     let response = URLResponse(
                         url: requestURL,
                         mimeType: contentType,
-                        expectedContentLength: data.count,
+                        expectedContentLength: data?.count ?? Int(fileSize),
                         textEncodingName: nil
                     )
                     guard deliverIfActive(taskID, task: task, {
                         $0.didReceive(response)
                     }) else { return }
-                    guard deliverIfActive(taskID, task: task, {
-                        $0.didReceive(data)
-                    }) else { return }
-                    _ = deliverIfActive(taskID, task: task, {
-                        $0.didFinish()
-                    })
+                    if let data {
+                        guard deliverIfActive(taskID, task: task, {
+                            $0.didReceive(data)
+                        }) else { return }
+                        _ = deliverIfActive(taskID, task: task, {
+                            $0.didFinish()
+                        })
+                    } else {
+                        try serveFileContents(at: reference.fileURL, range: 0..<fileSize,
+                            task: task, taskID: taskID)
+                    }
                 }
             }
         } catch {
@@ -276,26 +281,39 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendabl
             $0.didReceive(response)
         }) else { return }
 
-        guard contentLength > 0 else {
+        try serveFileContents(at: reference.fileURL, range: range, task: task, taskID: taskID)
+    }
+
+    nonisolated private func serveFileContents(
+        at url: URL,
+        range: Range<Int64>,
+        task: URLSchemeTaskReference,
+        taskID: ObjectIdentifier
+    ) throws {
+        guard task.isActive else { return }
+        guard !range.isEmpty else {
             _ = deliverIfActive(taskID, task: task, {
                 $0.didFinish()
             })
             return
         }
 
-        let handle = try FileHandle(forReadingFrom: reference.fileURL)
+        let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         try handle.seek(toOffset: UInt64(range.lowerBound))
-        var remaining = contentLength
+        var remaining = range.upperBound - range.lowerBound
         while remaining > 0 {
+            guard task.isActive else { return }
             let chunkSize = Int(min(Int64(512 * 1024), remaining))
-            guard let data = try handle.read(upToCount: chunkSize), !data.isEmpty else {
-                throw URLError(.cannotLoadFromNetwork)
+            // Drain Foundation's temporary objects as well as the Swift Data each iteration.
+            let deliveredCount = try autoreleasepool {
+                guard let data = try handle.read(upToCount: chunkSize), !data.isEmpty else {
+                    throw URLError(.cannotLoadFromNetwork)
+                }
+                return deliverIfActive(taskID, task: task, { $0.didReceive(data) }) ? data.count : 0
             }
-            guard deliverIfActive(taskID, task: task, {
-                $0.didReceive(data)
-            }) else { return }
-            remaining -= Int64(data.count)
+            guard deliveredCount > 0 else { return }
+            remaining -= Int64(deliveredCount)
         }
         _ = deliverIfActive(taskID, task: task, {
             $0.didFinish()

@@ -63,6 +63,7 @@ extension AppStore {
         let builtInProfiles = ModelCatalog.builtInProfiles.filter { profile in
             if discovered.profiles.contains(where: {
                 $0.modelID == profile.modelID && $0.capability == profile.capability
+                    && $0.loras == profile.loras
             }) {
                 return false
             }

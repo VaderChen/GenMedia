@@ -5,6 +5,21 @@ import MLXFast
 import MLXNN
 
 final class Qwen21Transformer {
+    /// Immutable inputs shared only by the denoising steps of one generation.
+    struct PreparedConditioning {
+        struct TextSegment {
+            let range: Range<Int>
+            let indices: MLXArray
+        }
+        let layout: Qwen21Layout
+        let text: MLXArray
+        let textSegments: [TextSegment]
+        let imageIndices: MLXArray
+        let frequencies: MLXArray
+        let cosine: MLXArray
+        let sine: MLXArray
+    }
+
     let config: Qwen21TransformerConfiguration
     let weights: Qwen21Weights
 
@@ -20,24 +35,40 @@ final class Qwen21Transformer {
                                    bits: config.quantization.bits)
     }
 
-    func callAsFunction(latents: MLXArray, conditioning: MLXArray, sigma: Float,
-                        layout: Qwen21Layout) throws -> MLXArray {
-        let d = config.hidden, heads = config.num_attention_heads, hd = config.attention_head_dim
-        let eps = config.eps
+    func prepare(conditioning: MLXArray, layout: Qwen21Layout) throws -> PreparedConditioning {
+        try Task.checkCancellation()
         let normalizedText = Self.zeroCenteredRMSNorm(conditioning,
-            weight: try weights.tensor("txt_in.text_norm.weight"), eps: eps)
+            weight: try weights.tensor("txt_in.text_norm.weight"), eps: config.eps)
         let text = try weights.linear(geluApproximate(weights.linear(normalizedText, "txt_in.in_layer")), "txt_in.out_layer")
-        let image = try weights.linear(latents, "img_in")
-        var hidden = MLXArray.zeros([1, layout.count, d], dtype: .bfloat16)
+        var textSegments: [PreparedConditioning.TextSegment] = []
         var sourceText = 0
         for segment in layout.segments where !segment.image {
             let indices = MLXArray(Array(layout.textIndices[sourceText..<(sourceText + segment.range.count)]))
-            hidden[0..., segment.range, 0...] = text[0..., indices, 0...]
+            eval(indices)
+            textSegments.append(.init(range: segment.range, indices: indices))
             sourceText += segment.range.count
         }
-        hidden[0..., MLXArray(layout.imageIndices), 0...] = image
-        let freq = exp(-log(Float(10_000)) * MLXArray(0..<128).asType(.float32) / 128)
-        let time = MLXArray([sigma * 1000, 0]).expandedDimensions(axis: -1) * freq
+        let imageIndices = MLXArray(layout.imageIndices)
+        let frequencies = exp(-log(Float(10_000)) * MLXArray(0..<128).asType(.float32) / 128)
+        let (cosine, sine) = layout.rotary(axes: config.axes_dims_rope)
+        // Materialize once so later steps do not retain or rebuild the preparation graph.
+        eval(text, imageIndices, frequencies, cosine, sine)
+        return PreparedConditioning(layout: layout, text: text, textSegments: textSegments,
+            imageIndices: imageIndices, frequencies: frequencies, cosine: cosine, sine: sine)
+    }
+
+    func callAsFunction(latents: MLXArray, sigma: Float,
+                        prepared: PreparedConditioning) throws -> MLXArray {
+        let layout = prepared.layout
+        let d = config.hidden, heads = config.num_attention_heads, hd = config.attention_head_dim
+        let eps = config.eps
+        let image = try weights.linear(latents, "img_in")
+        var hidden = MLXArray.zeros([1, layout.count, d], dtype: .bfloat16)
+        for segment in prepared.textSegments {
+            hidden[0..., segment.range, 0...] = prepared.text[0..., segment.indices, 0...]
+        }
+        hidden[0..., prepared.imageIndices, 0...] = image
+        let time = MLXArray([sigma * 1000, 0]).expandedDimensions(axis: -1) * prepared.frequencies
         let embedding = concatenated([cos(time), sin(time)], axis: -1).asType(.bfloat16)
         let temb = try weights.linear(silu(weights.linear(embedding,
             "time_text_embed.linear_1")), "time_text_embed.linear_2")
@@ -52,7 +83,7 @@ final class Qwen21Transformer {
         }
         let scale1 = rows(chunks[0]), gate1 = tanh(rows(chunks[1]))
         let scale2 = rows(chunks[2]), gate2 = tanh(rows(chunks[3]))
-        let (cosine, sine) = layout.rotary(axes: config.axes_dims_rope)
+        let cosine = prepared.cosine, sine = prepared.sine
         func rope(_ x: MLXArray) -> MLXArray {
             let pairs = x.asType(.float32).reshaped([1, heads, layout.count, hd / 2, 2])
             let a = pairs[0..., 0..., 0..., 0..., 0], b = pairs[0..., 0..., 0..., 0..., 1]

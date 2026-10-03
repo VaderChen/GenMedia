@@ -6,6 +6,20 @@
 
 尚無新的變更。
 
+## 1.26.1003 — 2026-10-03
+
+本版提供已完成 Apple 公證與 Gatekeeper 驗證的 Apple Silicon 安裝包。
+
+- **4 種新圖像風格**：Z-Image Turbo 新增鉛筆素描、吉卜力風格、週六早晨卡通與復古彩色電影 LoRA，可從模型中心下載並在既有選單切換。
+- **4 種影片鏡頭運動**：LTX 新增鏡頭推近、拉遠、左移與右移，各提供 MLX Q4／GGUF Q3 文生影 Profile。
+- **3 組低步數文生影 LoRA**：MiniMax H3 新增 LightX2V 4 步、8 步，以及 Turbo v4（預設 6 步，可調整為 4–8 步），共 11 個對應預設。選擇 Profile 會帶入步數與採樣設定，並檢查基底模型與 LoRA 相容性。
+- **維持原有操作的效能改善**：減少原圖預覽與音訊資訊讀取的暫存記憶體；Qwen-Image 2.1 重用同次生成的固定資料，減少重複運算。UI、操作方式、生成參數與模型精度保持不變。
+- **純本機生成**：新增 LoRA 維持 Swift／MLX 推論，不需額外 Python 環境；模型與 LoRA 權重另行下載。四語 README 與 LoRA 使用指南同步更新。
+
+影片鏡頭 LoRA 原為 LTX-2 19B 訓練，在 LTX-2.3 為實驗性相容；H3 低步數組合亦為實驗性功能，完整影片效果尚待驗證。LightX2V 支援完整及 Pruned FL2VA GGUF，Turbo v4 限完整 FL2VA。減少步數不會降低主模型的記憶體需求。Qwen 2.1 的單圖編輯限制維持不變。
+
+[LoRA 使用指南](docs/LORAS.md) · [驗證方式與範圍](docs/VALIDATION.md) · [效能紀錄](docs/PERFORMANCE_CHANGES.md)
+
 ## 1.26.0922 — 2026-09-22
 
 Release 驗證（2026-09-23）：App 與 DMG 均完成 Developer ID 簽章、Apple Notarization、Staple 與 Gatekeeper 驗證。

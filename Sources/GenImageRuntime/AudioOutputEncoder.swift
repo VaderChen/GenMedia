@@ -62,28 +62,36 @@ enum AudioOutputEncoder {
     }
 
     static func waveMetadata(at url: URL) throws -> AudioOutputMetadata {
-        let data = try Data(contentsOf: url)
-        guard data.count >= 44,
-              String(data: data[0..<4], encoding: .ascii) == "RIFF",
-              String(data: data[8..<12], encoding: .ascii) == "WAVE" else {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let fileSize = try handle.seekToEnd()
+        try handle.seek(toOffset: 0)
+        guard fileSize >= 44,
+              let header = try handle.read(upToCount: 12), header.count == 12,
+              String(data: header[0..<4], encoding: .ascii) == "RIFF",
+              String(data: header[8..<12], encoding: .ascii) == "WAVE" else {
             throw AudioOutputEncodingError.invalidWaveOutput(url)
         }
-        var offset = 12
+        var offset: UInt64 = 12
         var sampleRate: Int?
         var channelCount: Int?
         var byteRate: Int?
         var audioByteCount: Int?
-        while offset + 8 <= data.count {
-            let chunkID = String(data: data[offset..<(offset + 4)], encoding: .ascii)
-            let chunkSize = Int(littleEndianUInt32(data, at: offset + 4))
+        // Audio payloads and unknown chunks are skipped without allocating their contents.
+        while offset + 8 <= fileSize {
+            try handle.seek(toOffset: offset)
+            guard let chunk = try handle.read(upToCount: 8), chunk.count == 8 else { break }
+            let chunkID = String(data: chunk[0..<4], encoding: .ascii)
+            let chunkSize = UInt64(littleEndianUInt32(chunk, at: 4))
             let contentOffset = offset + 8
-            guard contentOffset + chunkSize <= data.count else { break }
+            guard chunkSize <= fileSize - contentOffset else { break }
             if chunkID == "fmt ", chunkSize >= 16 {
-                channelCount = Int(littleEndianUInt16(data, at: contentOffset + 2))
-                sampleRate = Int(littleEndianUInt32(data, at: contentOffset + 4))
-                byteRate = Int(littleEndianUInt32(data, at: contentOffset + 8))
+                guard let format = try handle.read(upToCount: 16), format.count == 16 else { break }
+                channelCount = Int(littleEndianUInt16(format, at: 2))
+                sampleRate = Int(littleEndianUInt32(format, at: 4))
+                byteRate = Int(littleEndianUInt32(format, at: 8))
             } else if chunkID == "data" {
-                audioByteCount = chunkSize
+                audioByteCount = Int(chunkSize)
             }
             offset = contentOffset + chunkSize + (chunkSize % 2)
         }

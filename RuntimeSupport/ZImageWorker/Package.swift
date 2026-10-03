@@ -33,6 +33,14 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "Logging", package: "swift-log")
             ]
+        ),
+        .testTarget(
+            name: "GenImageZImageWorkerTests",
+            dependencies: [
+                .product(name: "ZImage", package: "z-image.swift"),
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift")
+            ]
         )
     ]
 )

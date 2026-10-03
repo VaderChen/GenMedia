@@ -1,4 +1,5 @@
 import Foundation
+import GenImageCore
 import MLX
 import MLXRandom
 
@@ -77,6 +78,8 @@ public struct MiniMaxH3Pipeline {
     public var textEncoderURL: URL?
     public var tokenizerDirectoryURL: URL?
     public var scheduler: MiniMaxH3FlowScheduler
+    public var loras: [MiniMaxH3LoRAConfiguration]
+    public var acceleration: MiniMaxH3Acceleration?
 
     public init(
         transformerURL: URL,
@@ -84,14 +87,20 @@ public struct MiniMaxH3Pipeline {
         audioVAEURL: URL? = nil,
         textEncoderURL: URL? = nil,
         tokenizerDirectoryURL: URL? = nil,
-        scheduler: MiniMaxH3FlowScheduler = MiniMaxH3FlowScheduler()
+        scheduler: MiniMaxH3FlowScheduler = MiniMaxH3FlowScheduler(),
+        loras: [MiniMaxH3LoRAConfiguration] = [],
+        acceleration: MiniMaxH3Acceleration? = nil
     ) {
         self.transformerURL = transformerURL
         self.videoVAEURL = videoVAEURL
         self.audioVAEURL = audioVAEURL
         self.textEncoderURL = textEncoderURL
         self.tokenizerDirectoryURL = tokenizerDirectoryURL
-        self.scheduler = scheduler
+        self.scheduler = acceleration.map {
+            MiniMaxH3FlowScheduler(videoShift: $0.videoShift, audioShift: $0.audioShift)
+        } ?? scheduler
+        self.loras = loras
+        self.acceleration = acceleration
     }
 
     /// Run the sampling loop and decode.
@@ -118,6 +127,13 @@ public struct MiniMaxH3Pipeline {
                 height: request.latentHeight,
                 width: request.latentWidth
             )
+        }
+        try MiniMaxH3LoRAAdapter.validateRequest(loras: loras, acceleration: acceleration, steps: request.steps)
+        if let acceleration, !acceleration.supportsPrunedBase {
+            let inventory = try MiniMaxH3GGUFWeightLoader.inspectTransformer(fileURL: transformerURL)
+            guard try !MiniMaxH3Configuration.forInventory(inventory).usesAdalnCurves else {
+                throw MiniMaxH3LoRAError.invalid("此加速 LoRA 不支援 Pruned 基底；請使用完整 FL2VA。")
+            }
         }
         MLXRandom.seed(request.seed)
         let defaultConfiguration = MiniMaxH3Configuration.fl2va
@@ -152,14 +168,22 @@ public struct MiniMaxH3Pipeline {
         }
 
         progress("loadingTransformer", 0)
-        let loaded = try MiniMaxH3GGUFQuantizedLoader.load(fileURL: transformerURL)
-        let configuration = loaded.configuration
-        var transformer: MiniMaxH3Transformer? = MiniMaxH3Transformer(
-            configuration: configuration,
-            weights: loaded.tensors,
-            quantizedPrefixes: loaded.quantizedPrefixes,
-            computeDType: .float32
-        )
+        var transformer: MiniMaxH3Transformer? = try {
+            // Keep the loader's tensor dictionary in this scope so releasing
+            // the transformer also releases its base weights before VAE decode.
+            let loaded = try MiniMaxH3GGUFQuantizedLoader.load(fileURL: transformerURL)
+            var configuration = loaded.configuration
+            configuration.videoShift = scheduler.videoShift
+            configuration.audioShift = scheduler.audioShift
+            return MiniMaxH3Transformer(
+                configuration: configuration,
+                weights: loaded.tensors,
+                quantizedPrefixes: loaded.quantizedPrefixes,
+                computeDType: .float32
+            )
+        }()
+        let adaptedLayers = try transformer!.loadLoRAs(loras)
+        if adaptedLayers > 0 { progress("loadingLoRA", 1) }
         progress("loadingTransformer", 1)
 
         let sigmas = scheduler.sigmas(steps: request.steps)

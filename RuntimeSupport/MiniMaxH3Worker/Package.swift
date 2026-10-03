@@ -28,6 +28,7 @@ let package = Package(
             name: "MiniMaxH3SwiftRuntime",
             dependencies: [
                 .product(name: "GenImageGGUF", package: "GenImage"),
+                .product(name: "GenImageCore", package: "GenImage"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXRandom", package: "mlx-swift"),
@@ -39,6 +40,7 @@ let package = Package(
             name: "GenImageMiniMaxH3Worker",
             dependencies: [
                 "MiniMaxH3SwiftRuntime",
+                .product(name: "GenImageCore", package: "GenImage"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXRandom", package: "mlx-swift"),
                 .product(name: "Tokenizers", package: "swift-transformers")
@@ -48,6 +50,7 @@ let package = Package(
             name: "MiniMaxH3SwiftRuntimeTests",
             dependencies: [
                 "MiniMaxH3SwiftRuntime",
+                .product(name: "GenImageCore", package: "GenImage"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXRandom", package: "mlx-swift"),
                 .product(name: "Tokenizers", package: "swift-transformers")

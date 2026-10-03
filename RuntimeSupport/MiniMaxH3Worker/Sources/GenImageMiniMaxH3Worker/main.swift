@@ -204,6 +204,9 @@ private enum GenImageMiniMaxH3Worker {
             if variant == .ref2va, request.keyframes?.isEmpty == false {
                 throw MiniMaxH3RequestProtocol.RequestError.unsupportedVariant(variantRaw)
             }
+            try MiniMaxH3LoRAAdapter.validateRequest(
+                loras: request.loras ?? [], acceleration: request.acceleration,
+                steps: request.steps, isRef2VA: variant == .ref2va)
             let components = try MiniMaxH3RequestProtocol.Components.resolve(
                 request: request
             )
@@ -247,7 +250,8 @@ private enum GenImageMiniMaxH3Worker {
                 videoVAEURL: components.videoVAE,
                 audioVAEURL: components.audioVAE,
                 textEncoderURL: components.textEncoder,
-                tokenizerDirectoryURL: components.tokenizerDirectory
+                tokenizerDirectoryURL: components.tokenizerDirectory,
+                loras: request.loras ?? [], acceleration: request.acceleration
             )
             let pipelineRequest = MiniMaxH3Pipeline.Request(
                 latentFrames: geometry.latentFrames,

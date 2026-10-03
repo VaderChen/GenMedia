@@ -24,3 +24,5 @@ RuntimeSupport/Qwen2511Worker | qwen-image-edit-swift | 0.7.2 | qwen-image-edit-
 
 . | mlx-swift-lm | 3.31.4 | mlx-swift-lm | Qwen3VL-Image-Conditioning.patch | Libraries/MLXVLM/Models/Qwen3VL.swift | public func encodeImageConditioning | Qwen-Image 2.1 視覺條件編碼 API
 . | mlx-swift-lm | 3.31.4 | mlx-swift-lm | Qwen3VL-Vision-GELU.patch | Libraries/MLXVLM/Models/Qwen3VL.swift | GELU(approximation: .precise) | Qwen3-VL 視覺 GELU 對齊模型設定
+
+RuntimeSupport/ZImageWorker | z-image.swift | 28bfcf3148c041a554629247170eb54d9ac46830 | Z-Image.swift | Z-Image-LoRA-Quantized-Targets.patch | Sources/ZImage/LoRA/LoRAApplicator.swift | return (out: qlin.shape.0, in: qlin.shape.1) | Z-Image LoRA 邏輯維度與 AdaLN 相容性修正

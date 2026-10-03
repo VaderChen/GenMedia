@@ -12,18 +12,16 @@ GenMedia is a local AI media generation app with **native Apple Silicon support*
 - A dedicated settings page supports Traditional Chinese, English, Japanese, Korean, and six persistent color themes.
 - Settings provides a switch for a localhost-only MCP HTTP API, while a standalone JSON-RPC 2.0 stdio server remains available when the app is not running.
 
-## Recent fixes and validation (2026-09-22)
+## What's new in 1.26.1003
 
-Text-to-image and image-to-image now have separate buttons, so selecting a completed output keeps text-to-image available. Buttons wrap in narrow windows. The launcher builds and checks all four root-package shipping products separately, fixing the missing main executable after a successful build. Validation includes 12 script tests, 6 Web UI tests, and WebKit layout checks in all four languages.
+- **More image styles**: Four Z-Image Turbo LoRAs add Pencil Sketch, Ghibli Style, Saturday Morning Cartoon, and Technically Color.
+- **Video camera control**: Four LTX camera LoRAs add dolly in, out, left, and right through the existing text-to-video profiles.
+- **Low-step video generation**: MiniMax H3 gains LightX2V 4-step / 8-step and Turbo v4 acceleration LoRAs. Turbo v4 defaults to 6 steps and supports 4–8; matching profiles apply the step count and sampling settings automatically.
+- **Less unnecessary memory use and repeated work**: Original-image previews, audio metadata reading, and Qwen-Image 2.1 generation are optimized while preserving the existing UI, controls, and generation settings.
 
-Model discovery, verification, and removal run in the background. Pause, resume, repair, and removal of the same model wait for earlier operations to finish cleanup. After an output-directory change, new jobs use the new location and running jobs keep their original destination.
+Use the existing Model Center, LoRA selector, and Profile editor, with no separate Python installation. Video camera adapters and H3 low-step combinations are experimental; complete video results remain unverified. Models require separate downloads, and fewer steps do not reduce base-model memory requirements.
 
-Files still referenced by another asset or workspace are retained; renaming updates all matching references. Automatic cleanup is limited to unreferenced MediaCache proxies. An unreadable workspace preserves its index and cache and disables workspace autosave for that session.
-
-LoRA conversion copies weights in 1 MiB chunks. Worker logs are read incrementally, including large logs written before a normal exit. The complete root package builds and **163 Swift tests pass**. See the [performance record](docs/PERFORMANCE_CHANGES.md) (Traditional Chinese) for the synthetic LoRA measurement and validation limits; this does not establish compatibility with every model or hardware configuration.
-
-- [Validation instructions and results](docs/VALIDATION.md) (Traditional Chinese)
-- [Detailed review and fixes](docs/PROJECT_REVIEW_2026-09-20.md) (Traditional Chinese)
+[Download and release notes](https://github.com/VaderChen/GenMedia/releases/tag/v1.26.1003) · [LoRA guide](docs/LORAS.md) · [Validation scope](docs/VALIDATION.md) · [Performance record](docs/PERFORMANCE_CHANGES.md) (guides in Traditional Chinese)
 
 ## Qwen-Image 2.1 (Swift/MLX)
 
@@ -113,6 +111,12 @@ After transcription, an optional local Qwen3.5 or Qwen3.8 MLX text model can tra
 `GenImageASRPoC` is a standalone WhisperKit validation utility for checking media decoding, language recognition, and timestamps without modifying the main app workspace. The production app follows the same Swift/Core ML boundary. See [ASR Subtitle PoC](docs/ASR_POC.en.md).
 
 Qwen3-VL, Qwen3.5, and Qwen3.8 are multimodal models, so Model Center classifies each under both image-to-text and text-to-text and provides a profile for each capability. Managed downloads include `processor_config.json`, image/video preprocessing configuration, tokenizer data, chat templates, and the complete weight index; installation is reported complete only after required-file validation succeeds.
+
+### Image Styles, Video Cameras, and Low-Step LoRAs
+
+Model Center adds **four Z-Image Turbo styles**: Pencil Sketch, Ghibli Style, Saturday Morning Cartoon, and Technically Color. **Four LTX camera motions**—dolly in, out, left, and right—each include MLX Q4 and GGUF Q3 text-to-video profiles. Use the existing download controls, LoRA selector, and Profile editor. These camera adapters were trained on LTX-2 19B; their use with LTX-2.3 is experimental, and complete video results remain unverified. See the [LoRA guide](docs/LORAS.md) (Traditional Chinese) for trigger words, setup, and compatibility.
+
+**MiniMax H3 low-step text-to-video** adds LightX2V 4-step / 8-step 768p and Turbo v4 (6 steps by default, adjustable from 4 to 8). Select the matching Profile to apply its step count and sampling settings. LightX2V supports full and Pruned FL2VA GGUF bases; Turbo v4 requires a full FL2VA base. These combinations are experimental, with complete video quality still unverified. Fewer steps do not reduce base-model memory requirements. Existing LTX-2.3 profiles already use an 8-step distilled model.
 
 ### Civitai LoRA
 

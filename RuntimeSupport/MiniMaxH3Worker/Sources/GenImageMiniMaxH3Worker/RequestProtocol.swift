@@ -1,4 +1,5 @@
 import Foundation
+import GenImageCore
 import MLX
 import MiniMaxH3SwiftRuntime
 
@@ -37,6 +38,8 @@ enum MiniMaxH3RequestProtocol {
         var seed: UInt64
         var steps: Int
         var keyframes: [Keyframe]?
+        var loras: [MiniMaxH3LoRAConfiguration]?
+        var acceleration: MiniMaxH3Acceleration?
         /// Optional overrides; the worker resolves the standard layout otherwise.
         var transformerPath: String?
         var videoVAEPath: String?

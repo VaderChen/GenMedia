@@ -627,7 +627,7 @@ public enum ModelCatalog {
             licenseName: "BSD-3-Clause",
             sourceURL: URL(string: "https://huggingface.co/mlboydaisuke/Real-ESRGAN-x4-CoreML")
         )
-    ] + [QwenImage21Model.descriptor]
+    ] + [QwenImage21Model.descriptor] + LoRACatalog.entries.map(\.descriptor)
 
     public static let builtInProfiles: [InferenceProfile] = [
         InferenceProfile(
@@ -859,7 +859,7 @@ public enum ModelCatalog {
                     conditioningScale: 1
                 )
             ],
-            notes: "原生 MLX INT4 LTX-2.3 Profile；由 LTX Swift Worker 使用 Apple Silicon Metal 執行。文字生影已支援；image conditioning 與 LoRA fusion 尚未支援，建議 48GB 以上記憶體。",
+            notes: "原生 MLX INT4 LTX-2.3 Profile；由 LTX Swift Worker 使用 Apple Silicon Metal 執行。文字生影已支援；已支援一般 Linear LoRA；image conditioning 尚未支援，建議 48GB 以上記憶體。",
             isBuiltIn: true
         ),
         InferenceProfile(
@@ -1122,7 +1122,7 @@ public enum ModelCatalog {
             notes: "先以 Real-ESRGAN 4× 修復，再以 Lanczos 縮放為 2×。",
             isBuiltIn: true
         )
-    ] + miniMaxH3GGUFProfiles + QwenImage21Model.profiles
+    ] + miniMaxH3GGUFProfiles + QwenImage21Model.profiles + LoRACatalog.videoProfiles
 
     private static var miniMaxH3GGUFProfiles: [InferenceProfile] {
         let variants: [(modelID: String, displayName: String)] = [

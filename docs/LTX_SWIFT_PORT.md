@@ -7,7 +7,8 @@ Gemma3 文字編碼與 conditioning connector、兩階段 distilled denoise，�
 影片／音訊解碼與 FFmpeg 封裝。`LTXVideoGenerationService` 已改走獨立的
 `GenImageLTXVideoWorker` JSON 子行程，不再搜尋或啟動 Python Runtime。Worker
 在模型檔案不完整時明確失敗，不會靜默退回其他 Runtime；目前原生支援文字生影，
-image conditioning 與 LoRA fusion 仍明確回報不支援。
+LTX-2.3 MLX／GGUF 現已支援一般 Linear LoRA；image conditioning 與 IC-LoRA 仍明確回報不支援。
+鏡頭 LoRA 的使用與驗證範圍見 [LoRA 指南](LORAS.md)。
 
 ## 參考版本與模型
 
@@ -191,7 +192,7 @@ swift test
   目前尚未取得可區分 active coding 的可靠計時，因此不把 git 時間窗當作工時。
 - Block 3–4 已完成結構與管線串接；待完整模型下載後補做端到端權重 parity 與
   實機耗時／記憶體紀錄。
-- 後續只處理 image conditioning、LoRA fusion 與更長影片的最佳化，不回到 Python
+- 後續處理 image conditioning、IC-LoRA 與更長影片的最佳化，不回到 Python
   生成路徑。
 
 排除項目仍為 `ic_lora.py`、`retake.py`、`keyframe_interpolation.py` 與

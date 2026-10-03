@@ -1,0 +1,97 @@
+--- a/Sources/ZImage/LoRA/LoRAApplicator.swift
++++ b/Sources/ZImage/LoRA/LoRAApplicator.swift
+@@ -7,9 +7,8 @@
+ 
+   private static func linearDims(for module: Module) -> (out: Int, in: Int)? {
+     if let qlin = module as? QuantizedLinear {
+-      let outDim = qlin.weight.dim(max(0, qlin.weight.ndim - 2))
+-      let inDim = qlin.weight.dim(max(0, qlin.weight.ndim - 1))
+-      return (out: outDim, in: inDim)
++      // Packed weight columns are smaller than the logical input dimension.
++      return (out: qlin.shape.0, in: qlin.shape.1)
+     }
+     if let lin = module as? Linear {
+       let outDim = lin.weight.dim(max(0, lin.weight.ndim - 2))
+@@ -399,12 +398,13 @@
+     }
+   }
+ 
++  @discardableResult
+   public static func applyDynamically<T: Module>(
+     to transformer: T,
+     loraWeights: LoRAWeights,
+     scale: Float,
+     logger: Logger? = nil
+-  ) {
++  ) -> Int {
+     let effectiveScale = scale * loraWeights.effectiveScale
+ 
+     logger?.info(
+@@ -522,6 +522,7 @@
+     } else if !loraWeights.hasLoKr {
+       logger?.warning("Dynamic LoRA matched 0 layers")
+     }
++    return appliedCount
+   }
+ 
+   public static func clearDynamicLoRA<T: Module>(
+--- a/Sources/ZImage/LoRA/LoRAKeyMapper.swift
++++ b/Sources/ZImage/LoRA/LoRAKeyMapper.swift
+@@ -61,10 +61,11 @@
+ 
+   private static let cachedTargetPaths: [String] = {
+     var paths: [String] = []
+-    paths.reserveCapacity(238)
++    paths.reserveCapacity(270)
+ 
+     for i in 0..<30 {
+       paths.append(contentsOf: [
++        "layers.\(i).adaLN_modulation.0.weight",
+         "layers.\(i).attention.to_q.weight",
+         "layers.\(i).attention.to_k.weight",
+         "layers.\(i).attention.to_v.weight",
+@@ -77,6 +78,7 @@
+ 
+     for i in 0..<2 {
+       paths.append(contentsOf: [
++        "noise_refiner.\(i).adaLN_modulation.0.weight",
+         "noise_refiner.\(i).attention.to_q.weight",
+         "noise_refiner.\(i).attention.to_k.weight",
+         "noise_refiner.\(i).attention.to_v.weight",
+--- a/Sources/ZImage/LoRA/LoRALinear.swift
++++ b/Sources/ZImage/LoRA/LoRALinear.swift
+@@ -69,7 +69,8 @@
+       scales: quantizedLinear.scales,
+       biases: quantizedLinear.biases,
+       groupSize: quantizedLinear.groupSize,
+-      bits: quantizedLinear.bits
++      bits: quantizedLinear.bits,
++      mode: quantizedLinear.mode
+     )
+   }
+ 
+@@ -82,7 +83,8 @@
+       biases: biases,
+       transpose: true,
+       groupSize: groupSize,
+-      bits: bits
++      bits: bits,
++      mode: mode
+     )
+ 
+     if let bias = bias {
+--- a/Sources/ZImage/Pipeline/ZImagePipeline.swift
++++ b/Sources/ZImage/Pipeline/ZImagePipeline.swift
+@@ -626,7 +626,11 @@
+       let loraWeights = try await LoRAWeightLoader.load(from: config)
+       logger.info("Loaded adapter: \(loraWeights.logSummary)")
+ 
+-      LoRAApplicator.applyDynamically(to: trans, loraWeights: loraWeights, scale: config.scale, logger: logger)
++      let appliedLayers = LoRAApplicator.applyDynamically(
++        to: trans, loraWeights: loraWeights, scale: config.scale, logger: logger)
++      guard appliedLayers > 0 || loraWeights.hasLoKr else {
++        throw LoRAError.incompatibleWeights("LoRA did not match any model layers.")
++      }
+ 
+       currentLoRA = loraWeights
+       currentLoRAConfig = config

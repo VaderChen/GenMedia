@@ -8,8 +8,9 @@ import Testing
 @Suite(.serialized, .timeLimit(.minutes(1)))
 @MainActor
 struct AssetSchemeHandlerTests {
-    @Test func stoppingLargeMediaAfterResponsePreventsEverySubsequentCallback() async throws {
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("asset-\(UUID()).mp4")
+    @Test(arguments: ["mp4", "png"])
+    func stoppingLargeMediaAfterResponsePreventsEverySubsequentCallback(fileExtension ext: String) async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("asset-\(UUID()).\(ext)")
         FileManager.default.createFile(atPath: file.path, contents: nil)
         defer { try? FileManager.default.removeItem(at: file) }
         let handle = try FileHandle(forWritingTo: file)
@@ -18,7 +19,7 @@ struct AssetSchemeHandlerTests {
         _ = NSApplication.shared
         let webView = WKWebView()
         let handler = AssetSchemeHandler()
-        let asset = MediaAsset(projectID: UUID(), kind: .generatedVideo, title: "Test", fileURL: file,
+        let asset = MediaAsset(projectID: UUID(), kind: ext == "png" ? .generated : .generatedVideo, title: "Test", fileURL: file,
             pixelWidth: 16, pixelHeight: 16)
         handler.updateAssets([asset])
         let task = RecordingSchemeTask(url: URL(string: "genimage-asset://\(asset.id.uuidString.lowercased())")!)
@@ -36,6 +37,50 @@ struct AssetSchemeHandlerTests {
         #expect(task.callbacksAfterStop == 0)
         #expect(task.body.isEmpty)
         #expect(!task.finished)
+    }
+
+    @Test(arguments: [false, true])
+    func originalImageStreamsIdenticalBytesAndHonorsCancellation(cancelAfterChunk: Bool) async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("asset-\(UUID()).png")
+        let expected = Data((0..<(2 * 1_024 * 1_024 + 17)).map { UInt8(truncatingIfNeeded: $0) })
+        try expected.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        _ = NSApplication.shared
+        let webView = WKWebView()
+        let handler = AssetSchemeHandler()
+        let asset = MediaAsset(projectID: UUID(), kind: .generated, title: "Test", fileURL: file,
+            pixelWidth: 16, pixelHeight: 16)
+        handler.updateAssets([asset])
+        let task = RecordingSchemeTask(url: URL(string: "genimage-asset://\(asset.id.uuidString.lowercased())")!)
+        if cancelAfterChunk {
+            task.onData = {
+                task.stopped = true
+                handler.webView(webView, stop: task)
+            }
+        }
+        defer { task.onData = nil }
+        handler.webView(webView, start: task)
+        for _ in 0..<200 where !task.finished && !task.stopped && task.error == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(task.error == nil)
+        #expect(task.response?.mimeType == "image/png")
+        #expect(task.response?.expectedContentLength == Int64(expected.count))
+        #expect(!(task.response is HTTPURLResponse))
+        #expect(!task.chunkSizes.isEmpty)
+        #expect(task.chunkSizes.allSatisfy { $0 <= 512 * 1_024 })
+        if cancelAfterChunk {
+            #expect(task.stopped)
+            try await Task.sleep(for: .milliseconds(150))
+            #expect(task.callbacksAfterStop == 0)
+            #expect(!task.finished)
+            #expect(task.chunkSizes.count == 1)
+            #expect(task.body == expected.prefix(task.body.count))
+        } else {
+            #expect(task.finished)
+            #expect(task.body == expected)
+            #expect(task.chunkSizes.count > 1)
+        }
     }
 
     @Test(arguments: ["bytes=3-7", "bytes="])
@@ -72,6 +117,8 @@ private final class RecordingSchemeTask: NSObject, WKURLSchemeTask, @unchecked S
     var stopped = false
     var callbacksAfterStop = 0
     var onResponse: (() -> Void)?
+    var onData: (() -> Void)?
+    var chunkSizes: [Int] = []
     var response: URLResponse?
     var body = Data()
     var finished = false
@@ -91,6 +138,8 @@ private final class RecordingSchemeTask: NSObject, WKURLSchemeTask, @unchecked S
     func didReceive(_ data: Data) {
         if stopped { callbacksAfterStop += 1 }
         body.append(data)
+        chunkSizes.append(data.count)
+        onData?()
     }
     func didFinish() {
         if stopped { callbacksAfterStop += 1 }

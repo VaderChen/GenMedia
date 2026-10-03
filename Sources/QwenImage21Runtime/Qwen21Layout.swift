@@ -57,11 +57,15 @@ struct Qwen21Layout {
     }
 
     func rotary(axes: [Int]) -> (MLXArray, MLXArray) {
+        let denominators = axes.map { dimension in
+            stride(from: 0, to: dimension, by: 2).map { pow(Float(10_000), Float($0) / Float(dimension)) }
+        }
         var angles: [Float] = []
+        angles.reserveCapacity(count * axes.reduce(0, +) / 2)
         for position in positions {
-            for (axis, dimension) in axes.enumerated() {
-                for i in stride(from: 0, to: dimension, by: 2) {
-                    angles.append(position[axis] / pow(10_000, Float(i) / Float(dimension)))
+            for (axis, values) in denominators.enumerated() {
+                for denominator in values {
+                    angles.append(position[axis] / denominator)
                 }
             }
         }

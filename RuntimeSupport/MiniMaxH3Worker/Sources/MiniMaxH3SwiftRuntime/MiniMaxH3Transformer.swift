@@ -17,6 +17,7 @@ public final class MiniMaxH3Transformer {
     private let weights: [String: MLXArray]
     private let quantizedPrefixes: Set<String>
     private let computeDType: DType
+    private var lora = MiniMaxH3LoRAAdapter()
 
     public init(
         configuration: MiniMaxH3Configuration = .fl2va,
@@ -30,6 +31,14 @@ public final class MiniMaxH3Transformer {
         self.computeDType = computeDType
     }
 
+    @discardableResult
+    public func loadLoRAs(_ configurations: [MiniMaxH3LoRAConfiguration]) throws -> Int {
+        let adapter = try MiniMaxH3LoRAAdapter.load(configurations,
+            shapes: MiniMaxH3LoRAAdapter.shapes(weights: weights, quantizedPrefixes: quantizedPrefixes))
+        lora = adapter
+        return adapter.layerCount
+    }
+
     private func weight(_ name: String) throws -> MLXArray {
         guard let value = weights[name] else {
             throw MiniMaxH3WeightError.missingTensor(name)
@@ -38,7 +47,7 @@ public final class MiniMaxH3Transformer {
     }
 
     /// `y = x W^T (+ b)`, transparently handling quantized weights.
-    private func linear(
+    func linear(
         _ input: MLXArray,
         _ prefix: String,
         bias hasBias: Bool = false
@@ -61,7 +70,7 @@ public final class MiniMaxH3Transformer {
         if hasBias {
             output = output + (try weight("\(prefix).bias")).asType(output.dtype)
         }
-        return output
+        return lora.apply(to: output, input: input, path: prefix)
     }
 
     // MARK: - Primitives

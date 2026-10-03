@@ -46,12 +46,12 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
             capability: request.profile.capability,
             frameCount: request.options.frameCount
         )
-        let loras = try Self.validatedLoRAs(request.profileLoRAs)
+        try Self.validateLoRAs(request.profileLoRAs, modelID: request.profile.modelID)
+        let loras = request.profileLoRAs.map {
+            WorkerRequest.LoRA(path: $0.localURL.path, scale: $0.scale, conditioningScale: $0.conditioningScale)
+        }
         guard sourcePaths.isEmpty else {
             throw LTXVideoRuntimeError.unsupportedImageConditioning
-        }
-        guard loras.isEmpty else {
-            throw LTXVideoRuntimeError.unsupportedLoRA
         }
 
         let manifestURL = request.modelURL.appendingPathComponent("genimage-model.json")
@@ -205,10 +205,18 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
         }
     }
 
-    private static func validatedLoRAs(
-        _ values: [VideoGenerationLoRA]
-    ) throws -> [WorkerRequest.LoRA] {
-        try values.map { lora in
+    static func validateLoRAs(_ values: [VideoGenerationLoRA], modelID: String) throws {
+        guard values.isEmpty || LoRACatalog.ltxModelIDs.contains(where: { $0.lowercased() == modelID.lowercased() }) else {
+            throw LTXVideoRuntimeError.unsupportedLoRA
+        }
+        for lora in values {
+            guard lora.conditioning == nil, lora.conditioningScale == 1 else {
+                throw LTXVideoRuntimeError.unsupportedImageConditioning
+            }
+            if let entry = LoRACatalog.entry(for: lora.modelID),
+               !entry.supports(modelID: modelID, capability: .textToVideo) {
+                throw LTXVideoRuntimeError.unsupportedLoRA
+            }
             guard FileManager.default.fileExists(atPath: lora.localURL.path) else {
                 throw LTXVideoRuntimeError.loraNotInstalled(lora.localURL)
             }
@@ -217,11 +225,6 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
                   (0...1).contains(lora.conditioningScale) else {
                 throw LTXVideoRuntimeError.invalidLoRAScale(lora.modelID)
             }
-            return WorkerRequest.LoRA(
-                path: lora.localURL.path,
-                scale: lora.scale,
-                conditioningScale: lora.conditioningScale
-            )
         }
     }
 
@@ -424,7 +427,7 @@ public enum LTXVideoRuntimeError: LocalizedError, Sendable {
         case .unsupportedImageConditioning:
             "目前 LTX Swift Worker 尚未提供 image conditioning；未退回其他 Runtime。"
         case .unsupportedLoRA:
-            "目前 LTX Swift Worker 尚未提供 LoRA fusion；未退回其他 Runtime。"
+            "目前僅 LTX-2.3 MLX／GGUF 文生影支援一般 Linear LoRA；請使用相容的鏡頭或風格 LoRA。"
         case let .workerNotFound(paths):
             "找不到 LTX Swift Runtime Worker。請重新建置 App，或設定 GENIMAGE_LTX_WORKER；已檢查：\(paths.joined(separator: "、"))"
         case let .runtimeFailed(status, message):

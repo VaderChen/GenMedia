@@ -108,3 +108,45 @@ node --test Tests/WebUI/*.test.mjs
 - 日誌：`genimage-media-reproduction.log`、`genimage-media-final-build.log`、`genimage-media-final-tests.log`。成功後移除本輪 `.bak` 與測試副本，保留其他備份。
 
 此輪未測量真實模型推論速度或峰值 RAM，也未執行完整 WebKit 操作、磁碟斷線／重連及 Release App／DMG 發佈。媒體檔案操作仍同步執行；本輪重點是檔案與參照一致性，沒有宣稱所有磁碟操作已離開 MainActor。
+
+
+## 2026-10-03 檔案讀取與 Qwen 2.1 固定資料重用
+
+本次保持 UI、操作方式、生成參數、模型精度與功能不變，沒有修改 WebUI 資源。
+
+- WAV 資訊改以 `FileHandle` 讀取 RIFF／chunk 標頭及 16 bytes 的格式資料，跳過音訊與未知 chunk，不再載入整份 WAV。保留原有 chunk 順序、奇數長度 padding、最後有效 fmt/data 優先及不完整尾端的處理方式。
+- 原始圖片與其他非影音預覽使用與影音共用的分段傳送，每段至多 512 KiB，等待主執行緒接收後才讀下一段；每段釋放 Foundation 暫存物件，取消後停止讀取與回呼。MIME、完整內容、縮圖快取及影音 Range 行為保持不變。這限制的是原生傳送端的暫存，WebKit 仍需要圖片解碼及顯示記憶體。
+- Qwen-Image 2.1 在每張圖片開始去噪前，準備文字投影、索引、RoPE cos/sin 與時間頻率，供同張圖片的後續步驟重用。RoPE 的固定分母只計算一次。latents、時間嵌入、調制、注意力與 Euler 更新仍逐步計算；保留 BF16／FP32 運算順序與每步 MLX 快取清理。準備資料隨去噪階段結束釋放，不跨工作保存。
+
+### WAV 記憶體量測
+
+以修改前後的實際解析函式建立獨立 Swift `-O` 程序，讀取相同 256 MiB PCM WAV，用 `/usr/bin/time -l` 記錄：
+
+| 指標 | 修改前 | 修改後 |
+| --- | ---: | ---: |
+| 最大 RSS | 274,563,072 bytes（261.84 MiB） | 6,127,616 bytes（5.84 MiB） |
+| Peak memory footprint | 270,582,408 bytes | 1,950,152 bytes |
+| 解析結果 | 48,000 Hz、2 聲道、1398.1013333333333 秒 | 完全相同 |
+
+這是 WAV 資訊解析的單次合成測試，不代表整個 App 或模型推論的記憶體降幅。
+
+### 小尺寸實際生成比對
+
+使用已安裝的 Qwen-Image 2.1 MLX 4-bit 模型、256×256、seed 42：
+
+- 文生圖：20 步，提示詞 `A red apple on a white table, studio photograph.`，修改前後 PNG SHA-256 均為 `2336b785ffa68663249b92d556e45beb8f6ec0ef8c7f34dcbfddd4197ba9af42`。
+- 圖像編輯：以上述文生圖作為輸入，3 步，提示詞 `Make the apple green.`，修改前後 PNG SHA-256 均為 `46a370da84fc8b196d29ea0859df163ce45dbf05fd0a42f2085a279ff1e0f7ae`。此案例驗證執行與輸出一致性，不用於評估編輯品質。
+- 兩個案例的輸出檔案均逐位元組相同。觀察到的單次總時間差距很小，且修改後執行期間另有編譯工作，未據此宣稱整體推論速度或模型峰值記憶體有明顯改善。
+
+量測請求、日誌、解析函式量測來源與圖片保存在本機 `Outputs/performance-2026-10-03/`（Git 忽略）。
+
+
+### 編譯與回歸測試
+
+- 根套件 Debug 及測試目標編譯成功（`swift build --build-system native --build-tests -j 4`）；`GenImage` 與 `GenImageQwen21Worker` 的 Release 產品以預設建置後端各自編譯成功。
+- 相關 **21 項測試、6 個 suite 全部通過**，指令為 `swift test --build-system native --skip-build --no-parallel -j 4 --filter 'AudioOutputEncoderTests|AssetSchemeHandlerTests|QwenImage21RuntimeTests'`。測試時提供本次編譯的 MLX Metal library，驗證後移除根目錄的暫存副本。
+- 新增驗證涵蓋 PCM／float WAV、延伸 fmt、chunk 順序與 padding、重複有效 chunk、512 MiB 稀疏音訊、損壞及空資料；原始圖片完整 bytes、512 KiB 傳送上限、回應後／首段後取消；Qwen 獨立 attention oracle，以及同一準備資料跨不同 sigma／latents 重用的輸出一致性。
+- **完整套件測試未全部完成**：既有 `WarmRuntimeWorkerTests.reusesProcessAndUnloadsAfterIdle` 遇到 60 秒逾時，取樣顯示卡在 Foundation `Process.waitUntilExit()`；Runtime 分組重試也在 `Qwen21ServiceTests.workerProtocolPreservesLinksAndCleansFailedBatches` 的程序等待停住。原因尚未確認，本次沒有修改這些程序管理程式，不將相關測試記為通過。已停止本次卡住的測試行程，保留日誌與堆疊取樣供後續追查。
+- `git diff --check` 通過；WebUI、操作參數與模型設定檔均未修改。本次 `.bak`、舊編譯快取備份與大型合成測試檔在驗證後移除。
+
+主要日誌：`test-native-final-build.log`、`tests-targeted.log`、`app-release-build.log`、`qwen-final-build.log`、`tests-final.log`、`tests-runtime.log`，以及兩份 `*-sample.txt`，皆位於前述本機量測目錄。

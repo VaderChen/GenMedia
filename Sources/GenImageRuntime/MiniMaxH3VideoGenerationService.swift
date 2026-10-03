@@ -99,9 +99,9 @@ public final class MiniMaxH3VideoGenerationService: VideoGenerating, Sendable {
             }
             inputImageURL = nil
         }
-        guard request.profileLoRAs.isEmpty else {
-            throw MiniMaxH3VideoRuntimeError.unsupportedLoRA
-        }
+        let acceleration = try Self.validatedAcceleration(
+            request.profileLoRAs, modelID: request.profile.modelID,
+            capability: request.profile.capability, steps: request.options.steps)
 
         let modelFiles = try Self.modelFiles(
             for: request.profile.modelID,
@@ -159,6 +159,8 @@ public final class MiniMaxH3VideoGenerationService: VideoGenerating, Sendable {
                 frameRate: request.options.frameRate,
                 seed: request.options.seed &+ UInt64(index),
                 steps: request.options.steps,
+                loras: request.profileLoRAs.map { .init(path: $0.localURL.path, scale: $0.scale) },
+                acceleration: acceleration,
                 keyframes: inputImageURL.map {
                     [WorkerRequest.Keyframe(frameIndex: 0, imagePath: $0.path)]
                 } ?? [],
@@ -225,8 +227,36 @@ public final class MiniMaxH3VideoGenerationService: VideoGenerating, Sendable {
         return outputs
     }
 
+    static func validatedAcceleration(
+        _ loras: [VideoGenerationLoRA], modelID: String,
+        capability: ModelCapability, steps: Int
+    ) throws -> MiniMaxH3Acceleration? {
+        guard !loras.isEmpty else { return nil }
+        guard loras.count == 1, let lora = loras.first,
+              let entry = LoRACatalog.entry(for: lora.modelID),
+              let acceleration = entry.h3Acceleration,
+              entry.supports(modelID: modelID, capability: capability) else {
+            throw MiniMaxH3VideoRuntimeError.unsupportedLoRA
+        }
+        guard acceleration.allowedSteps.contains(steps) else {
+            throw MiniMaxH3VideoRuntimeError.invalidLoRA("此加速 LoRA 需使用 \(acceleration.allowedSteps) 步。")
+        }
+        guard lora.conditioning == nil, lora.conditioningScale == 1,
+              lora.scale.isFinite, lora.scale > 0, lora.scale <= 1 else {
+            throw MiniMaxH3VideoRuntimeError.invalidLoRA("加速 LoRA 權重需大於 0 且不超過 1，建議使用 1；不支援額外條件控制。")
+        }
+        guard FileManager.default.fileExists(atPath: lora.localURL.path) else {
+            throw MiniMaxH3VideoRuntimeError.invalidLoRA("找不到權重檔案：\(lora.localURL.path)")
+        }
+        return acceleration
+    }
+
     /// Mirrors `MiniMaxH3RequestProtocol.Request` in the worker.
     private struct WorkerRequest: Encodable {
+        struct LoRA: Encodable {
+            let path: String
+            let scale: Double
+        }
         struct Keyframe: Encodable {
             var frameIndex: Int
             var imagePath: String
@@ -241,6 +271,8 @@ public final class MiniMaxH3VideoGenerationService: VideoGenerating, Sendable {
         var frameRate: Int
         var seed: UInt64
         var steps: Int
+        var loras: [LoRA]
+        var acceleration: MiniMaxH3Acceleration?
         var keyframes: [Keyframe]
         var transformerPath: String?
         var videoVAEPath: String?
@@ -433,6 +465,7 @@ public enum MiniMaxH3VideoRuntimeError: LocalizedError, Sendable {
     case unsupportedArchitecture(InferenceArchitecture)
     case unsupportedModel(String)
     case unsupportedLoRA
+    case invalidLoRA(String)
     case modelNotInstalled(URL)
     case workerNotFound([String])
     case runtimeFailed(status: Int32, message: String)
@@ -451,8 +484,10 @@ public enum MiniMaxH3VideoRuntimeError: LocalizedError, Sendable {
             "MiniMax H3 Worker 不支援此架構：\(architecture.title)。"
         case let .unsupportedModel(modelID):
             "目前 MiniMax H3 Swift Runtime 尚不支援模型：\(modelID)。"
+        case let .invalidLoRA(reason):
+            "H3 LoRA：\(reason)"
         case .unsupportedLoRA:
-            "MiniMax H3 Swift Worker 尚未提供 LoRA fusion。"
+            "此 LoRA 與所選 H3 Profile 不相容；請使用模型中心提供的 FL2VA 低步數加速組合。"
         case let .modelNotInstalled(url):
             "MiniMax H3 模型或配套檔案尚未完整安裝：\(url.path)"
         case let .workerNotFound(paths):

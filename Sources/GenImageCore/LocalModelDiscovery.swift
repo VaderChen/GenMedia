@@ -1137,7 +1137,7 @@ public enum LocalModelDiscovery {
                         conditioningScale: 1
                     )
                 ],
-                notes: "從 \(directory.path) 自動偵測；文字生影由原生 Swift Worker 執行，image conditioning 與 LoRA fusion 尚未支援，建議 48GB 以上記憶體。",
+                notes: "從 \(directory.path) 自動偵測；文字生影由原生 Swift Worker 執行，已支援一般 Linear LoRA；image conditioning 尚未支援，建議 48GB 以上記憶體。",
                 isBuiltIn: true
             )
         )
@@ -1511,6 +1511,14 @@ public enum LocalModelDiscovery {
                     licenseName: "本機檔案（請自行確認授權）",
                     localURL: normalizedURL
                 )
+                continue
+            }
+            if let entry = LoRACatalog.entry(for: manifest.modelID) {
+                discovered[id]?.displayName = entry.displayName
+                discovered[id]?.compatibleCapabilities = [entry.capability]
+                var descriptor = entry.descriptor
+                descriptor.localURL = normalizedURL
+                managedModels[entry.id] = descriptor
                 continue
             }
             switch manifest.modelID {

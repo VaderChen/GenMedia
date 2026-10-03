@@ -89,7 +89,7 @@ struct WorkflowGraphTests {
             expectedGGUFModelIDs.contains($0.modelID)
         }
         #expect(Set(ggufProfiles.map(\.modelID)) == expectedGGUFModelIDs)
-        #expect(ggufProfiles.count == expectedGGUFModelIDs.count * 2)
+        #expect(ggufProfiles.filter { $0.loras.isEmpty }.count == expectedGGUFModelIDs.count * 2)
         for modelID in expectedGGUFModelIDs {
             let capabilities = Set(
                 ggufProfiles.filter { $0.modelID == modelID }.map(\.capability)

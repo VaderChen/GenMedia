@@ -50,11 +50,12 @@ public enum Qwen21Pipeline {
                                 conditioning: Qwen21Conditioning, reference: MLXArray?, layout: Qwen21Layout,
                                 sigmas: [Float], progress: (Int) -> Void) throws -> MLXArray {
         let transformer = try Qwen21Transformer(directory: root.appendingPathComponent("transformer"))
+        let prepared = try transformer.prepare(conditioning: conditioning.hidden, layout: layout)
         var x = MLXRandom.normal([1, request.height * request.width / 256, 64], key: MLXRandom.key(seed)).asType(.bfloat16)
         for step in 0..<request.steps {
             try Task.checkCancellation()
             let input = reference.map { concatenated([$0, x], axis: 1) } ?? x
-            let velocity = try transformer(latents: input, conditioning: conditioning.hidden, sigma: sigmas[step], layout: layout)
+            let velocity = try transformer(latents: input, sigma: sigmas[step], prepared: prepared)
             // Euler accumulation in fp32, then restore model precision.
             x = (x.asType(.float32) + velocity.asType(.float32) * (sigmas[step + 1] - sigmas[step])).asType(.bfloat16)
             eval(x)

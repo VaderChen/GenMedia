@@ -710,6 +710,11 @@ public actor HuggingFaceModelInstaller {
     }
 
     private nonisolated static func plan(for modelID: String) -> InstallPlan? {
+        if let entry = LoRACatalog.entry(for: modelID) {
+            return InstallPlan(directoryName: entry.directoryName, runtimeRelativePath: entry.filename,
+                sources: [SourcePlan(repository: entry.repository, revision: entry.revision,
+                    destinationSubdirectory: "", prefixes: [], exactFiles: [entry.filename, "README.md"])])
+        }
         let officialFiles: Set<String> = ["model_index.json"]
         let officialPrefixes = [
             "processor/", "scheduler/", "text_encoder/", "tokenizer/", "transformer/", "vae/"

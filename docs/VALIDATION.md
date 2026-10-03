@@ -1,8 +1,23 @@
 # 驗證方式與結果
 
-最近更新：2026-09-23。本文記錄可重複執行的檢查，以及各次結果的實際範圍。
+最近更新：2026-10-03。本文記錄可重複執行的檢查，以及各次結果的實際範圍。
 
-## 最新結果
+## 最新結果（1.26.1003）
+
+| 範圍 | 結果 | 說明 |
+| --- | --- | --- |
+| 根套件 Debug／測試目標 | 編譯通過 | 目前工具鏈使用 `--build-system native` 編譯測試 |
+| LoRA／Profile／模型目錄相關回歸 | 82 項通過 | 含 H3 步數、基底相容性、錯誤請求、下載驗證與 Profile 合併；實際下載測試另行執行 |
+| 記憶體最佳化相關回歸 | 21 項通過 | WAV 標頭讀取、原圖分段傳送、Qwen 2.1 固定資料重用 |
+| H3 Runtime 回歸 | 29 項通過 | LoRA 數值、Dense／INT8、alpha/rank、排程、基底結構與量化；實際權重另行測試 |
+| 小尺寸實際文生圖／編輯 | 通過限定案例 | 256×256 Qwen 2.1 文生圖／編輯在最佳化前後輸出完全相同；Z-Image LoRA 套用／清除與連續生成通過 |
+| 影片 LoRA 載入 | 層級驗證通過 | LTX Dolly In 480 層、H3 LightX2V 8 步 208 層、Turbo v4 259 層；不代表完整影片生成品質 |
+| 完整根套件測試 | 未全部完成 | 既有兩項程序等待測試停住，詳見效能紀錄；沒有以舊版完整通過數量代表本版 |
+| 1.26.1003 安裝包 | 簽章、公證及 Gatekeeper 通過 | App／DMG 均 Accepted、Staple；複製回專案及唯讀掛載後再次驗證 |
+
+各組測試的範圍不同且部分重疊，數量不相加。影片 LoRA 的完整影片品質與整段加速倍率尚未驗證。H3 4 步版本次只核對公開權重標頭與採樣規格；8 步版與 Turbo v4 則實際下載完整 LoRA 並檢查非零、有限的殘差。詳見 [LoRA 指南](LORAS.md) 與 [效能紀錄](PERFORMANCE_CHANGES.md)。
+
+## 2026-09-22～23 歷史結果（1.26.0922）
 
 | 範圍 | 結果 | 說明 |
 | --- | --- | --- |
@@ -22,11 +37,11 @@
 在專案根目錄執行：
 
 ```sh
-swift build --build-tests -j 4
-swift test --skip-build -j 4
+swift build -c release --product GenImage
+swift build --build-system native --build-tests -j 4
 ```
 
-MLX 測試需要與目前相依版本匹配的 Metal library。此次 Swift 6.4 使用的 SwiftPM 建置方式將 library 輸出到以下位置；若測試無法找到它，可在測試期間放到套件根目錄，完成後移除該暫存副本：
+MLX 測試需要與目前相依版本匹配的 Metal library。本次測試使用原生建置後端，Metal library 則由 Release 建置產生；若測試無法找到它，可在測試期間放到套件根目錄，完成後移除該暫存副本：
 
 ```sh
 (
@@ -34,15 +49,16 @@ MLX 測試需要與目前相依版本匹配的 Metal library。此次 Swift 6.4 
     echo "default.metallib 已存在；請先確認其來源，不自動覆蓋。" >&2
     exit 1
   fi
-  cp .build/out/Products/Debug/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib ./default.metallib || exit 1
+  cp .build/out/Products/Release/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib ./default.metallib || exit 1
   trap 'rm -f ./default.metallib' EXIT
-  swift test --skip-build -j 4
+  swift test --build-system native --skip-build -j 4 \
+    --filter 'GenImageCoreTests|LoRAIntegrationTests|ZImageLoRAAdapterNormalizerTests|LoRAProfileTests|MiniMaxH3AccelerationTests|Qwen21ProfileCompatibilityTests'
 )
 ```
 
 其他 SwiftPM 版本或建置後端的輸出位置可能不同。請使用本次建置產生的 library，不要覆蓋既有的自訂檔案，也不要將額外檔案放進已簽章的 `.xctest/Contents/MacOS/`；這會影響 bundle 簽章驗證。
 
-本輪完整驗證在內部 APFS 暫存副本進行，來源、測試、資源與套件設定共 183 個檔案均與專案逐檔一致。原 ExFAT 工作區的 AppleDouble 中繼資料曾影響簽章；正式建置腳本不再提供外接磁碟專用的中繼資料清理流程。測試副本不包含模型權重；Qwen-Image 2.1 實跑另讀取專案 Models 下的固定 revision 權重。
+1.26.0922 的完整驗證在內部 APFS 暫存副本進行，來源、測試、資源與套件設定共 183 個檔案均與專案逐檔一致。原 ExFAT 工作區的 AppleDouble 中繼資料曾影響簽章；正式建置腳本不再提供外接磁碟專用的中繼資料清理流程。測試副本不包含模型權重；Qwen-Image 2.1 實跑另讀取專案 Models 下的固定 revision 權重。
 
 ## 維護腳本與 Web UI
 
@@ -60,7 +76,7 @@ git diff --check
 
 新增 4 項回歸測試，涵蓋連續兩次完成後再生成、編輯完成後繼續、執行／取消／失敗狀態、來源圖片與模型安裝限制。測試使用 256×256 的模擬狀態，驗證實際介面渲染與活動狀態合併，未執行模型推論。另以 WKWebView 載入實際 JS／CSS，確認繁中、英、日、韓四種語言在 584 與 946 px 面板寬度下，圖生文、文生圖、圖生圖按鈕均可用且不被裁切；窄面板會自動換行。
 
-## 這次涵蓋的回歸案例
+## 1.26.0922 涵蓋的回歸案例
 
 - Profile 的 64 GB 可見性邊界、自訂 Profile 保存與工作區讀取失敗保護。
 - 模型掃描的過期結果、同模型取消清理順序、目錄切換等待移除完成。
@@ -72,7 +88,7 @@ git diff --check
 
 ## 限制
 
-此次沒有執行所有真實模型的完整推論、完整 WebKit 操作、長時間磁碟斷線／重連、Release App／DMG 簽署公證或發佈。
+尚未驗證所有真實模型的完整推論、所有 WebKit 操作與長時間磁碟斷線／重連。安裝包的簽署公證與發佈結果依版本記錄於下方，不以程式編譯或單元測試代替。
 
 256 MiB 合成 LoRA 轉換的最大 RSS 約由 521 MiB 降到 11.6 MiB，僅代表該次格式轉換，不能當成整個 App 或模型推論的記憶體／速度提升。原始方法及數值見[量測紀錄](PERFORMANCE_CHANGES.md#合成記憶體量測)。
 
@@ -150,3 +166,19 @@ git diff --check
 - DMG 公證 ID：`0b5c7965-a081-4b40-81e0-e82c0e8ec3fe`。
 
 最終 DMG SHA-256：`bf2d839ad9803da300f54387f57b42fda9cfef7e74255c8cd5d069f93fa51b03`。本機建置、測試及安裝包日誌位於 `Outputs/release-1.26.0922`（不納入 Git）。
+
+
+## 1.26.1003 安裝包（2026-10-03）
+
+版本 `1.26.1003`、Build `1236`。完整執行 Release 打包，根套件四個出貨產品與五個獨立生成 Worker 均建置成功，並驗證 Runtime patch 清單。安裝包包含圖片風格、影片鏡頭、H3 低步數 LoRA 與記憶體最佳化的原始碼版本；模型權重不包含於 App。
+
+App／DMG 在內部 APFS 製作，兩次 Apple 公證均為 **Accepted**，票據附加與驗證成功。DMG 複製至專案 `dist/` 後逐位元組雜湊一致，通過磁碟映像完整性、簽章、票據及 Gatekeeper 檢查；再以唯讀方式掛載，核對 App 版本與 Build，並驗證內含 App 的簽章、票據及 Gatekeeper。主程式與 7 個 Helper 的 Developer ID Team、hardened runtime、secure timestamp 均符合。未將未公證或驗證失敗的檔案列為發布資產。
+
+- App 公證 ID：`e05bf83e-77ce-49ec-a1dc-3aab6b3493af`。
+- DMG 公證 ID：`cf591ddf-8c8a-474d-8596-4e64d0dd8409`。
+- DMG：`GenMedia-1.26.1003-arm64.dmg`，214,612,336 bytes。
+- SHA-256：`f2a9eedf21b34374b0c8565f9873cc3ac733f6b3e8d5705fb86c03634615d5b8`。
+
+打包後另以 256×256、4 幀的無模型請求檢查 H3 Helper，確認能識別新 LoRA 協定並在步數不符時回報錯誤；此項沒有生成影片。新的 LoRA 數值、採樣與小尺寸生成驗證依本文最新結果及 [LoRA 指南](LORAS.md) 的範圍為準。
+
+本機日誌、來源雜湊、公證狀態及掛載驗證紀錄位於 `Outputs/release-1.26.1003/`（不納入 Git）。本版未重新執行完整根套件測試，既有程序等待案例的限制維持公開記錄。

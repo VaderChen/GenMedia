@@ -132,11 +132,23 @@ struct Qwen21Tests {
             let edit = item.slots.contains(true)
             let layout = try Qwen21Layout(imageSlots: item.slots, referenceHeight: edit ? 2 : nil,
                 referenceWidth: edit ? 2 : nil, height: 2, width: 2)
-            let actual = try model(latents: MLXArray(item.latents).reshaped([1, edit ? 8 : 4, 64]),
-                conditioning: MLXArray(item.conditioning).reshaped([1, 4, 8]), sigma: 0.7, layout: layout)
+            let conditioning = MLXArray(item.conditioning).reshaped([1, 4, 8])
+            let latents = MLXArray(item.latents).reshaped([1, edit ? 8 : 4, 64])
+            let prepared = try model.prepare(conditioning: conditioning, layout: layout)
+            let actual = try model(latents: latents, sigma: 0.7, prepared: prepared)
             let expected = MLXArray(item.expected).reshaped([1, 4, 64])
             // Production uses BF16 in the joint stream; the independent oracle uses fp32/fp64.
             #expect(max(abs(actual.asType(.float32) - expected)).item(Float.self) < 0.02)
+            // Reusing a context must not retain step-dependent latents or timestep values.
+            for sigma in [Float(0.3), 0.7] {
+                let nextLatents = latents * sigma
+                let reused = try model(latents: nextLatents, sigma: sigma, prepared: prepared)
+                let fresh = try model(latents: nextLatents, sigma: sigma,
+                    prepared: model.prepare(conditioning: conditioning, layout: layout))
+                #expect(reused.asArray(Float.self) == fresh.asArray(Float.self))
+            }
+            let repeated = try model(latents: latents, sigma: 0.7, prepared: prepared)
+            #expect(repeated.asArray(Float.self) == actual.asArray(Float.self))
         }
     }
 }

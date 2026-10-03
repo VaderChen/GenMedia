@@ -115,6 +115,10 @@ extension AppStore {
         }
 
         for configuration in profile.loras {
+            if let entry = LoRACatalog.entry(for: configuration.modelID),
+               !entry.supports(modelID: profile.modelID, capability: profile.capability) {
+                return "Profile「\(profile.name)」與 LoRA「\(entry.displayName)」的基底模型不相容。"
+            }
             guard let loraModel = models.first(where: { $0.id == configuration.modelID }),
                   let loraURL = loraModel.localURL else {
                 return "Profile「\(profile.name)」找不到 LoRA「\(configuration.modelID)」。"
