@@ -29,6 +29,18 @@ struct WebAsset: Encodable {
     let sidecarSubtitleFormat: SubtitleFormat?
 
     init(asset: MediaAsset, subtitleAssets: [MediaAsset] = []) {
+        self.init(asset: asset, sidecar: Self.sidecar(for: asset) {
+            SubtitleSidecarResolver.locate(for: asset, among: subtitleAssets)
+        })
+    }
+
+    init(asset: MediaAsset, subtitleLookup: inout SubtitleSidecarResolver.Lookup) {
+        self.init(asset: asset, sidecar: Self.sidecar(for: asset) {
+            subtitleLookup.locate(for: asset)
+        })
+    }
+
+    private init(asset: MediaAsset, sidecar: SubtitleSidecar?) {
         id = asset.id
         parentAssetID = asset.parentAssetID
         kind = asset.kind
@@ -50,7 +62,6 @@ struct WebAsset: Encodable {
         thumbnailURL = asset.kind.isImage && asset.fileURL != nil
             ? "genimage-asset://\(asset.id.uuidString)/thumbnail"
             : nil
-        let sidecar = Self.sidecar(for: asset, subtitleAssets: subtitleAssets)
         subtitleURL = sidecar == nil
             ? nil
             : "genimage-asset://\((sidecar?.assetID ?? asset.id).uuidString)/subtitle"
@@ -59,7 +70,7 @@ struct WebAsset: Encodable {
 
     private static func sidecar(
         for asset: MediaAsset,
-        subtitleAssets: [MediaAsset]
+        resolve: () -> SubtitleSidecar?
     ) -> SubtitleSidecar? {
         guard asset.kind == .importedVideo || asset.kind == .generatedVideo else {
             return nil
@@ -71,7 +82,7 @@ struct WebAsset: Encodable {
                 mediaURL.stopAccessingSecurityScopedResource()
             }
         }
-        return SubtitleSidecarResolver.locate(for: asset, among: subtitleAssets)
+        return resolve()
     }
 
     private static func subtitlePreview(for asset: MediaAsset) -> String? {

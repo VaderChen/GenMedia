@@ -1,6 +1,13 @@
 import MLX
 import MLXNN
 
+public struct LTXPreparedRoPE {
+    public let video: LTXRoPEFrequencies?
+    public let audio: LTXRoPEFrequencies?
+    public let videoCross: LTXRoPEFrequencies?
+    public let audioCross: LTXRoPEFrequencies?
+}
+
 public final class LTXTransformer: Module {
     @ModuleInfo(key: "patchify_proj") public var patchifyProj: Linear
     @ModuleInfo(key: "audio_patchify_proj") public var audioPatchifyProj: Linear
@@ -139,64 +146,12 @@ public final class LTXTransformer: Module {
         return projection(shifted)
     }
 
-    public func callAsFunction(
-        videoLatent: MLXArray,
-        audioLatent: MLXArray,
-        timestep: MLXArray,
-        videoTextEmbeds: MLXArray? = nil,
-        audioTextEmbeds: MLXArray? = nil,
-        videoPositions: MLXArray? = nil,
-        audioPositions: MLXArray? = nil,
-        videoAttentionMask: MLXArray? = nil,
-        audioAttentionMask: MLXArray? = nil,
-        videoCrossAttentionMask: MLXArray? = nil,
-        videoTimesteps: MLXArray? = nil,
-        audioTimesteps: MLXArray? = nil,
-        videoKeyframeMask: MLXArray? = nil
-    ) -> (video: MLXArray, audio: MLXArray) {
-        let videoLatent = videoLatent.asType(.bfloat16)
-        let audioLatent = audioLatent.asType(.bfloat16)
-        let timestep = timestep.asType(.bfloat16)
-        let videoTextEmbeds = videoTextEmbeds?.asType(.bfloat16)
-        let audioTextEmbeds = audioTextEmbeds?.asType(.bfloat16)
-        let videoDType = videoLatent.dtype
-        let audioDType = audioLatent.dtype
-        var videoHidden = patchifyProj(videoLatent)
-        if let keyframesAbsPosEmbedding, let videoKeyframeMask {
-            videoHidden = videoHidden + videoKeyframeMask.asType(videoHidden.dtype) * keyframesAbsPosEmbedding
-        }
-        let audioHidden = audioPatchifyProj(audioLatent)
-        let globalTimestep = timestep.asType(videoDType)
-        let globalEmbedding = LTXTransformerOps.timestepEmbedding(
-            globalTimestep * configuration.timestepScaleMultiplier,
-            dimension: configuration.timestepEmbeddingDim
-        )
-        let gateEmbedding = LTXTransformerOps.timestepEmbedding(
-            timestep.asType(audioDType) * configuration.avCATimestepScaleMultiplier,
-            dimension: configuration.timestepEmbeddingDim
-        )
-
-        let videoTime = timestepParameters(
-            adalnSingle,
-            timesteps: videoTimesteps ?? timestep
-        )
-        let audioTime = timestepParameters(
-            audioAdaLN,
-            timesteps: audioTimesteps ?? timestep
-        )
-        let videoPrompt = promptAdaLN(globalEmbedding)
-        let audioPrompt = audioPromptAdaLN(globalEmbedding)
-        let avVideo = timestepParameters(
-            avVideoAdaLN,
-            timesteps: videoTimesteps ?? timestep
-        )
-        let avAudio = timestepParameters(
-            avAudioAdaLN,
-            timesteps: audioTimesteps ?? timestep
-        )
-        let avA2VGate = avA2VGateAdaLN(gateEmbedding).parameters
-        let avV2AGate = avV2AGateAdaLN(gateEmbedding).parameters
-
+    /// The positions stay fixed within one denoising stage. Keep the tables in
+    /// that call's scope so another request or the refinement stage starts fresh.
+    public func prepareRoPE(
+        videoPositions: MLXArray?,
+        audioPositions: MLXArray?
+    ) -> LTXPreparedRoPE {
         let videoRoPE = videoPositions.map {
             LTXTransformerOps.precomputeRoPE(
                 positions: $0,
@@ -242,6 +197,73 @@ public final class LTXTransformer: Module {
             )
         }
 
+        return LTXPreparedRoPE(video: videoRoPE, audio: audioRoPE,
+            videoCross: videoCrossRoPE, audioCross: audioCrossRoPE)
+    }
+
+    public func callAsFunction(
+        videoLatent: MLXArray,
+        audioLatent: MLXArray,
+        timestep: MLXArray,
+        videoTextEmbeds: MLXArray? = nil,
+        audioTextEmbeds: MLXArray? = nil,
+        videoPositions: MLXArray? = nil,
+        audioPositions: MLXArray? = nil,
+        videoAttentionMask: MLXArray? = nil,
+        audioAttentionMask: MLXArray? = nil,
+        videoCrossAttentionMask: MLXArray? = nil,
+        videoTimesteps: MLXArray? = nil,
+        audioTimesteps: MLXArray? = nil,
+        videoKeyframeMask: MLXArray? = nil,
+        preparedRoPE: LTXPreparedRoPE? = nil
+    ) -> (video: MLXArray, audio: MLXArray) {
+        let videoLatent = videoLatent.asType(.bfloat16)
+        let audioLatent = audioLatent.asType(.bfloat16)
+        let timestep = timestep.asType(.bfloat16)
+        let videoTextEmbeds = videoTextEmbeds?.asType(.bfloat16)
+        let audioTextEmbeds = audioTextEmbeds?.asType(.bfloat16)
+        let videoDType = videoLatent.dtype
+        let audioDType = audioLatent.dtype
+        var videoHidden = patchifyProj(videoLatent)
+        if let keyframesAbsPosEmbedding, let videoKeyframeMask {
+            videoHidden = videoHidden + videoKeyframeMask.asType(videoHidden.dtype) * keyframesAbsPosEmbedding
+        }
+        let audioHidden = audioPatchifyProj(audioLatent)
+        let globalTimestep = timestep.asType(videoDType)
+        let globalEmbedding = LTXTransformerOps.timestepEmbedding(
+            globalTimestep * configuration.timestepScaleMultiplier,
+            dimension: configuration.timestepEmbeddingDim
+        )
+        let gateEmbedding = LTXTransformerOps.timestepEmbedding(
+            timestep.asType(audioDType) * configuration.avCATimestepScaleMultiplier,
+            dimension: configuration.timestepEmbeddingDim
+        )
+
+        let videoTime = timestepParameters(
+            adalnSingle,
+            timesteps: videoTimesteps ?? timestep
+        )
+        let audioTime = timestepParameters(
+            audioAdaLN,
+            timesteps: audioTimesteps ?? timestep
+        )
+        let videoPrompt = promptAdaLN(globalEmbedding)
+        let audioPrompt = audioPromptAdaLN(globalEmbedding)
+        let avVideo = timestepParameters(
+            avVideoAdaLN,
+            timesteps: videoTimesteps ?? timestep
+        )
+        let avAudio = timestepParameters(
+            avAudioAdaLN,
+            timesteps: audioTimesteps ?? timestep
+        )
+        let avA2VGate = avA2VGateAdaLN(gateEmbedding).parameters
+        let avV2AGate = avV2AGateAdaLN(gateEmbedding).parameters
+
+        let rotary = preparedRoPE ?? prepareRoPE(
+            videoPositions: videoPositions, audioPositions: audioPositions
+        )
+
         var currentVideo = videoHidden
         var currentAudio = audioHidden
         for block in transformerBlocks {
@@ -258,10 +280,10 @@ public final class LTXTransformer: Module {
                 avV2AGate: avV2AGate,
                 videoText: videoTextEmbeds,
                 audioText: audioTextEmbeds,
-                videoRoPE: videoRoPE,
-                audioRoPE: audioRoPE,
-                videoCrossRoPE: videoCrossRoPE,
-                audioCrossRoPE: audioCrossRoPE,
+                videoRoPE: rotary.video,
+                audioRoPE: rotary.audio,
+                videoCrossRoPE: rotary.videoCross,
+                audioCrossRoPE: rotary.audioCross,
                 videoMask: videoAttentionMask,
                 audioMask: audioAttentionMask,
                 videoCrossMask: videoCrossAttentionMask
@@ -293,7 +315,8 @@ public final class LTXX0Model {
         audioPositions: MLXArray? = nil,
         videoAttentionMask: MLXArray? = nil,
         audioAttentionMask: MLXArray? = nil,
-        videoKeyframeMask: MLXArray? = nil
+        videoKeyframeMask: MLXArray? = nil,
+        preparedRoPE: LTXPreparedRoPE? = nil
     ) -> (video: MLXArray, audio: MLXArray) {
         let velocity = transformer(
             videoLatent: videoLatent,
@@ -305,7 +328,8 @@ public final class LTXX0Model {
             audioPositions: audioPositions,
             videoAttentionMask: videoAttentionMask,
             audioAttentionMask: audioAttentionMask,
-            videoKeyframeMask: videoKeyframeMask
+            videoKeyframeMask: videoKeyframeMask,
+            preparedRoPE: preparedRoPE
         )
         let videoSigma = sigma[0..., .newAxis, .newAxis]
         let audioSigma = sigma[0..., .newAxis, .newAxis]

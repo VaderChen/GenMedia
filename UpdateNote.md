@@ -6,6 +6,18 @@
 
 尚無新的變更。
 
+## 1.26.1003 build 2312 — 2026-10-03
+
+本版提供已完成 Apple 公證與 Gatekeeper 驗證的 Apple Silicon 安裝包。
+
+- **大量素材與 Profile 更流暢**：加快多部影片的字幕對應，以及模型／LoRA Profile 清單的產生，維持原有排序、按鈕與操作方式。
+- **減少載入與生成的重複工作**：加快 GGUF 權重解碼及生成進度處理，LTX 文生影在同一階段重用固定資料；生成設定、模型精度與既有功能不變。
+- **版本更容易辨識**：使用 `1.YY.MMDD build HHmm`，同日不同 Build 可正常檢查更新；Release Tag 與安裝包檔名也包含 Build。
+
+本輪完成小型數值回歸與函式量測；數字不代表完整生成的加速倍率，H3 兩項既有 VAE 測試失敗仍保留追蹤。詳見[效能紀錄](docs/PERFORMANCE_CHANGES.md)。
+
+[下載 1.26.1003 build 2312 與中英文版本說明](https://github.com/VaderChen/GenMedia/releases/tag/v1.26.1003-build.2312)。未附 Build 的舊版 `1.26.1003`／`1.26.1004` 請手動下載此次更新。
+
 ## 1.26.1004 — 2026-10-03
 
 本版提供已完成 Apple 公證與 Gatekeeper 驗證的 Apple Silicon 安裝包。

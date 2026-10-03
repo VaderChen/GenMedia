@@ -146,7 +146,8 @@ final class HybridBridgeController: NSObject, ObservableObject {
         }
         let projectAssets = store.projectAssets
         if projectedAssets != projectAssets {
-            cachedWebAssets = projectAssets.map { WebAsset(asset: $0, subtitleAssets: projectAssets) }
+            var subtitleLookup = SubtitleSidecarResolver.Lookup(assets: projectAssets)
+            cachedWebAssets = projectAssets.map { WebAsset(asset: $0, subtitleLookup: &subtitleLookup) }
             projectedAssets = projectAssets
         }
 

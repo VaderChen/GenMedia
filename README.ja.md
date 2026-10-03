@@ -12,6 +12,19 @@ GenMedia は **Apple Silicon をネイティブサポート**するローカル 
 - 専用の設定画面で繁体字中国語、英語、日本語、韓国語、および永続化可能な 6 種類のカラーテーマを利用できます。
 - 設定画面のスイッチで localhost 専用 MCP HTTP API を起動でき、App を起動していない場合も独立した JSON-RPC 2.0 stdio サーバーを利用できます。
 
+## 1.26.1003 build 2312 の改善内容
+
+- **Profile 一覧をより快適に**：モデルと LoRA の一覧表示を高速化し、並び順、インストール状態、操作ボタンを維持します。
+- **動画の字幕をすばやく準備**：複数の動画で字幕を探す重複処理を減らし、従来の対応付けルールを維持します。
+- **読み込みと生成の重複処理を削減**：GGUF の重み処理と進捗の読み取りを高速化し、LTX は同じ生成段階で固定の位置データを再利用します。
+- **同日の更新を区別**：バージョンは `1.YY.MMDD build HHmm` 形式となり、更新確認でも同日の Build を比較します。
+
+UI、操作、生成設定、モデルの精度は変わりません。関数単位の測定結果であり、生成全体の速度や大型モデルのメモリ要件の改善を保証するものではありません。測定範囲と既知の H3 制限は検証記録を参照してください。
+
+[1.26.1003 build 2312 のダウンロードと中英リリースノート](https://github.com/VaderChen/GenMedia/releases/tag/v1.26.1003-build.2312) · [検証記録](docs/VALIDATION.md) · [性能記録](docs/PERFORMANCE_CHANGES.md)（記録は繁体字中国語）
+
+Build 表記のない旧版 `1.26.1003` または `1.26.1004` をご利用の場合は、日付と Build による番号へ移行するため、今回の更新を一度手動でダウンロードしてください。
+
 ## 1.26.1004 の新機能と改善
 
 - **Qwen 2.1 Turbo**：Viggle v0.3 による 6 ステップの画像生成と単一画像編集。
@@ -64,9 +77,11 @@ GenMedia は **Apple Silicon をネイティブサポート**するローカル 
 # App bundle を作成せずに増分 Release ビルドのみ実行
 ./build.command --no-app
 
-# バージョンと Bundle ID を指定
-GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
+# 日付バージョンと Build を指定
+GENIMAGE_VERSION=1.26.1003 GENIMAGE_BUILD_NUMBER=2312 ./build.command
 ```
+
+バージョン表示は `1.YY.MMDD build HHmm` で、既定ではビルド環境のローカル日付と 24 時間形式を使用します。Git Tag は空白を含まない `v1.YY.MMDD-build.HHmm`、DMG は `GenMedia-1.YY.MMDD-build.HHmm-arm64.dmg` です。
 
 `run.command` は自動的に `--no-app` を使用するため、日常の起動で App bundle を繰り返し生成しません。配布用 DMG は、Developer ID Application 署名、Apple の公証、Staple、Gatekeeper 検証を行う別のローカルフローで処理します。
 

@@ -12,6 +12,19 @@ GenMedia is a local AI media generation app with **native Apple Silicon support*
 - A dedicated settings page supports Traditional Chinese, English, Japanese, Korean, and six persistent color themes.
 - Settings provides a switch for a localhost-only MCP HTTP API, while a standalone JSON-RPC 2.0 stdio server remains available when the app is not running.
 
+## Improvements in 1.26.1003 build 2312
+
+- **Smoother Profile browsing**: Faster model and LoRA lists, preserving their order, installation status, and existing controls.
+- **Video subtitles ready sooner**: Less repeated subtitle searching when working with multiple videos, with the same matching rules.
+- **Less repeated work during loading and generation**: Faster GGUF weight processing and progress reading; LTX reuses fixed position data within each generation stage.
+- **Clearer updates within a day**: Versions use `1.YY.MMDD build HHmm`, and update checks compare builds from the same date.
+
+The UI, controls, generation settings, and model precision stay the same. Function benchmarks show improvements in these paths; they do not measure total generation speed or reduce large-model memory requirements. See the validation record for measurements and known H3 limitations.
+
+[Download 1.26.1003 build 2312 and bilingual release notes](https://github.com/VaderChen/GenMedia/releases/tag/v1.26.1003-build.2312) · [Validation record](docs/VALIDATION.md) · [Performance record](docs/PERFORMANCE_CHANGES.md) (records in Traditional Chinese)
+
+If you use the legacy `1.26.1003` or `1.26.1004` release without a Build suffix, download this update manually once to switch to date-and-build versioning.
+
 ## What's new in 1.26.1004
 
 - **Qwen 2.1 Turbo**: Viggle v0.3 adds 6-step text-to-image and single-image editing through the existing controls.
@@ -64,9 +77,11 @@ Requirements: Apple Silicon; the package deployment target starts at macOS 14. B
 # Incremental release build without creating the app bundle
 ./build.command --no-app
 
-# Set the version and bundle identifier
-GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
+# Set the date version and build
+GENIMAGE_VERSION=1.26.1003 GENIMAGE_BUILD_NUMBER=2312 ./build.command
 ```
+
+Versions display as `1.YY.MMDD build HHmm`, using the build machine’s local date and 24-hour time by default. Git tags use `v1.YY.MMDD-build.HHmm` without spaces; installers use `GenMedia-1.YY.MMDD-build.HHmm-arm64.dmg`.
 
 `run.command` automatically uses `--no-app`, so normal development runs do not repeatedly create the app bundle. Release DMGs are handled by a separate local workflow with Developer ID Application signing, Apple notarization, stapling, and Gatekeeper verification.
 

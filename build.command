@@ -476,19 +476,20 @@ cp "$METALLIB_SOURCE" "$METALLIB_TARGET"
 if [[ "$PACKAGE_APP" == true ]]; then
   APP_NAME="GenMedia"
   APP_DISPLAY_NAME="${GENIMAGE_DISPLAY_NAME:-GenMedia}"
-  APP_VERSION="${GENIMAGE_VERSION:-$(date '+1.%y.%m%d')}"
+  DEFAULT_VERSION_BUILD="$(date '+1.%y.%m%d %H%M')"
+  APP_VERSION="${GENIMAGE_VERSION:-${DEFAULT_VERSION_BUILD% *}}"
   BUNDLE_ID="${GENIMAGE_BUNDLE_ID:-com.vader.genimage}"
-  BUILD_NUMBER="${GENIMAGE_BUILD_NUMBER:-$(date '+%H%M')}"
+  BUILD_NUMBER="${GENIMAGE_BUILD_NUMBER:-${DEFAULT_VERSION_BUILD##* }}"
   CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
   DIST_DIR="${GENIMAGE_DIST_DIR:-$SCRIPT_DIR/dist}"
   FINAL_APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 
-  if [[ ! "$APP_VERSION" =~ '^[0-9]+([.][0-9]+)*$' ]]; then
-    print -u2 "錯誤：GENIMAGE_VERSION 必須是數字與句點組成的版本號：$APP_VERSION"
+  if [[ ! "$APP_VERSION" =~ '^1\.[0-9]{2}\.[0-9]{4}$' ]]; then
+    print -u2 "錯誤：GENIMAGE_VERSION 必須是 1.YY.MMDD：$APP_VERSION"
     exit 1
   fi
-  if [[ ! "$BUILD_NUMBER" =~ '^[0-9]{4}$' ]]; then
-    print -u2 "錯誤：GENIMAGE_BUILD_NUMBER 必須是 HHmm 四位數字：$BUILD_NUMBER"
+  if [[ ! "$BUILD_NUMBER" =~ '^([01][0-9]|2[0-3])[0-5][0-9]$' ]]; then
+    print -u2 "錯誤：GENIMAGE_BUILD_NUMBER 必須是 HHmm（0000–2359）：$BUILD_NUMBER"
     exit 1
   fi
 
@@ -680,6 +681,7 @@ if [[ "$PACKAGE_APP" == true ]]; then
   /usr/bin/plutil -insert CFBundlePackageType -string "APPL" "$PLIST_PATH"
   /usr/bin/plutil -insert CFBundleShortVersionString -string "$APP_VERSION" "$PLIST_PATH"
   /usr/bin/plutil -insert CFBundleVersion -string "$BUILD_NUMBER" "$PLIST_PATH"
+  /usr/bin/plutil -insert CFBundleGetInfoString -string "$APP_DISPLAY_NAME $APP_VERSION build $BUILD_NUMBER" "$PLIST_PATH"
   /usr/bin/plutil -insert LSApplicationCategoryType -string "public.app-category.graphics-design" "$PLIST_PATH"
   /usr/bin/plutil -insert LSMinimumSystemVersion -string "14.0" "$PLIST_PATH"
   /usr/bin/plutil -insert LSRequiresNativeExecution -bool YES "$PLIST_PATH"

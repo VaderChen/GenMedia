@@ -13,6 +13,80 @@ public struct SubtitleSidecar: Hashable, Sendable {
 }
 
 public enum SubtitleSidecarResolver {
+    /// A short-lived lookup for one asset projection. Recreate it for each
+    /// refresh so external subtitle edits and directory changes remain visible.
+    public struct Lookup {
+        private struct Candidate {
+            let url: URL
+            let stem: String
+            let format: SubtitleFormat
+        }
+
+        private let fileManager: FileManager
+        private var firstSubtitleByParent: [UUID: MediaAsset] = [:]
+        private var directories: [URL: [Candidate]] = [:]
+
+        public init(assets: [MediaAsset] = [], fileManager: FileManager = .default) {
+            self.fileManager = fileManager
+            for asset in assets where asset.kind == .generatedSubtitle {
+                if let parent = asset.parentAssetID, firstSubtitleByParent[parent] == nil {
+                    firstSubtitleByParent[parent] = asset
+                }
+            }
+        }
+
+        public mutating func locate(for mediaURL: URL) -> SubtitleSidecar? {
+            guard mediaURL.isFileURL else { return nil }
+            let directoryURL = mediaURL.deletingLastPathComponent()
+            let mediaStem = mediaURL.deletingPathExtension().lastPathComponent
+            guard !mediaStem.isEmpty else { return nil }
+            let candidates: [Candidate]
+            if let cached = directories[directoryURL] {
+                candidates = cached
+            } else {
+                guard let entries = try? fileManager.contentsOfDirectory(
+                    at: directoryURL,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: []
+                ) else { return nil }
+                candidates = entries.compactMap { entry in
+                    let format: SubtitleFormat
+                    if entry.pathExtension.caseInsensitiveCompare("vtt") == .orderedSame {
+                        format = .vtt
+                    } else if entry.pathExtension.caseInsensitiveCompare("srt") == .orderedSame {
+                        format = .srt
+                    } else { return nil }
+                    return Candidate(url: entry, stem: entry.deletingPathExtension().lastPathComponent,
+                        format: format)
+                }
+                directories[directoryURL] = candidates
+            }
+            for format in [SubtitleFormat.vtt, .srt] {
+                if let candidate = candidates.first(where: {
+                    $0.format == format && $0.stem.caseInsensitiveCompare(mediaStem) == .orderedSame
+                        && (try? $0.url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+                }) {
+                    return SubtitleSidecar(fileURL: candidate.url, format: format)
+                }
+            }
+            return nil
+        }
+
+        public mutating func locate(for videoAsset: MediaAsset) -> SubtitleSidecar? {
+            guard videoAsset.kind == .importedVideo || videoAsset.kind == .generatedVideo else {
+                return nil
+            }
+            for mediaURL in [videoAsset.fileURL, videoAsset.playbackURL].compactMap({ $0 }) {
+                if let sidecar = locate(for: mediaURL) {
+                    return SubtitleSidecar(fileURL: sidecar.fileURL, format: sidecar.format,
+                        assetID: videoAsset.id)
+                }
+            }
+            guard let asset = firstSubtitleByParent[videoAsset.id] else { return nil }
+            return SubtitleSidecarResolver.subtitle(for: asset)
+        }
+    }
+
     private static let preferredExtensions = ["vtt", "srt"]
 
     public static func locate(

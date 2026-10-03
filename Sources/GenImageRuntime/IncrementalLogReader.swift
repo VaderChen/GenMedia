@@ -29,15 +29,17 @@ final class IncrementalLogReader {
             guard let data = try handle.read(upToCount: Int(min(64 * 1_024, end - offset))),
                   !data.isEmpty else { break }
             offset += UInt64(data.count)
-            var start = data.startIndex
-            for index in data.indices where data[index] == 10 || data[index] == 13 {
-                append(data[start..<index])
-                if !discardingLongLine, !pending.isEmpty { lines.append(pending) }
-                pending = Data()
-                discardingLongLine = false
-                start = data.index(after: index)
+            data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+                var start = 0
+                for index in bytes.indices where bytes[index] == 10 || bytes[index] == 13 {
+                    append(UnsafeRawBufferPointer(rebasing: bytes[start..<index]))
+                    if !discardingLongLine, !pending.isEmpty { lines.append(pending) }
+                    pending = Data()
+                    discardingLongLine = false
+                    start = index + 1
+                }
+                append(UnsafeRawBufferPointer(rebasing: bytes[start..<bytes.count]))
             }
-            append(data[start..<data.endIndex])
         }
         let hasMore = offset < size
         // Only a stopped writer can make its unterminated final line complete.
@@ -49,14 +51,14 @@ final class IncrementalLogReader {
         return (lines, reset, hasMore)
     }
 
-    private func append(_ bytes: Data.SubSequence) {
+    private func append(_ bytes: UnsafeRawBufferPointer) {
         guard !discardingLongLine else { return }
         guard pending.count + bytes.count <= maximumLineBytes else {
             pending.removeAll(keepingCapacity: false)
             discardingLongLine = true
             return
         }
-        pending.append(bytes)
+        pending.append(bytes.bindMemory(to: UInt8.self))
     }
 }
 

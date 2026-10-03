@@ -3,7 +3,42 @@ import { t } from "./i18n.js";
 
 const primaryCapabilities = ["imageToText", "textToImage", "textToText", "imageToImage", "textToVideo", "imageToVideo", "textToMusic", "videoToText", "upscale"];
 
+// Each render gets a fresh context, including installation changes received in
+// activity updates. Duplicate model IDs keep the original first-match semantics
+// for details/install actions and any-installed semantics for availability.
+function createProfileContext(models) {
+  const modelsByID = new Map();
+  const installedModelIDs = new Set();
+  for (const model of models) {
+    if (!modelsByID.has(model.descriptor.id)) modelsByID.set(model.descriptor.id, model);
+    if (model.installation.phase === "installed") installedModelIDs.add(model.descriptor.id);
+  }
+  return { modelsByID, installedModelIDs, profileStates: new Map() };
+}
+
+function profileState(profile, context) {
+  let result = context.profileStates.get(profile);
+  if (!result) {
+    const modelIDs = profileDependencies(profile);
+    result = {
+      modelIDs,
+      dependencies: modelIDs.map((id) => context.modelsByID.get(id)).filter(Boolean),
+      available: modelIDs.length > 0 && modelIDs.every((id) => context.installedModelIDs.has(id)),
+    };
+    context.profileStates.set(profile, result);
+  }
+  return result;
+}
+
 export function renderProfiles(state, ui) {
+  const context = createProfileContext(state.models);
+  context.disabledProfileIDs = new Set(state.disabledProfileIDs || []);
+  context.byCapability = new Map();
+  for (const profile of state.profiles) {
+    const group = context.byCapability.get(profile.capability) || [];
+    group.push(profile);
+    context.byCapability.set(profile.capability, group);
+  }
   const selectedCapability = primaryCapabilities.includes(ui.profileFilter)
     ? ui.profileFilter
     : "all";
@@ -20,7 +55,7 @@ export function renderProfiles(state, ui) {
         ${renderProfileFilter(selectedCapability)}
       </header>
       <div class="page-scroll" data-scroll-id="profiles">
-        ${visibleCapabilities.map((capability) => renderProfileSection(state, capability)).join("")}
+        ${visibleCapabilities.map((capability) => renderProfileSection(state, capability, context)).join("")}
       </div>
     </section>
   `;
@@ -59,14 +94,14 @@ function renderProfileFilter(selectedCapability) {
   </label>`;
 }
 
-function renderProfileSection(state, capability) {
+function renderProfileSection(state, capability, context) {
   const activeID = state.activeProfileIDs[capability];
   const profiles = sortedProfiles(
-    state.profiles.filter((profile) => profile.capability === capability),
+    context.byCapability.get(capability) || [],
     activeID,
-    state.models,
+    context,
   );
-  const disabledProfileIDs = new Set(state.disabledProfileIDs || []);
+  const disabledProfileIDs = context.disabledProfileIDs;
   return `
     <section style="margin-bottom:28px">
       <div class="section-heading">
@@ -80,7 +115,7 @@ function renderProfileSection(state, capability) {
               profile,
               profile.id === activeID,
               disabledProfileIDs.has(profile.id),
-              state.models,
+              context,
             ),
           )
           .join("")}
@@ -89,25 +124,23 @@ function renderProfileSection(state, capability) {
   `;
 }
 
-function sortedProfiles(profiles, activeID, models) {
+function sortedProfiles(profiles, activeID, context) {
   return profiles
     .map((profile, originalIndex) => ({
       profile,
       originalIndex,
-      rank: profileSortRank(profile, activeID, models),
+      rank: profileSortRank(profile, activeID, context),
     }))
     .sort((left, right) => left.rank - right.rank || left.originalIndex - right.originalIndex)
     .map(({ profile }) => profile);
 }
 
-function profileSortRank(profile, activeID, models) {
+function profileSortRank(profile, activeID, context) {
   if (profile.id === activeID) return 0;
 
-  if (isProfileAvailable(profile, models)) return 1;
+  if (isProfileAvailable(profile, context)) return 1;
 
-  const dependencies = profileDependencies(profile)
-    .map((modelID) => models.find(({ descriptor }) => descriptor.id === modelID))
-    .filter(Boolean);
+  const { dependencies } = profileState(profile, context);
   if (dependencies.some(({ installation }) =>
     ["queued", "downloading", "paused", "verifying"].includes(installation.phase))) {
     return 2;
@@ -115,8 +148,8 @@ function profileSortRank(profile, activeID, models) {
   return 3;
 }
 
-function renderProfileCard(profile, isActive, isDisabled, models) {
-  const availabilityClass = isProfileAvailable(profile, models) ? "is-available" : "is-unavailable";
+function renderProfileCard(profile, isActive, isDisabled, context) {
+  const availabilityClass = isProfileAvailable(profile, context) ? "is-available" : "is-unavailable";
   return `
     <article class="profile-card ${availabilityClass}" data-profile-card="${profile.id}">
       <div class="card-title-row">
@@ -150,13 +183,14 @@ function renderProfileCard(profile, isActive, isDisabled, models) {
         </div>
       </div>
       ${profile.isBuiltIn
-        ? renderBuiltInActions(profile, isActive, models)
-        : renderCustomCardActions(profile, isActive, models)}
+        ? renderBuiltInActions(profile, isActive, context)
+        : renderCustomCardActions(profile, isActive, context)}
     </article>
   `;
 }
 
 export function renderProfileDetails(profile, isActive, models) {
+  const context = createProfileContext(models);
   return `
     <p class="detail-summary">${escapeHTML(profile.notes || t("profile.noNotes"))}</p>
     <div class="profile-meta detail-meta">
@@ -164,38 +198,38 @@ export function renderProfileDetails(profile, isActive, models) {
       <span>${t("profile.model")}</span><strong>${escapeHTML(profile.modelID)}</strong>
       <span>${t("profile.modelRevision")}</span><strong>${escapeHTML(profile.modelRevision)}</strong>
       <span>${t("profile.defaults")}</span><strong>${defaultsSummary(profile.defaults)}</strong>
-      <span>${t("profile.loras")}</span><strong>${profileLoRASummary(profile, models)}</strong>
+      <span>${t("profile.loras")}</span><strong>${profileLoRASummary(profile, context)}</strong>
     </div>
-    ${profile.isBuiltIn ? "" : `<div class="profile-detail-editor" data-profile-editor="${profile.id}">${renderProfileForm(profile, isActive, models)}</div>`}
+    ${profile.isBuiltIn ? "" : `<div class="profile-detail-editor" data-profile-editor="${profile.id}">${renderProfileForm(profile, isActive, context)}</div>`}
   `;
 }
 
-function renderBuiltInActions(profile, isActive, models) {
+function renderBuiltInActions(profile, isActive, context) {
   return `<div class="button-row">
-    ${renderActivationButton(profile, isActive, models)}
-    ${renderProfileInstallButton(profile, models)}
+    ${renderActivationButton(profile, isActive, context)}
+    ${renderProfileInstallButton(profile, context)}
   </div>`;
 }
 
-function renderCustomCardActions(profile, isActive, models) {
+function renderCustomCardActions(profile, isActive, context) {
   return `<div class="button-row">
-    ${renderActivationButton(profile, isActive, models)}
-    ${renderProfileInstallButton(profile, models)}
+    ${renderActivationButton(profile, isActive, context)}
+    ${renderProfileInstallButton(profile, context)}
   </div>`;
 }
 
-function renderActivationButton(profile, isActive, models = []) {
+function renderActivationButton(profile, isActive, context) {
   if (profile.supportsGeneration === false) {
     return `<button class="secondary-button compact" disabled title="${escapeHTML(t("profile.downloadOnlyNote"))}">${t("profile.downloadOnly")}</button>`;
   }
   if (isActive) {
     return `<button class="danger-button compact" data-action="requestDeactivateProfile" data-profile-id="${profile.id}" data-capability="${profile.capability}">${t("profile.deactivate")}</button>`;
   }
-  const isInstalled = isProfileAvailable(profile, models);
+  const isInstalled = isProfileAvailable(profile, context);
   return `<button class="primary-button compact" data-action="activateProfile" data-profile-id="${profile.id}" data-capability="${profile.capability}" ${isInstalled ? "" : `disabled title="${escapeHTML(t("profile.installRequired"))}"`}>${t("profile.activate")}</button>`;
 }
 
-function renderProfileForm(profile, isActive, models) {
+function renderProfileForm(profile, isActive, context) {
   const architectures = ["mlxSwift", "coreML", "localService", "externalCLI"];
   return `
     <div class="profile-form">
@@ -227,18 +261,15 @@ function renderProfileForm(profile, isActive, models) {
     </div>
     <div class="button-row">
       <button class="primary-button compact" data-action="saveProfile" data-profile-id="${profile.id}">${t("profile.save")}</button>
-      ${renderActivationButton(profile, isActive, models)}
-      ${renderProfileInstallButton(profile, models)}
+      ${renderActivationButton(profile, isActive, context)}
+      ${renderProfileInstallButton(profile, context)}
       <button class="danger-button compact" data-action="deleteProfile" data-profile-id="${profile.id}">${t("profile.delete")}</button>
     </div>
   `;
 }
 
-function renderProfileInstallButton(profile, models = []) {
-  const modelIDs = profileDependencies(profile);
-  const dependencies = modelIDs
-    .map((modelID) => models.find(({ descriptor }) => descriptor.id === modelID))
-    .filter(Boolean);
+function renderProfileInstallButton(profile, context) {
+  const { modelIDs, dependencies } = profileState(profile, context);
   if (dependencies.length !== modelIDs.length) {
     return `<button class="secondary-button compact" disabled>${t("profile.dependencyMissing")}</button>`;
   }
@@ -258,18 +289,15 @@ function profileDependencies(profile) {
     .filter((modelID, index, values) => modelID && values.indexOf(modelID) === index);
 }
 
-function isProfileAvailable(profile, models) {
-  const modelIDs = profileDependencies(profile);
-  return modelIDs.length > 0 && modelIDs.every((modelID) =>
-    models.some(({ descriptor, installation }) =>
-      descriptor.id === modelID && installation.phase === "installed"));
+function isProfileAvailable(profile, context) {
+  return profileState(profile, context).available;
 }
 
-function profileLoRASummary(profile, models) {
+function profileLoRASummary(profile, context) {
   const loras = profile.loras || [];
   if (!loras.length) return t("lora.none");
   return loras.map((lora) => {
-    const model = models.find(({ descriptor }) => descriptor.id === lora.modelID);
+    const model = context.modelsByID.get(lora.modelID);
     const name = model?.descriptor.displayName || lora.modelID;
     const conditioning = lora.conditioning === "sourceImageCanny"
       ? ` · ${t("profile.cannyControl")}`

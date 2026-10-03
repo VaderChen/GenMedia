@@ -2,6 +2,37 @@
 
 最近更新：2026-10-03。本文記錄可重複執行的檢查，以及各次結果的實際範圍。
 
+## 1.26.1003 build 2312 回歸與安裝包（2026-10-03）
+
+本版收錄第二輪全專案函式最佳化，並改用日期與 Build 識別同日更新。App 的 `CFBundleShortVersionString` 為 `1.26.1003`、`CFBundleVersion` 為 `2312`；顯示版本 `1.26.1003 build 2312`，Git Tag `v1.26.1003-build.2312`，安裝包 `GenMedia-1.26.1003-build.2312-arm64.dmg`。數值版本欄位與 Build 分開保存，Tag 以 `-build.` 連接以符合 Git 不允許空白的限制。
+
+| 範圍 | 本次結果與限制 |
+| --- | --- |
+| 根套件 | 215 項／56 suites 通過；包含 210 項最佳化回歸及 5 項日期／Build 解析與更新比較測試，另有參數化案例。 |
+| WebUI | 17 項通過；四語共 500 組 Profile 狀態與 1,500 份詳細資料 HTML 比對相同。 |
+| LTX | 51 項／8 suites 通過；小型兩層 Transformer 重用位置表前後的音影位元模式相同。需要真實模型環境的案例仍條件略過。 |
+| H3 | 全套 70 項／11 suites 仍有兩項既有 VAE 失敗：padded token 預期 12、實際 15；輸出幀數預期 9、實際 6。相關實作與測試預期未修改。 |
+| 建置／啟動／維護腳本 | 12 項通過，打包腳本語法檢查通過。 |
+| 函式量測 | 字幕批次查找、GGUF 解碼、進度日誌、Profile HTML 及 LTX 位置資料準備改善；完整條件、九輪中位數與限制見[效能紀錄](PERFORMANCE_CHANGES.md)。 |
+| 發布建置與安裝包 | 9 個 Release 產品建置成功；App／DMG 均完成 Developer ID 簽章、公證、Staple 與 Gatekeeper 驗證，複製回專案及唯讀掛載後再次核對通過。 |
+| 內附工具啟動 | Qwen Turbo、LTX-2.5、H3 v1.2 Worker 正確拒絕不相容步數，FFmpeg／FFprobe 可執行；未因此載入模型或生成媒體。 |
+
+最佳化後的 LTX、WebUI、GGUF 與其他受影響來源及測試均核對雜湊未再變更，沿用緊接本次發布之前的回歸結果；版本檢查與腳本變更後另跑完整根套件與腳本測試。本輪沒有重新執行大型模型的完整生成，不以先前的小尺寸輸出當作本次新增實測。
+
+舊版 `1.26.1004` 的日期數字高於本次實際發布日；未附 Build 的舊版 `1.26.1003` 則會將新的 Tag 後綴視為預覽版。因此這兩版的既有更新比較不會提示本次版本，使用者需手動安裝一次；新版會比較日期及 HHmm，同日更新與跨日更新均有回歸案例。既有 Git Tag 與歷史安裝包保留。
+
+日誌與版本資料位於本機 `Outputs/release-1.26.1003-build.2312/`；最佳化證據位於 `Outputs/project-function-optimization-2026-10-03-round2/`（均不納入 Git）。
+
+### 1.26.1003 build 2312 公證安裝包
+
+- App 公證：`a7d417e9-f8c9-419e-bcaf-730b96c5321a` — **Accepted**。
+- DMG 公證：`a38695e4-6ba8-4516-b658-14d8556a1fde` — **Accepted**。
+- `GenMedia-1.26.1003-build.2312-arm64.dmg`，`214,694,627` bytes；App／DMG 均已 Staple，Gatekeeper 回報 `Notarized Developer ID`。
+- SHA-256：`8c1d90a32f96b2e3b0a6e938105a1bc004036855d9d0a9cc156d239787c40191`。
+- 於 APFS 製作，複製回專案後雜湊一致；唯讀掛載核對 App 版本與 Build、主程式及 7 個內附執行元件的 Developer ID、hardened runtime、secure timestamp，以及 22 份 WebUI 資源和授權文件。建置輸入雜湊未變更。
+- DMG 首次建立遇到系統「資源忙碌中」，保留已公證 App 後重建成功；重建、簽章、公證與掛載驗證均有獨立日誌。
+- [下載與中英文版本說明](https://github.com/VaderChen/GenMedia/releases/tag/v1.26.1003-build.2312)。
+
 ## 1.26.1004 回歸與安裝包（2026-10-03）
 
 本版包含下方的新模型整合與兩輪函式最佳化。最終回歸在 Apple M4、16 GB RAM、Swift 6.4／macOS 27 SDK 執行；小尺寸真實模型結果與純函式測試分開記錄。

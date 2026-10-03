@@ -145,49 +145,51 @@ public enum GGUFDequantizer {
             throw GGUFLoaderError.invalidTensor(name)
         }
 
-        let blockCount = elementCount / elementsPerBlock
-        var values = [Float](repeating: 0, count: elementCount)
-        for block in 0..<blockCount {
-            let rawOffset: Int
-            switch typeCode {
-            case 2: rawOffset = block * 18
-            case 3: rawOffset = block * 20
-            case 6: rawOffset = block * 22
-            case 7: rawOffset = block * 24
-            case 8: rawOffset = block * 34
-            case 9: rawOffset = block * 36
-            case 10: rawOffset = block * 84
-            case 11: rawOffset = block * 110
-            case 12: rawOffset = block * 144
-            case 13: rawOffset = block * 176
-            case 14: rawOffset = block * 210
-            case 39: rawOffset = block * 17
-            case 41: rawOffset = block * 18
-            case 42: rawOffset = block * 18
-            default: throw GGUFLoaderError.unsupportedTensorType(typeCode, name)
+        return try raw.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            let blockCount = elementCount / elementsPerBlock
+            var values = [Float](repeating: 0, count: elementCount)
+            for block in 0..<blockCount {
+                let rawOffset: Int
+                switch typeCode {
+                case 2: rawOffset = block * 18
+                case 3: rawOffset = block * 20
+                case 6: rawOffset = block * 22
+                case 7: rawOffset = block * 24
+                case 8: rawOffset = block * 34
+                case 9: rawOffset = block * 36
+                case 10: rawOffset = block * 84
+                case 11: rawOffset = block * 110
+                case 12: rawOffset = block * 144
+                case 13: rawOffset = block * 176
+                case 14: rawOffset = block * 210
+                case 39: rawOffset = block * 17
+                case 41: rawOffset = block * 18
+                case 42: rawOffset = block * 18
+                default: throw GGUFLoaderError.unsupportedTensorType(typeCode, name)
+                }
+                switch typeCode {
+                case 2: decodeQ4_0(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
+                case 3: decodeQ4_1(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
+                case 6: decodeQ5_0(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
+                case 7: decodeQ5_1(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
+                case 8: decodeQ8_0(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
+                case 9: decodeQ8_1(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
+                case 10: decodeQ2K(raw, offset: rawOffset, output: &values, outputOffset: block * 256)
+                case 11: decodeQ3K(raw, offset: rawOffset, output: &values, outputOffset: block * 256)
+                case 12: decodeQ4K(raw, offset: rawOffset, output: &values, outputOffset: block * 256)
+                case 13: decodeQ5K(raw, offset: rawOffset, output: &values, outputOffset: block * 256)
+                case 14: decodeQ6K(raw, offset: rawOffset, output: &values, outputOffset: block * 256)
+                case 39: decodeMXFP4(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
+                case 41: decodeQ1_0(raw, offset: rawOffset, output: &values, outputOffset: block * 128)
+                case 42: decodeQ2_0(raw, offset: rawOffset, output: &values, outputOffset: block * 64)
+                default: throw GGUFLoaderError.unsupportedTensorType(typeCode, name)
+                }
             }
-            switch typeCode {
-            case 2: decodeQ4_0(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
-            case 3: decodeQ4_1(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
-            case 6: decodeQ5_0(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
-            case 7: decodeQ5_1(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
-            case 8: decodeQ8_0(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
-            case 9: decodeQ8_1(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
-            case 10: decodeQ2K(raw, offset: rawOffset, output: &values, outputOffset: block * 256)
-            case 11: decodeQ3K(raw, offset: rawOffset, output: &values, outputOffset: block * 256)
-            case 12: decodeQ4K(raw, offset: rawOffset, output: &values, outputOffset: block * 256)
-            case 13: decodeQ5K(raw, offset: rawOffset, output: &values, outputOffset: block * 256)
-            case 14: decodeQ6K(raw, offset: rawOffset, output: &values, outputOffset: block * 256)
-            case 39: decodeMXFP4(raw, offset: rawOffset, output: &values, outputOffset: block * 32)
-            case 41: decodeQ1_0(raw, offset: rawOffset, output: &values, outputOffset: block * 128)
-            case 42: decodeQ2_0(raw, offset: rawOffset, output: &values, outputOffset: block * 64)
-            default: throw GGUFLoaderError.unsupportedTensorType(typeCode, name)
-            }
+            return values
         }
-        return values
     }
 
-    private static func decodeQ4_0(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ4_0(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = float16(raw, at: offset)
         for index in 0..<16 {
             let packed = raw[offset + 2 + index]
@@ -196,7 +198,7 @@ public enum GGUFDequantizer {
         }
     }
 
-    private static func decodeQ4_1(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ4_1(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = float16(raw, at: offset)
         let minimum = float16(raw, at: offset + 2)
         for index in 0..<16 {
@@ -206,7 +208,7 @@ public enum GGUFDequantizer {
         }
     }
 
-    private static func decodeQ5_0(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ5_0(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = float16(raw, at: offset)
         let highBits = uint32(raw, at: offset + 2)
         for index in 0..<16 {
@@ -217,7 +219,7 @@ public enum GGUFDequantizer {
         }
     }
 
-    private static func decodeQ5_1(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ5_1(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = float16(raw, at: offset)
         let minimum = float16(raw, at: offset + 2)
         let highBits = uint32(raw, at: offset + 4)
@@ -229,21 +231,21 @@ public enum GGUFDequantizer {
         }
     }
 
-    private static func decodeQ8_0(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ8_0(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = float16(raw, at: offset)
         for index in 0..<32 {
             output[outputOffset + index] = Float(Int8(bitPattern: raw[offset + 2 + index])) * scale
         }
     }
 
-    private static func decodeQ8_1(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ8_1(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = float16(raw, at: offset)
         for index in 0..<32 {
             output[outputOffset + index] = Float(Int8(bitPattern: raw[offset + 4 + index])) * scale
         }
     }
 
-    private static func decodeMXFP4(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeMXFP4(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = Foundation.pow(2 as Float, Float(Int(raw[offset]) - 127))
         let lookup: [Float] = [
             0, 0.5, 1, 1.5, 2, 3, 4, 6,
@@ -256,7 +258,7 @@ public enum GGUFDequantizer {
         }
     }
 
-    private static func decodeQ1_0(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ1_0(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = float16(raw, at: offset)
         for index in 0..<128 {
             let bit = (raw[offset + 2 + index / 8] >> (index % 8)) & 1
@@ -264,7 +266,7 @@ public enum GGUFDequantizer {
         }
     }
 
-    private static func decodeQ2_0(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ2_0(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = float16(raw, at: offset)
         for index in 0..<64 {
             let quantized = (raw[offset + 2 + index / 4] >> ((index % 4) * 2)) & 3
@@ -272,7 +274,7 @@ public enum GGUFDequantizer {
         }
     }
 
-    private static func decodeQ2K(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ2K(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = float16(raw, at: offset)
         let minimumScale = float16(raw, at: offset + 2)
         let scalesOffset = offset + 4
@@ -306,7 +308,7 @@ public enum GGUFDequantizer {
         }
     }
 
-    private static func decodeQ3K(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ3K(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = float16(raw, at: offset + 108)
         let scalesOffset = offset + 96
         let quantizedOffset = offset + 32
@@ -352,7 +354,7 @@ public enum GGUFDequantizer {
         }
     }
 
-    private static func decodeQ4K(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ4K(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = float16(raw, at: offset)
         let minimumScale = float16(raw, at: offset + 2)
         let scalesOffset = offset + 4
@@ -375,7 +377,7 @@ public enum GGUFDequantizer {
         }
     }
 
-    private static func decodeQ5K(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ5K(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let scale = float16(raw, at: offset)
         let minimumScale = float16(raw, at: offset + 2)
         let scalesOffset = offset + 4
@@ -405,7 +407,7 @@ public enum GGUFDequantizer {
         }
     }
 
-    private static func decodeQ6K(_ raw: Data, offset: Int, output: inout [Float], outputOffset: Int) {
+    private static func decodeQ6K(_ raw: UnsafeRawBufferPointer, offset: Int, output: inout [Float], outputOffset: Int) {
         let lowBitsOffset = offset
         let highBitsOffset = offset + 128
         let scalesOffset = offset + 192
@@ -430,7 +432,7 @@ public enum GGUFDequantizer {
         }
     }
 
-    private static func kScaleAndMin(index: Int, raw: Data, offset: Int) -> (scale: UInt8, minimum: UInt8) {
+    private static func kScaleAndMin(index: Int, raw: UnsafeRawBufferPointer, offset: Int) -> (scale: UInt8, minimum: UInt8) {
         if index < 4 {
             return (raw[offset + index] & 63, raw[offset + index + 4] & 63)
         }
@@ -439,15 +441,15 @@ public enum GGUFDequantizer {
         return (scale, minimum)
     }
 
-    private static func float16(_ data: Data, at offset: Int) -> Float {
+    private static func float16(_ data: UnsafeRawBufferPointer, at offset: Int) -> Float {
         Float(Float16(bitPattern: uint16(data, at: offset)))
     }
 
-    private static func uint16(_ data: Data, at offset: Int) -> UInt16 {
+    private static func uint16(_ data: UnsafeRawBufferPointer, at offset: Int) -> UInt16 {
         UInt16(data[offset]) | UInt16(data[offset + 1]) << 8
     }
 
-    private static func uint32(_ data: Data, at offset: Int) -> UInt32 {
+    private static func uint32(_ data: UnsafeRawBufferPointer, at offset: Int) -> UInt32 {
         UInt32(data[offset])
             | UInt32(data[offset + 1]) << 8
             | UInt32(data[offset + 2]) << 16

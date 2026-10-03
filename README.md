@@ -12,6 +12,19 @@ GenMedia 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App�
 - 獨立設定頁支援繁體中文、英文、日文、韓文及六套可持久保存的配色。
 - 設定頁可用 Switch 啟動只綁定本機的 MCP HTTP API；另保留可在 App 未啟動時獨立運作的 JSON-RPC 2.0 stdio server。
 
+## 1.26.1003 build 2312 改善內容
+
+- **大量 Profile 更好操作**：加快模型與 LoRA 清單的產生，保留原有排序、安裝狀態與操作按鈕。
+- **影片字幕更快就緒**：同時處理多部影片時，減少重複搜尋字幕的等待，沿用既有字幕對應規則。
+- **減少載入與生成的重複工作**：加快 GGUF 權重處理與生成進度讀取，LTX 在同一生成階段重用固定的位置資料。
+- **同日更新更容易辨識**：版本採 `1.YY.MMDD build HHmm`，同一天可區分不同 Build，更新檢查也會比較 Build。
+
+維持既有 UI、操作、生成設定與模型精度。函式基準顯示上述流程有所改善，不代表整段生成速度或降低大型模型的記憶體需求；詳細量測與已知 H3 限制見驗證紀錄。
+
+[下載 1.26.1003 build 2312 與中英文版本說明](https://github.com/VaderChen/GenMedia/releases/tag/v1.26.1003-build.2312) · [驗證紀錄](docs/VALIDATION.md) · [效能紀錄](docs/PERFORMANCE_CHANGES.md)
+
+已安裝未附 Build 的舊版 `1.26.1003` 或 `1.26.1004` 的使用者，請由上述連結手動下載這次更新，以切換至日期加 Build 的版本編號。
+
 ## 1.26.1004 新功能與改善
 
 - **Qwen 2.1 Turbo**：Viggle v0.3 以 6 步完成文生圖與單圖編輯，沿用現有生成操作。
@@ -64,9 +77,11 @@ GenMedia 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App�
 # 只做增量 Release 建置，不建立 App bundle
 ./build.command --no-app
 
-# 指定版本與 Bundle ID
-GENIMAGE_VERSION=1.1.0 GENIMAGE_BUNDLE_ID=com.example.genimage ./build.command
+# 指定日期版本與 Build
+GENIMAGE_VERSION=1.26.1003 GENIMAGE_BUILD_NUMBER=2312 ./build.command
 ```
+
+版本顯示使用 `1.YY.MMDD build HHmm`，預設取建置機本機日期與 24 小時制時間。Git Tag 使用 `v1.YY.MMDD-build.HHmm`（Tag 不含空白），DMG 使用 `GenMedia-1.YY.MMDD-build.HHmm-arm64.dmg`。
 
 `run.command` 會自動使用 `--no-app`，日常啟動不會重複建立 App bundle。對外發佈的 DMG 由獨立本機流程完成 Developer ID Application 簽章、Apple Notarization、Staple 與 Gatekeeper 驗證。
 

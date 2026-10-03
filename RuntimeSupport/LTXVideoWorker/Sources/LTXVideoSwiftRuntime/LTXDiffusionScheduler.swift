@@ -158,6 +158,10 @@ public struct LTXDiffusionScheduler: Sendable {
             )
         }
 
+        try Task.checkCancellation()
+        let rotary = model.transformer.prepareRoPE(
+            videoPositions: videoPositions, audioPositions: audioPositions
+        )
         var video = videoLatent
         var audio = audioLatent
         let totalSteps = sigmas.count - 1
@@ -176,7 +180,8 @@ public struct LTXDiffusionScheduler: Sendable {
                 audioPositions: audioPositions,
                 videoAttentionMask: videoAttentionMask,
                 audioAttentionMask: audioAttentionMask,
-                videoKeyframeMask: videoKeyframeMask
+                videoKeyframeMask: videoKeyframeMask,
+                preparedRoPE: rotary
             )
             let videoDenoised = applyDenoiseMask(
                 prediction.video, clean: videoClean, mask: videoMask

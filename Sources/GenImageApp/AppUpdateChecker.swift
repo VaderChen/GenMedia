@@ -8,7 +8,7 @@ struct AppUpdateInfo: Codable, Hashable, Sendable {
 }
 
 enum AppUpdateChecker {
-    private static let defaultRepository = "VaderChen/GenImage"
+    private static let defaultRepository = "VaderChen/GenMedia"
 
     static func availableUpdate() async -> AppUpdateInfo? {
         guard let currentVersion = currentApplicationVersion(),
@@ -56,11 +56,22 @@ enum AppUpdateChecker {
     }
 
     private static func currentApplicationVersion() -> String? {
-        let environmentVersion = ProcessInfo.processInfo.environment["GENIMAGE_VERSION"]
+        let environment = ProcessInfo.processInfo.environment
+        if let version = environment["GENIMAGE_VERSION"] {
+            return applicationVersion(version, build: environment["GENIMAGE_BUILD_NUMBER"])
+        }
         let bundleVersion = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
         ) as? String
-        return normalizedVersion(environmentVersion ?? bundleVersion ?? "")
+        let bundleBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        return applicationVersion(bundleVersion ?? "", build: environment["GENIMAGE_BUILD_NUMBER"] ?? bundleBuild)
+    }
+
+    static func applicationVersion(_ version: String, build: String?) -> String? {
+        guard let normalized = normalizedVersion(version) else { return nil }
+        guard ParsedVersion(normalized)?.build == nil,
+              let build, ParsedVersion.validBuild(build) else { return normalized }
+        return "\(normalized) build \(build)"
     }
 
     private static func updateRepository() -> String? {
@@ -81,16 +92,16 @@ enum AppUpdateChecker {
         return parts.joined(separator: "/")
     }
 
-    private static func normalizedVersion(_ rawValue: String) -> String? {
+    static func normalizedVersion(_ rawValue: String) -> String? {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let firstDigit = trimmed.firstIndex(where: { $0.isNumber }) else { return nil }
         let version = String(trimmed[firstDigit...])
         let core = version.split(separator: "+", maxSplits: 1).first.map(String.init) ?? version
         guard ParsedVersion(core) != nil else { return nil }
-        return core
+        return core.replacingOccurrences(of: "-build.", with: " build ")
     }
 
-    private static func isNewer(_ candidate: String, than current: String) -> Bool {
+    static func isNewer(_ candidate: String, than current: String) -> Bool {
         guard let candidateVersion = ParsedVersion(candidate),
               let currentVersion = ParsedVersion(current) else {
             return false
@@ -117,9 +128,19 @@ enum AppUpdateChecker {
     private struct ParsedVersion: Comparable {
         let numbers: [Int]
         let prerelease: String?
+        let build: Int?
 
         init?(_ value: String) {
-            let pieces = value.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+            let buildParts = value.replacingOccurrences(of: " build ", with: "-build.")
+                .components(separatedBy: "-build.")
+            guard buildParts.count <= 2 else { return nil }
+            if buildParts.count == 2 {
+                guard Self.validBuild(buildParts[1]) else { return nil }
+                build = Int(buildParts[1])
+            } else {
+                build = nil
+            }
+            let pieces = buildParts[0].split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
             let numberParts = pieces[0].split(separator: ".", omittingEmptySubsequences: false)
             guard !numberParts.isEmpty,
                   numberParts.allSatisfy({ part in
@@ -132,6 +153,12 @@ enum AppUpdateChecker {
             prerelease = pieces.count == 2 && !pieces[1].isEmpty ? String(pieces[1]) : nil
         }
 
+        static func validBuild(_ value: String) -> Bool {
+            guard value.utf8.count == 4, value.utf8.allSatisfy({ (48...57).contains($0) }),
+                  let hours = Int(value.prefix(2)), let minutes = Int(value.suffix(2)) else { return false }
+            return hours < 24 && minutes < 60
+        }
+
         static func < (lhs: ParsedVersion, rhs: ParsedVersion) -> Bool {
             let count = max(lhs.numbers.count, rhs.numbers.count)
             for index in 0..<count {
@@ -140,10 +167,11 @@ enum AppUpdateChecker {
                 if left != right { return left < right }
             }
             switch (lhs.prerelease, rhs.prerelease) {
-            case (nil, nil): return false
+            case (nil, nil): return (lhs.build ?? -1) < (rhs.build ?? -1)
             case (.some, nil): return true
             case (nil, .some): return false
             case let (.some(left), .some(right)):
+                if left == right { return (lhs.build ?? -1) < (rhs.build ?? -1) }
                 return left.compare(right, options: [.numeric, .caseInsensitive]) == .orderedAscending
             }
         }
