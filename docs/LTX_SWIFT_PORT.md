@@ -1,5 +1,22 @@
 # LTX-2 純 Swift 移植紀錄
 
+## LTX-2.5 Distilled Q4（1.26.1004）
+
+新增模型中心項目與「文生影 · LTX-2.5 Distilled Q4（8 步）」Profile，維持現有 UI 與原生 Swift／MLX Worker。選擇 Profile 後請套用其預設值，再依需求調整尺寸。使用 Gemma4-12B 文字編碼、8 步主階段及 3 步放大細化，輸出影片與同步立體聲音訊。預設 512×320、49 幀、24 FPS；尺寸須為 64 的倍數，幀數為 8n+1。驗證優先採 256×256、9 幀，不能把短片驗證當成長影片品質保證。
+
+這是實驗性 Q4 支援，建議 32 GB 以上記憶體。4-bit 文字編碼與 Transformer 是容量／品質折衷，尚未證明與 BF16／Q8 參考品質相同。目前只提供文生影；LTX-2.3 鏡頭 LoRA、圖像條件、多鏡頭與 DiffVAE／DFR 不在這個 Profile 的支援範圍。
+
+- 上游：[Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5)。
+- 下載：[ddalcu/LTX-2.5-MLX-Serve-4bit](https://huggingface.co/ddalcu/LTX-2.5-MLX-Serve-4bit)，revision `e8f8c97cd6e4ff9c997e0d382c027ad9b61776bb`。
+- 模型目錄：`ltx-2.5-mlx-q4`，下載計畫只取蒸餾模型與必要元件，約 27.21 GB。Gemma4 包含在 `gemma4-12b-ltx-v1/`，不使用 2.3 的 Gemma3 或環境變數覆寫。
+- 權重與授權檔案下載後才安裝，不納入 App 或 Git；依來源的 LTX-2.x Community License 使用。
+- Runtime 差異：Gemma4 的 49 組 hidden states、最後一層 RMSNorm、首幀 keyframe embedding、影片 FF 無 bias 與 ancestral Euler 取樣。2.3 保留原先設定。
+- Gemma4、connector、Transformer 與解碼階段依序載入並釋放；影片使用卷積 VAE。未改動最低部署目標或升級 MLX 相依版本。
+
+已以真實模型生成紅色茶壺短片，並在封裝修正後重用同一份 latent 確認 256×256、9 幀、24 FPS、48 kHz 雙聲道與 0.375 秒長度；首、中、末幀均已檢視。16 GB 測試機的完整初次流程約 869.92 秒，修正後的解碼／封裝回放約 2.13 秒；這是分段驗證，不是最終版本單次完整執行的效能量測。音訊較短時會補齊尾端並保留影片幀數。
+
+新增測試涵蓋獨立 FP64 純量 Gemma4 oracle、左 padding、BOS／截斷方向、keyframe／bias 結構及 ancestral 排程。真實模型的安裝與生成驗證另見 [驗證紀錄](VALIDATION.md)；以下舊版 2.3 的數字不代表 2.5 已通過權重 parity。
+
 ## 範圍
 
 本階段已完成 Block 0–4：比對基礎設施、影片 VAE、影片／音訊多模態 Transformer、

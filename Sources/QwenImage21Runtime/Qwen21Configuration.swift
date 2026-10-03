@@ -1,4 +1,5 @@
 import Foundation
+import GenImageCore
 
 public enum Qwen21Error: LocalizedError {
     case invalid(String)
@@ -17,16 +18,26 @@ public struct Qwen21Request: Codable, Sendable {
     public var height: Int
     public var steps: Int
     public var seed: UInt64
+    public var loraPath: String?
+    public var loraScale: Double?
+    public var acceleration: QwenImage21Acceleration?
 
     public init(modelDirectory: String, outputPaths: [String], inputPath: String? = nil,
                 prompt: String, negativePrompt: String = "", width: Int, height: Int,
-                steps: Int, seed: UInt64) {
+                steps: Int, seed: UInt64, loraPath: String? = nil, loraScale: Double? = nil,
+                acceleration: QwenImage21Acceleration? = nil) {
         self.modelDirectory = modelDirectory; self.outputPaths = outputPaths; self.inputPath = inputPath
         self.prompt = prompt; self.negativePrompt = negativePrompt
         self.width = width; self.height = height; self.steps = steps; self.seed = seed
+        self.loraPath = loraPath; self.loraScale = loraScale; self.acceleration = acceleration
     }
 
     public func validate() throws {
+        guard (loraPath != nil) == (acceleration != nil),
+              (loraPath != nil) == (loraScale != nil),
+              acceleration == nil || (steps == acceleration?.steps && loraScale == 1 && loraPath?.isEmpty == false) else {
+            throw Qwen21Error.invalid("Viggle Turbo 需要完整 LoRA、固定 6 步與權重 1。")
+        }
         guard (256...2048).contains(width), (256...2048).contains(height),
               width % 32 == 0, height % 32 == 0 else {
             throw Qwen21Error.invalid("寬高須為 256～2048 之間的 32 倍數。")
@@ -71,22 +82,23 @@ struct Qwen21Scheduler: Decodable {
     let max_image_seq_len: Int
     let base_shift: Double
     let max_shift: Double
-    let shift_terminal: Double
+    let shift_terminal: Double?
 
-    func sigmas(steps: Int, imageTokens: Int) throws -> [Float] {
+    func sigmas(steps: Int, imageTokens: Int, acceleration: QwenImage21Acceleration? = nil) throws -> [Float] {
         guard steps > 0, max_image_seq_len > base_image_seq_len,
-              shift_terminal > 0, shift_terminal < 1 else {
+              imageTokens > 0, base_shift.isFinite, max_shift.isFinite,
+              shift_terminal.map({ $0 > 0 && $0 < 1 }) ?? true,
+              acceleration == nil || steps == acceleration?.steps else {
             throw Qwen21Error.invalid("無效的取樣器參數。")
         }
         let mu = base_shift + Double(imageTokens - base_image_seq_len)
             * (max_shift - base_shift) / Double(max_image_seq_len - base_image_seq_len)
         let e = exp(mu)
-        var values = (0..<steps).map { i -> Double in
-            let sigma = 1 - Double(i) / Double(steps)
-            return e / (e + 1 / sigma - 1)
-        }
+        let raw = acceleration?.rawSigmas ?? (0..<steps).map { 1 - Double($0) / Double(steps) }
+        var values = raw.map { e / (e + 1 / $0 - 1) }
         // FlowMatchEuler's stretch_shift_to_terminal is undefined for a one-step schedule.
-        if steps > 1 {
+        // Viggle's distilled schedule explicitly disables terminal stretching.
+        if acceleration == nil, steps > 1, let shift_terminal {
             let scale = (1 - values[steps - 1]) / (1 - shift_terminal)
             values = values.map { 1 - (1 - $0) / scale }
         }

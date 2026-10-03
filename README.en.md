@@ -12,11 +12,24 @@ GenMedia is a local AI media generation app with **native Apple Silicon support*
 - A dedicated settings page supports Traditional Chinese, English, Japanese, Korean, and six persistent color themes.
 - Settings provides a switch for a localhost-only MCP HTTP API, while a standalone JSON-RPC 2.0 stdio server remains available when the app is not running.
 
+## What's new in 1.26.1004
+
+- **Qwen 2.1 Turbo**: Viggle v0.3 adds 6-step text-to-image and single-image editing through the existing controls.
+- **Prompt enhancement**: Qwen PE expands short instructions, with separate generation and editing profiles while preserving the selected output size and seed.
+- **H3 LightX2V v1.2**: An experimental 4-step video LoRA for full and Pruned FL2VA base models.
+- **LTX-2.5 Distilled Q4**: Experimental text-to-video with synchronized stereo audio, 8 main steps and 3 refinement steps; 32 GB or more memory is recommended.
+- **Smoother work with large asset collections**: Faster workspace reconciliation, range selection, profile filtering, and music WAV export; less repeated computation and temporary memory use while preserving the existing UI, controls, and generation settings.
+- **More reliable session continuity**: Reopening a workspace preserves standard, Turbo, and prompt-enhanced profile choices. Generation completion and resource cleanup handle process exits more reliably.
+
+All inference remains native Swift/MLX. Download models and LoRAs separately in Model Center. Qwen Turbo passed 256×256 generation and color-edit checks; LTX-2.5 completed 256×256, 9-frame video/audio output checks. Full H3 v1.2 videos and longer or higher-resolution LTX-2.5 videos remain untested. Fewer steps do not reduce base-model memory requirements.
+
+[Download 1.26.1004 and bilingual release notes](https://github.com/VaderChen/GenMedia/releases/tag/v1.26.1004) · [Qwen guide](docs/QWEN_IMAGE_21.md) · [LoRA guide](docs/LORAS.md) · [Validation record](docs/VALIDATION.md) · [Performance record](docs/PERFORMANCE_CHANGES.md) (guides in Traditional Chinese)
+
 ## What's new in 1.26.1003
 
 - **More image styles**: Four Z-Image Turbo LoRAs add Pencil Sketch, Ghibli Style, Saturday Morning Cartoon, and Technically Color.
 - **Video camera control**: Four LTX camera LoRAs add dolly in, out, left, and right through the existing text-to-video profiles.
-- **Low-step video generation**: MiniMax H3 gains LightX2V 4-step / 8-step and Turbo v4 acceleration LoRAs. Turbo v4 defaults to 6 steps and supports 4–8; matching profiles apply the step count and sampling settings automatically.
+- **Low-step video generation**: MiniMax H3 gains LightX2V 4-step / 8-step and Turbo v4 acceleration LoRAs. Turbo v4 defaults to 6 steps and supports 4–8; select a matching profile and apply its defaults to set the step count. Sampling settings are handled automatically.
 - **Less unnecessary memory use and repeated work**: Original-image previews, audio metadata reading, and Qwen-Image 2.1 generation are optimized while preserving the existing UI, controls, and generation settings.
 
 Use the existing Model Center, LoRA selector, and Profile editor, with no separate Python installation. Video camera adapters and H3 low-step combinations are experimental; complete video results remain unverified. Models require separate downloads, and fewer steps do not reduce base-model memory requirements.

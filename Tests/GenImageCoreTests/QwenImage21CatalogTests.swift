@@ -8,7 +8,7 @@ struct QwenImage21CatalogTests {
         #expect(model.count == 1)
         #expect(model[0].capabilities == [.textToImage, .imageToImage])
         let profiles = ModelCatalog.builtInProfiles.filter { $0.modelID == QwenImage21Model.id }
-        #expect(profiles.count == 2)
+        #expect(profiles.count == 8)
         #expect(profiles.allSatisfy { $0.architecture == .mlxSwift && $0.modelRevision == QwenImage21Model.revision })
         #expect(model[0].licenseName == "Qwen Research License")
     }

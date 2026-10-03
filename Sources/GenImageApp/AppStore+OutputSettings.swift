@@ -92,7 +92,7 @@ extension AppStore {
                 for: preferredVideoProfile
             )
             if updated.frameCount != frameCount {
-                statusMessage = "LTX-2.3 幀數已從 \(frameCount) 自動調整為合法值 \(updated.frameCount)（8n+1）。"
+                statusMessage = "LTX 幀數已從 \(frameCount) 自動調整為合法值 \(updated.frameCount)（8n+1）。"
             }
         }
         if let frameRate { updated.frameRate = min(max(frameRate, 1), 120) }
@@ -105,7 +105,7 @@ extension AppStore {
         for profile: InferenceProfile?
     ) -> Int {
         let clamped = min(max(frameCount, 1), 512)
-        if profile?.modelID.lowercased().contains("ltx-2.3-mlx") == true {
+        if profile?.modelID.lowercased().contains("ltx-2.3-mlx") == true || profile?.modelID == LTX25Model.id {
             return LTXVideoGenerationService.normalizedFrameCount(clamped)
         }
         if profile.map({ MiniMaxH3VideoGenerationService.isSupportedModelID($0.modelID) }) == true {

@@ -12,11 +12,24 @@ GenMedia 是一款**原生支援 Apple Silicon** 的本機 AI 媒體生成 App�
 - 獨立設定頁支援繁體中文、英文、日文、韓文及六套可持久保存的配色。
 - 設定頁可用 Switch 啟動只綁定本機的 MCP HTTP API；另保留可在 App 未啟動時獨立運作的 JSON-RPC 2.0 stdio server。
 
+## 1.26.1004 新功能與改善
+
+- **Qwen 2.1 Turbo**：Viggle v0.3 以 6 步完成文生圖與單圖編輯，沿用現有生成操作。
+- **提示詞增強**：Qwen PE 將簡短描述展開為完整提示詞，分別提供文生圖與圖生圖 Profile；保留使用者指定尺寸與 Seed。
+- **H3 LightX2V v1.2**：新增實驗性 4 步文生影 LoRA，支援完整及 Pruned FL2VA 基底。
+- **LTX-2.5 Distilled Q4**：加入實驗性文生影與同步立體聲音訊，主階段 8 步、放大細化 3 步，建議 32 GB 以上記憶體。
+- **大量素材操作更流暢**：改善工作區分頁、範圍選取與 Profile 篩選；加快音樂 WAV 輸出，減少模型載入和生成過程的重複運算與暫存記憶體，維持原有 UI、操作及生成設定。
+- **工作接續更可靠**：重新開啟工作區時保留一般／Turbo／提示詞增強 Profile，改善生成程序結束與資源釋放時的等待問題。
+
+均維持純 Swift／MLX，模型與 LoRA 請在模型中心另行下載。Qwen Turbo 已通過 256×256 文生圖與改色編輯；LTX-2.5 已完成 256×256、9 幀的影音輸出檢查。H3 v1.2 完整影片，以及較長、較高解析度的 LTX-2.5 影片仍未實測；減少步數不會降低主模型的記憶體需求。
+
+[下載 1.26.1004 與中英文版本說明](https://github.com/VaderChen/GenMedia/releases/tag/v1.26.1004) · [Qwen 指南](docs/QWEN_IMAGE_21.md) · [LoRA 指南](docs/LORAS.md) · [驗證紀錄](docs/VALIDATION.md) · [效能紀錄](docs/PERFORMANCE_CHANGES.md)
+
 ## 1.26.1003 新功能與改善
 
 - **更多文生圖風格**：新增鉛筆素描、吉卜力風格、週六早晨卡通與復古彩色電影 4 種 Z-Image Turbo LoRA。
 - **影片鏡頭控制**：新增推近、拉遠、左移、右移 4 種 LTX 鏡頭 LoRA，搭配既有文生影 Profile 使用。
-- **低步數文生影**：MiniMax H3 新增 LightX2V 4／8 步及 Turbo v4（預設 6 步，可調整為 4–8 步）加速 LoRA；Profile 自動套用對應步數與採樣設定。
+- **低步數文生影**：MiniMax H3 新增 LightX2V 4／8 步及 Turbo v4（預設 6 步，可調整為 4–8 步）加速 LoRA；選擇對應 Profile 後，使用「套用 Profile 預設值」帶入步數，採樣設定由程式處理。
 - **減少不必要的記憶體使用與重複運算**：改善原圖預覽、音訊資訊讀取及 Qwen-Image 2.1 生成流程，維持原有 UI、操作與生成設定。
 
 沿用模型中心、LoRA 選單與 Profile 編輯器，不需另外安裝 Python。影片鏡頭 LoRA 與 H3 低步數組合目前為實驗性功能，完整影片效果尚未驗證；模型需另行下載，低步數不會降低主模型的記憶體需求。
@@ -120,7 +133,7 @@ Qwen3-VL、Qwen3.5 與 Qwen3.8 屬於多模態模型，因此模型中心會同�
 
 模型中心新增 **4 種 Z-Image Turbo 圖像風格**：鉛筆素描、吉卜力風格、週六早晨卡通、復古彩色電影；另提供 **4 種 LTX 鏡頭運動**：推近、拉遠、左移、右移，各附 MLX Q4／GGUF Q3 文生影 Profile。沿用現有下載、LoRA 選單與 Profile 編輯方式。鏡頭 LoRA 原為 LTX-2 19B 訓練，在 LTX-2.3 的套用屬實驗性相容；完整影片效果尚待驗證。使用方法、觸發詞與相容範圍見 [LoRA 指南](docs/LORAS.md)。
 
-**MiniMax H3 低步數文生影**新增 LightX2V 4 步／8 步 768p，以及 Turbo v4（預設 6 步，可調整為 4–8 步）。選擇對應 Profile 即會帶入步數與採樣設定；LightX2V 支援完整及 Pruned FL2VA GGUF，Turbo v4 限完整 FL2VA。這些組合目前為實驗性功能，完整影片品質尚待驗證；減少步數不會降低主模型的記憶體需求。現有 LTX-2.3 Profile 已使用 8 步蒸餾模型。
+**MiniMax H3 低步數文生影**新增 LightX2V 4 步／8 步 768p，以及 Turbo v4（預設 6 步，可調整為 4–8 步）。選擇對應 Profile 後，使用「套用 Profile 預設值」帶入步數，採樣設定由程式處理；LightX2V 支援完整及 Pruned FL2VA GGUF，Turbo v4 限完整 FL2VA。這些組合目前為實驗性功能，完整影片品質尚待驗證；減少步數不會降低主模型的記憶體需求。現有 LTX-2.3 Profile 已使用 8 步蒸餾模型。
 
 ### Civitai LoRA
 

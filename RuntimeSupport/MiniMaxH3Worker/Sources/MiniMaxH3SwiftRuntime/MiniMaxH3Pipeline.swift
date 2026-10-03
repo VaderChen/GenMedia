@@ -186,37 +186,44 @@ public struct MiniMaxH3Pipeline {
         if adaptedLayers > 0 { progress("loadingLoRA", 1) }
         progress("loadingTransformer", 1)
 
-        let sigmas = scheduler.sigmas(steps: request.steps)
-        for step in 0 ..< request.steps {
-            let sigma = sigmas[step]
-            let nextSigma = sigmas[step + 1]
+        do {
+            // Text refinement is independent of sigma. Evaluate once after LoRA
+            // application and release the prepared context before VAE decoding.
+            let refinedText = text.shape[1] == transformer!.configuration.hiddenSize
+                ? text : try transformer!.refineTextStates(text)
+            MLX.eval(refinedText)
+            let sigmas = scheduler.sigmas(steps: request.steps)
+            for step in 0 ..< request.steps {
+                let sigma = sigmas[step]
+                let nextSigma = sigmas[step + 1]
 
-            // Carry the audio latent onto the video schedule so the pack
-            // behaves as one flow latent (ModelSamplingAV).
-            let carry = scheduler.carry(videoSigma: sigma)
-            let carriedAudio = audioLatent * Float(carry)
+                // Carry the audio latent onto the video schedule so the pack
+                // behaves as one flow latent (ModelSamplingAV).
+                let carry = scheduler.carry(videoSigma: sigma)
+                let carriedAudio = audioLatent * Float(carry)
 
-            let output = try transformer!.forward(
-                videoLatent: videoLatent,
-                audioLatent: carriedAudio,
-                textStates: text,
-                sigma: Float(sigma),
-                conditioning: conditioning
-            )
-            let audioVelocity = scheduler.uncarryAudioVelocity(
-                output.audio, carriedAudio: carriedAudio, videoSigma: sigma
-            )
+                let output = try transformer!.forward(
+                    videoLatent: videoLatent,
+                    audioLatent: carriedAudio,
+                    textStates: refinedText,
+                    sigma: Float(sigma),
+                    conditioning: conditioning
+                )
+                let audioVelocity = scheduler.uncarryAudioVelocity(
+                    output.audio, carriedAudio: carriedAudio, videoSigma: sigma
+                )
 
-            videoLatent = MiniMaxH3FlowScheduler.eulerStep(
-                videoLatent, velocity: output.video,
-                sigma: sigma, nextSigma: nextSigma
-            )
-            audioLatent = MiniMaxH3FlowScheduler.eulerStep(
-                audioLatent, velocity: audioVelocity,
-                sigma: sigma, nextSigma: nextSigma
-            )
-            MLX.eval(videoLatent, audioLatent)
-            progress("denoising", Double(step + 1) / Double(request.steps))
+                videoLatent = MiniMaxH3FlowScheduler.eulerStep(
+                    videoLatent, velocity: output.video,
+                    sigma: sigma, nextSigma: nextSigma
+                )
+                audioLatent = MiniMaxH3FlowScheduler.eulerStep(
+                    audioLatent, velocity: audioVelocity,
+                    sigma: sigma, nextSigma: nextSigma
+                )
+                MLX.eval(videoLatent, audioLatent)
+                progress("denoising", Double(step + 1) / Double(request.steps))
+            }
         }
 
         // Release the transformer before the VAE loads.

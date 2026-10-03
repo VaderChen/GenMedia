@@ -26,8 +26,10 @@ public enum LocalModelDiscovery {
             discoverNSFWCaptioner,
             discoverManagedMultimodalModels,
             discoverQwenImage21,
+            discoverQwenImage21PromptEnhancers,
             discoverQwenImageEdit,
             discoverLTX23,
+            discoverLTX25,
             discoverLTX23MLXQ4,
             discoverLTX23GGUFDistilledQ3KM,
             discoverLTXVideo096GGUF,
@@ -1371,6 +1373,39 @@ public enum LocalModelDiscovery {
         result.models.append(model)
     }
 
+    private static func discoverQwenImage21PromptEnhancers(
+        root: URL, fileManager: FileManager, result: inout DiscoveredModelCatalog
+    ) {
+        for enhancer in QwenImage21PromptEnhancer.allCases {
+            let directory = root.appendingPathComponent(enhancer.directoryName)
+            let runtime = directory.appendingPathComponent("4bit")
+            guard let data = try? Data(contentsOf: directory.appendingPathComponent("genimage-model.json")),
+                  let manifest = try? JSONDecoder().decode(ManagedModelManifest.self, from: data),
+                  manifest.modelID == enhancer.modelID,
+                  QwenImage21PromptEnhancer.requiredFiles.allSatisfy({ file in
+                      (try? runtime.appendingPathComponent(file).resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]))
+                          .map { $0.isRegularFile == true && ($0.fileSize ?? 0) > 0 } ?? false
+                  }) else { continue }
+            var model = enhancer.descriptor
+            model.localURL = runtime
+            result.models.append(model)
+        }
+    }
+
+    private static func discoverLTX25(root: URL, fileManager: FileManager, result: inout DiscoveredModelCatalog) {
+        let directory = root.appendingPathComponent(LTX25Model.directoryName)
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent("genimage-model.json")),
+              let manifest = try? JSONDecoder().decode(ManagedModelManifest.self, from: data),
+              manifest.modelID == LTX25Model.id,
+              LTX25Model.requiredFiles.allSatisfy({ file in
+                  (try? directory.appendingPathComponent(file).resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]))
+                      .map { $0.isRegularFile == true && ($0.fileSize ?? 0) > 0 } ?? false
+              }) else { return }
+        var model = LTX25Model.descriptor
+        model.localURL = directory
+        result.models.append(model)
+    }
+
     private static func discoverQwenImageEdit(
         root: URL,
         fileManager: FileManager,
@@ -1515,7 +1550,7 @@ public enum LocalModelDiscovery {
             }
             if let entry = LoRACatalog.entry(for: manifest.modelID) {
                 discovered[id]?.displayName = entry.displayName
-                discovered[id]?.compatibleCapabilities = [entry.capability]
+                discovered[id]?.compatibleCapabilities = entry.compatibleCapabilities
                 var descriptor = entry.descriptor
                 descriptor.localURL = normalizedURL
                 managedModels[entry.id] = descriptor

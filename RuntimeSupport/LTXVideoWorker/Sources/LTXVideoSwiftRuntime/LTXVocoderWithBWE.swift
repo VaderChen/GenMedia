@@ -52,7 +52,7 @@ public final class LTXHannSincResampler {
             value,
             widths: [(0, 0), (kernel.shape[0] - 1, kernel.shape[0] - 1), (0, 0)].map { .init($0) }
         )
-        value = MLX.conv1d(value, filter).squeezed()
+        value = MLX.conv1d(value, filter).squeezed(axis: -1)
         value = value * Float(upsampleFactor)
         return value[0..., padLeft..<(value.shape[1] - padRight)][0..., 0..<(length * upsampleFactor)]
     }
@@ -174,7 +174,7 @@ public final class LTXVocoderWithBWE: Module {
             .reshaped(batch, stereoChannels * melSTFT.melCount, bweMel.shape[2])
             .transposed(0, 2, 1)
         let residual = bweGenerator(bweInput).transposed(0, 2, 1)
-        let resampled = try MLX.concatenated((0..<stereoChannels).map { channel in
+        let resampled = try MLX.stacked((0..<stereoChannels).map { channel in
                 try resampler(base[0..., channel, 0...])
         }, axis: 1)
         let count = min(resampled.shape[2], residual.shape[2])

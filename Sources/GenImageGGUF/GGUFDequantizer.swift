@@ -119,11 +119,7 @@ public enum GGUFDequantizer {
                 elementCount: elementCount,
                 name: name
             )
-            return MLXArray(
-                Data(bytes: values, count: values.count * MemoryLayout<Float>.stride),
-                shape,
-                dtype: .float32
-            )
+            return MLXArray(values, shape)
         }
     }
 

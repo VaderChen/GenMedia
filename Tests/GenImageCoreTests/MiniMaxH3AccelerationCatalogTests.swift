@@ -4,8 +4,8 @@ import Testing
 struct MiniMaxH3AccelerationCatalogTests {
     @Test func lowStepProfilesResolveToCompatibleBasesAndSamplingDefaults() throws {
         let profiles = MiniMaxH3Acceleration.allCases.flatMap(\.profiles)
-        #expect(profiles.count == 11)
-        #expect(LoRACatalog.videoProfiles.count == 19)
+        #expect(profiles.count == 15)
+        #expect(LoRACatalog.videoProfiles.count == 23)
         for acceleration in MiniMaxH3Acceleration.allCases {
             let entry = try #require(LoRACatalog.entry(for: acceleration.modelID))
             #expect(!entry.repository.contains("@"))
@@ -26,6 +26,7 @@ struct MiniMaxH3AccelerationCatalogTests {
         let pruned = MiniMaxH3Acceleration.prunedModelID
         #expect(MiniMaxH3Acceleration.lightX2V4Step768.entry.supports(modelID: pruned, capability: .textToVideo))
         #expect(MiniMaxH3Acceleration.lightX2V8Step768.entry.supports(modelID: pruned, capability: .textToVideo))
+        #expect(MiniMaxH3Acceleration.lightX2V4StepV12.entry.supports(modelID: pruned, capability: .textToVideo))
         #expect(!MiniMaxH3Acceleration.larryV4.entry.supports(modelID: pruned, capability: .textToVideo))
         #expect(MiniMaxH3Acceleration.lightX2V4Step768.allowedSteps == 4...4)
         #expect(MiniMaxH3Acceleration.lightX2V8Step768.allowedSteps == 8...8)

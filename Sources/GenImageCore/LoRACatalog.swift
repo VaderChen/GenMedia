@@ -13,10 +13,17 @@ public enum LoRACatalog {
         public let capability: ModelCapability
         public let sizeBytes: Int64
         public var h3Acceleration: MiniMaxH3Acceleration? = nil
+        public var qwenAcceleration: QwenImage21Acceleration? = nil
+
+        public var compatibleCapabilities: Set<ModelCapability> {
+            qwenAcceleration == nil ? [capability] : [.textToImage, .imageToImage]
+        }
 
         public var repository: String { String(id.split(separator: "@")[0]) }
         public func supports(modelID: String, capability: ModelCapability) -> Bool {
-            guard self.capability == capability else { return false }
+            guard compatibleCapabilities.contains(capability) else { return false }
+            if qwenAcceleration != nil { return modelID == QwenImage21Model.id }
+            if modelID == QwenImage21Model.id { return false }
             guard capability == .textToVideo else { return true }
             let compatible = h3Acceleration?.compatibleModelIDs ?? LoRACatalog.ltxModelIDs
             return compatible.contains { $0.lowercased() == modelID.lowercased() }
@@ -27,8 +34,8 @@ public enum LoRACatalog {
                 publisher: String(id.split(separator: "/")[0]), summary: summary,
                 capabilities: [.lora], quantization: .lora,
                 approximateDownloadGB: Double(sizeBytes) / 1_000_000_000,
-                recommendedMemoryGB: h3Acceleration == .larryV4 ? 64 : (capability == .textToVideo ? 48 : 16),
-                licenseName: capability == .textToVideo && h3Acceleration == nil ? "LTX-2 Community License" : "Apache-2.0",
+                recommendedMemoryGB: qwenAcceleration != nil ? 32 : (h3Acceleration == .larryV4 ? 64 : (capability == .textToVideo ? 48 : 16)),
+                licenseName: qwenAcceleration != nil ? "Qwen Research License" : (capability == .textToVideo && h3Acceleration == nil ? "LTX-2 Community License" : "Apache-2.0"),
                 sourceURL: URL(string: "https://huggingface.co/" + repository))
         }
     }
@@ -79,7 +86,7 @@ public enum LoRACatalog {
             displayName: "LTX · 鏡頭右移",
             summary: "Lightricks 官方 Dolly Right 鏡頭運動 LoRA；原為 LTX-2 19B 訓練，LTX-2.3 為實驗性相容，影片效果待驗證。", promptHint: "The camera dollies right.",
             capability: .textToVideo, sizeBytes: 327309208),
-    ] + MiniMaxH3Acceleration.allCases.map(\.entry)
+    ] + MiniMaxH3Acceleration.allCases.map(\.entry) + [QwenImage21Acceleration.entry]
 
     public static func entry(for id: String) -> Entry? { entries.first { $0.id == id } }
 

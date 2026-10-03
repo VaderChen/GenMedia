@@ -105,12 +105,12 @@ public final class LTXFeedForward: Module {
     @ModuleInfo(key: "proj_in") public var projIn: Linear
     @ModuleInfo(key: "proj_out") public var projOut: Linear
 
-    public init(dimension: Int, multiplier: Float) {
+    public init(dimension: Int, multiplier: Float, bias: Bool = true) {
         self._projIn = ModuleInfo(
-            wrappedValue: Linear(dimension, Int(Float(dimension) * multiplier)), key: "proj_in"
+            wrappedValue: Linear(dimension, Int(Float(dimension) * multiplier), bias: bias), key: "proj_in"
         )
         self._projOut = ModuleInfo(
-            wrappedValue: Linear(Int(Float(dimension) * multiplier), dimension), key: "proj_out"
+            wrappedValue: Linear(Int(Float(dimension) * multiplier), dimension, bias: bias), key: "proj_out"
         )
         super.init()
     }

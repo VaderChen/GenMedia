@@ -77,9 +77,9 @@ extension AppStore {
     }
 
     var filteredModels: [ModelDescriptor] {
-        models.filter { model in
+        let search = modelSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return models.filter { model in
             let matchesFilter = modelFilter.capability.map { model.capabilities.contains($0) } ?? true
-            let search = modelSearch.trimmingCharacters(in: .whitespacesAndNewlines)
             let matchesSearch = search.isEmpty
                 || model.displayName.localizedCaseInsensitiveContains(search)
                 || model.publisher.localizedCaseInsensitiveContains(search)
@@ -88,7 +88,7 @@ extension AppStore {
     }
 
     var visibleProfiles: [InferenceProfile] {
-        profiles.filter { ProfileVisibility.isVisible($0, models: models) }
+        ProfileVisibility.visibleProfiles(profiles, models: models)
     }
 
     func profiles(for capability: ModelCapability) -> [InferenceProfile] {

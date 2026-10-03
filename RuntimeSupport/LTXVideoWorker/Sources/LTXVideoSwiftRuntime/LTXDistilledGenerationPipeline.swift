@@ -238,6 +238,12 @@ public final class LTXDistilledGenerationPipeline {
         )
 
         let model = LTXX0Model(transformer: transformer)
+        let ltx25 = transformer.configuration.useKeyframesEmbedding
+        func keyframes(_ dimensions: [Int]) -> MLXArray? {
+            guard ltx25 else { return nil }
+            let spatial = dimensions[1] * dimensions[2]
+            return (MLXArray(0..<(dimensions[0] * spatial)) .< spatial).reshaped([1, -1, 1])
+        }
         let output1 = try LTXDiffusionScheduler.denoise(
             model: model,
             videoLatent: stage1Video,
@@ -247,6 +253,8 @@ public final class LTXDistilledGenerationPipeline {
             videoPositions: videoPositions1,
             audioPositions: audioPositions,
             sigmas: configuration.stage1Sigmas,
+            videoKeyframeMask: keyframes(stage1Dimensions),
+            ancestralNoiseSeed: ltx25 ? configuration.seed &+ 10_000 : nil,
             progress: { completed, total in
                 progress?(
                     LTXDistilledGenerationProgress(
@@ -276,7 +284,7 @@ public final class LTXDistilledGenerationPipeline {
         )
         let stage2AudioNoise = randomLatent(
             shape: output1.audio.shape,
-            seed: configuration.seed &+ 2,
+            seed: configuration.seed &+ (ltx25 ? 3 : 2),
             dtype: output1.audio.dtype
         )
         let stage2Video = stage2VideoNoise * startSigma
@@ -295,6 +303,8 @@ public final class LTXDistilledGenerationPipeline {
             videoPositions: videoPositions2,
             audioPositions: audioPositions,
             sigmas: configuration.stage2Sigmas,
+            videoKeyframeMask: keyframes(stage2Dimensions),
+            ancestralNoiseSeed: ltx25 ? configuration.seed &+ 20_000 : nil,
             progress: { completed, total in
                 progress?(
                     LTXDistilledGenerationProgress(

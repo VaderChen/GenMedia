@@ -261,6 +261,9 @@ public final class MiniMaxMusic3Pipeline {
                 key: randomKeys[1]
             )
             let noisePrompt = latents[0..., 0..<overlap, 0...]
+            let rotary = try transformer.prepareRotary(sequenceLength: condition.shape[1] + 1)
+            let unconditionalCondition = MLXArray.zeros(like: condition)
+            MLX.eval(unconditionalCondition)
 
             for timestepValue in timestepValues {
                 let timestep = MLXArray(
@@ -278,12 +281,14 @@ public final class MiniMaxMusic3Pipeline {
                 let conditional = try transformer(
                     latents,
                     timestep: timestep,
-                    encoderHiddenStates: condition
+                    encoderHiddenStates: condition,
+                    preparedRotary: rotary
                 )
                 let unconditional = try transformer(
                     latents,
                     timestep: timestep,
-                    encoderHiddenStates: MLXArray.zeros(like: condition)
+                    encoderHiddenStates: unconditionalCondition,
+                    preparedRotary: rotary
                 )
                 let velocity = unconditional + generation.flowCFGScale * (
                     conditional - unconditional

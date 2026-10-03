@@ -65,9 +65,9 @@ public enum LTXLatentUpsamplerWeightLoader {
         guard missing.isEmpty else {
             throw LTXVideoRuntimeError.missingWeights(missing)
         }
-        let parameterTree = ModuleParameters.unflattened(
-            converted.sorted { $0.key < $1.key }
-        )
+        // Preserve the model's dictionaries: `upsampler.0` is a named child,
+        // while `res_blocks.0` is an array element. Unflattening cannot tell them apart.
+        let parameterTree = model.parameters().mapValues { key, _ in converted[key]! }
         try model.update(parameters: parameterTree, verify: .all)
         MLX.eval(model)
         return (

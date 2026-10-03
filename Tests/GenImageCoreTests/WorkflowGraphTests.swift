@@ -3,6 +3,34 @@ import Testing
 @testable import GenImageCore
 
 struct WorkflowGraphTests {
+    @Test func indexedLookupPreservesFirstDuplicateAndValueSemantics() {
+        let original = MediaAsset(projectID: UUID(), kind: .imported, title: "first", pixelWidth: 1, pixelHeight: 1)
+        var duplicate = original
+        duplicate.title = "duplicate"
+        var graph = WorkflowGraph(assets: [original, duplicate])
+        let copy = graph
+        let child = MediaAsset(projectID: original.projectID, parentAssetID: original.id,
+            kind: .generated, title: "child", pixelWidth: 1, pixelHeight: 1)
+        graph.append(asset: child)
+        graph.append(asset: duplicate)
+        #expect(graph.asset(id: original.id)?.title == "first")
+        #expect(graph.asset(id: child.id) == child)
+        #expect(copy.asset(id: child.id) == nil)
+        #expect(copy.assets.count == 2)
+        #expect(graph.lineage(of: child.id).map(\.title) == ["first", "child"])
+    }
+
+    @Test func lineageStopsAtCyclesAndMissingParents() {
+        var first = MediaAsset(projectID: UUID(), kind: .generated, title: "a", pixelWidth: 1, pixelHeight: 1)
+        let second = MediaAsset(projectID: first.projectID, parentAssetID: first.id,
+            kind: .generated, title: "b", pixelWidth: 1, pixelHeight: 1)
+        first.parentAssetID = second.id
+        #expect(WorkflowGraph(assets: [first, second]).lineage(of: second.id).map(\.id) == [first.id, second.id])
+        first.parentAssetID = UUID()
+        #expect(WorkflowGraph(assets: [first]).lineage(of: first.id) == [first])
+        #expect(WorkflowGraph(assets: [first]).lineage(of: UUID()).isEmpty)
+    }
+
     @Test func lineageKeepsPipelineOrder() {
         let projectID = UUID()
         let original = MediaAsset(

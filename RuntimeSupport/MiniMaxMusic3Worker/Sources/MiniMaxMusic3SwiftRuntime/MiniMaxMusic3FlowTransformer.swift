@@ -358,6 +358,25 @@ private final class MiniMaxMusic3FlowTransformerBlock: Module {
 public final class MiniMaxMusic3FlowTransformer: Module {
     public let configuration: MiniMaxMusic3FlowTransformerConfiguration
 
+    public struct PreparedRotary {
+        fileprivate let sequenceLength: Int
+        fileprivate let rotaryDim: Int
+        fileprivate let frequencies: (cosine: MLXArray, sine: MLXArray)
+    }
+
+    /// The length includes the time token prepended by the transformer.
+    public func prepareRotary(sequenceLength: Int) throws -> PreparedRotary {
+        let frequencies = try miniMaxMusic3RotaryFrequencies(
+            sequenceLength: sequenceLength, rotaryDim: configuration.rotaryDim
+        )
+        MLX.eval(frequencies.cosine, frequencies.sine)
+        return PreparedRotary(
+            sequenceLength: sequenceLength,
+            rotaryDim: configuration.rotaryDim,
+            frequencies: frequencies
+        )
+    }
+
     @ModuleInfo(key: "time_proj") private var timeProjection: MiniMaxMusic3FourierEmbedding
     @ModuleInfo(key: "time_embed") private var timeEmbedding: MiniMaxMusic3TimestepEmbedding
     @ModuleInfo(key: "preprocess_conv") private var preprocessConvolution: Conv1d
@@ -415,7 +434,8 @@ public final class MiniMaxMusic3FlowTransformer: Module {
     public func callAsFunction(
         _ hiddenStates: MLXArray,
         timestep: MLXArray,
-        encoderHiddenStates: MLXArray
+        encoderHiddenStates: MLXArray,
+        preparedRotary: PreparedRotary? = nil
     ) throws -> MLXArray {
         guard hiddenStates.ndim == 3 else {
             throw MiniMaxMusic3FlowTransformerError.invalidInput(
@@ -435,6 +455,18 @@ public final class MiniMaxMusic3FlowTransformer: Module {
         guard timestep.shape == [batch] else {
             throw MiniMaxMusic3FlowTransformerError.invalidInput("timestep 必須是 [batch]。")
         }
+        let rotary: (cosine: MLXArray, sine: MLXArray)
+        if let preparedRotary {
+            guard preparedRotary.sequenceLength == length + 1,
+                  preparedRotary.rotaryDim == configuration.rotaryDim else {
+                throw MiniMaxMusic3FlowTransformerError.invalidInput("預先計算的 RoPE 尺寸不符。")
+            }
+            rotary = preparedRotary.frequencies
+        } else {
+            rotary = try miniMaxMusic3RotaryFrequencies(
+                sequenceLength: length + 1, rotaryDim: configuration.rotaryDim
+            )
+        }
 
         let zeros = MLXArray.zeros(like: hiddenStates)
         var output = MLX.concatenated(
@@ -445,10 +477,6 @@ public final class MiniMaxMusic3FlowTransformer: Module {
         let time = timeEmbedding(timeProjection(timestep))
         output = inputProjection(output)
         output = MLX.concatenated([time[0..., .newAxis, 0...], output], axis: 1)
-        let rotary = try miniMaxMusic3RotaryFrequencies(
-            sequenceLength: output.shape[1],
-            rotaryDim: configuration.rotaryDim
-        )
         for block in blocks {
             output = try block(output, rotary: rotary)
         }

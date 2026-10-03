@@ -69,7 +69,7 @@ public final class LTXBasicAVTransformerBlock: Module {
             normEps: configuration.normEps
         ), key: "video_to_audio_attn")
         self._ff = ModuleInfo(wrappedValue: LTXFeedForward(
-            dimension: videoDimension, multiplier: configuration.ffMult
+            dimension: videoDimension, multiplier: configuration.ffMult, bias: configuration.videoFFBias
         ), key: "ff")
         self._audioFF = ModuleInfo(wrappedValue: LTXFeedForward(
             dimension: audioDimension, multiplier: configuration.ffMult

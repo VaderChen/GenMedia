@@ -3,13 +3,22 @@ import Foundation
 public struct WorkflowGraph: Sendable {
     public private(set) var assets: [MediaAsset]
     public private(set) var operations: [WorkflowOperation]
+    private var assetIndices: [UUID: Int]
 
     public init(assets: [MediaAsset] = [], operations: [WorkflowOperation] = []) {
         self.assets = assets
         self.operations = operations
+        assetIndices = [:]
+        assetIndices.reserveCapacity(assets.count)
+        for (index, asset) in assets.enumerated() where assetIndices[asset.id] == nil {
+            assetIndices[asset.id] = index
+        }
     }
 
     public mutating func append(asset: MediaAsset) {
+        if assetIndices[asset.id] == nil {
+            assetIndices[asset.id] = assets.count
+        }
         assets.append(asset)
     }
 
@@ -18,7 +27,7 @@ public struct WorkflowGraph: Sendable {
     }
 
     public func asset(id: UUID) -> MediaAsset? {
-        assets.first { $0.id == id }
+        assetIndices[id].map { assets[$0] }
     }
 
     public func children(of assetID: UUID) -> [MediaAsset] {

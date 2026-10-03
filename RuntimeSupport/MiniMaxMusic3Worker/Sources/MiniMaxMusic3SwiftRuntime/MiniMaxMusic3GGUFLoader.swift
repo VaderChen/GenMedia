@@ -492,11 +492,7 @@ private struct MiniMaxMusic3GGUFFile {
             guard let values = try decodeQuantized(raw, typeCode: tensor.typeCode, count: elementCount) else {
                 throw MiniMaxMusic3GGUFError.unsupportedTensorType(tensor.typeCode, tensor.name)
             }
-            return MLXArray(
-                Data(bytes: values, count: values.count * MemoryLayout<Float>.stride),
-                tensor.shape,
-                dtype: .float32
-            )
+            return MLXArray(values, tensor.shape)
         default:
             throw MiniMaxMusic3GGUFError.unsupportedTensorType(tensor.typeCode, tensor.name)
         }

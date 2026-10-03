@@ -36,6 +36,24 @@ public enum MiniMaxMusic3AudioError: LocalizedError, Sendable {
 
 public enum MiniMaxMusic3Audio {
     public static func validate(_ audio: MLXArray, sampleRate: Int) throws -> MiniMaxMusic3AudioReport {
+        let report = try validateLayout(audio, sampleRate: sampleRate)
+        let values = audio.asType(.float32)
+        try withExtendedLifetime(values) {
+            let source = values.asData(access: .noCopyIfContiguous)
+            try source.data.withUnsafeBytes { raw in
+                for offset in stride(from: 0, to: raw.count, by: MemoryLayout<Float>.size) {
+                    guard raw.loadUnaligned(fromByteOffset: offset, as: Float.self).isFinite else {
+                        throw MiniMaxMusic3AudioError.nonFiniteSamples
+                    }
+                }
+            }
+        }
+        return report
+    }
+
+    private static func validateLayout(
+        _ audio: MLXArray, sampleRate: Int
+    ) throws -> MiniMaxMusic3AudioReport {
         guard audio.shape.count == 3,
               audio.shape[0] == 1,
               audio.shape[1] == 2,
@@ -44,10 +62,6 @@ public enum MiniMaxMusic3Audio {
         }
         guard sampleRate > 0 else {
             throw MiniMaxMusic3AudioError.invalidSampleRate
-        }
-        let values = audio.asType(.float32).asArray(Float.self)
-        guard values.allSatisfy(\.isFinite) else {
-            throw MiniMaxMusic3AudioError.nonFiniteSamples
         }
         return MiniMaxMusic3AudioReport(
             sampleCount: audio.shape[2],
@@ -61,12 +75,11 @@ public enum MiniMaxMusic3Audio {
         sampleRate: Int,
         to outputURL: URL
     ) throws -> MiniMaxMusic3AudioReport {
-        let report = try validate(audio, sampleRate: sampleRate)
-        let values = audio.asType(.float32).asArray(Float.self)
-        let pcmByteCount = values.count * MemoryLayout<Int16>.size
-        guard pcmByteCount <= Int(UInt32.max) - 36 else {
+        let report = try validateLayout(audio, sampleRate: sampleRate)
+        guard audio.size <= (Int(UInt32.max) - 36) / MemoryLayout<Int16>.size else {
             throw MiniMaxMusic3AudioError.fileTooLarge
         }
+        let pcmByteCount = audio.size * MemoryLayout<Int16>.size
 
         var data = Data(capacity: 44 + pcmByteCount)
         data.append(contentsOf: "RIFF".utf8)
@@ -85,17 +98,28 @@ public enum MiniMaxMusic3Audio {
         data.append(contentsOf: "data".utf8)
         appendLittleEndian(UInt32(pcmByteCount), to: &data)
 
-        for index in 0..<report.sampleCount {
-            for channel in 0..<report.channelCount {
-                let value = values[channel * report.sampleCount + index]
-                let clamped = max(-1, min(1, value))
-                let sample: Int16
-                if clamped <= -1 {
-                    sample = Int16.min
-                } else {
-                    sample = Int16((clamped * Float(Int16.max)).rounded())
+        data.count = 44 + pcmByteCount
+        let values = audio.asType(.float32)
+        try withExtendedLifetime(values) {
+            let source = values.asData(access: .noCopyIfContiguous)
+            try source.data.withUnsafeBytes { raw in
+                try data.withUnsafeMutableBytes { destination in
+                    var offset = 44
+                    for index in 0..<report.sampleCount {
+                        for channel in 0..<report.channelCount {
+                            let value = raw.loadUnaligned(
+                                fromByteOffset: (channel * report.sampleCount + index) * MemoryLayout<Float>.size,
+                                as: Float.self
+                            )
+                            guard value.isFinite else { throw MiniMaxMusic3AudioError.nonFiniteSamples }
+                            let clamped = max(-1, min(1, value))
+                            let sample = clamped <= -1
+                                ? Int16.min : Int16((clamped * Float(Int16.max)).rounded())
+                            destination.storeBytes(of: sample.littleEndian, toByteOffset: offset, as: Int16.self)
+                            offset += 2
+                        }
+                    }
                 }
-                appendLittleEndian(sample, to: &data)
             }
         }
 

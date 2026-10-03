@@ -30,7 +30,7 @@ public enum QwenImage21Model {
             InferenceProfile(name: "\(capability == .textToImage ? "文生圖" : "圖生圖") · Qwen-Image 2.1 4-bit",
                 capability: capability, modelID: id, modelRevision: revision, architecture: .mlxSwift,
                 defaults: ProfileDefaults(width: 1024, height: 1024, steps: 40, outputCount: 1),
-                notes: "Swift／MLX 實驗性 Runtime；尺寸須為 32 倍數，CFG=1，不使用負面提示詞與 LoRA。建議 32GB 以上。",
+                notes: "Swift／MLX 實驗性 Runtime；尺寸須為 32 倍數、CFG=1，不使用負面提示詞。加速請選 Viggle Turbo 6 步 Profile。建議 32GB 以上。",
                 isBuiltIn: true)
         }
     }

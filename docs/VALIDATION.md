@@ -2,7 +2,74 @@
 
 最近更新：2026-10-03。本文記錄可重複執行的檢查，以及各次結果的實際範圍。
 
-## 最新結果（1.26.1003）
+## 1.26.1004 回歸與安裝包（2026-10-03）
+
+本版包含下方的新模型整合與兩輪函式最佳化。最終回歸在 Apple M4、16 GB RAM、Swift 6.4／macOS 27 SDK 執行；小尺寸真實模型結果與純函式測試分開記錄。
+
+| 範圍 | 結果與限制 |
+| --- | --- |
+| 根套件 | 205 項／52 suites 通過，包含模型目錄、Profile、程序退出、Qwen 數值回歸、素材關係、串流文字及 ACE-Step 音訊。 |
+| WebUI | 14 項通過；另以 500 組狀態、6,000 次選取事件比較修改前後，結果一致。 |
+| MiniMax Music 3 | 24 項／2 suites 通過，涵蓋條件／無條件推論、RoPE 重用及 WAV 輸出。 |
+| LTX | 50 項／7 suites 通過；4 個需指定真實模型環境的案例條件略過，實際模型另依下方記錄驗證。 |
+| MiniMax H3 | 全套 70 項／11 suites 中有 2 項既有 VAE 時間分段測試失敗；本版未更改相關實作或測試預期。新增文字條件重用與 LoRA 數值回歸通過，不能宣稱全套通過。 |
+| 建置、啟動與維護腳本 | 12 項通過。 |
+| Release 建置與安裝包 | 9 個出貨產品建置成功；App／DMG 均完成 Developer ID 簽章、公證、Staple 與 Gatekeeper 驗證。複製回專案及唯讀掛載後再次核對通過。 |
+| 安裝包啟動檢查 | 內附 Qwen Turbo、LTX-2.5、H3 v1.2 Worker 正確拒絕不相容步數；FFmpeg／FFprobe 可執行。僅驗證封裝與參數檢查，未執行模型生成。 |
+| 小尺寸輸出一致性 | Qwen Turbo 256×256／6 步在最佳化前後的 PNG 相同；LTX 的 256×256／9 幀 latent 回放解碼，逐幀像素、時間戳及 AAC 資料相同。這不是重新執行完整文生影。 |
+
+效能數字是指定函式與輸入的局部量測，不代表整個 App 或模型生成的加速倍率。H3 的已知失敗為 `temporalTilingPlan` 與 `temporalOutputFrameCount`；詳見下方初始整合紀錄。完整方法、記憶體拷貝範圍與數值一致性結果見[效能紀錄](PERFORMANCE_CHANGES.md)。
+
+原始日誌保存於本機 `Outputs/function-optimization-2026-10-03/`、`Outputs/project-function-optimization-2026-10-03/` 與 `Outputs/release-1.26.1004/`，不納入 Git。
+
+### 1.26.1004 公證安裝包
+
+- App 版本 `1.26.1004`，Build `2102`，Bundle ID `com.vader.genimage`；Apple Silicon。
+- App 公證：`91f5bca7-d82a-40bd-b655-f1ae46a5cb59` — **Accepted**。
+- DMG 公證：`d2c4b966-1bb0-4e92-a4cd-6c6057ab9ce3` — **Accepted**。
+- `GenMedia-1.26.1004-arm64.dmg`，`214,624,691` bytes；App／DMG 均完成 Staple，Gatekeeper 回報 `Notarized Developer ID`。
+- SHA-256：`5e46c3d6cd1f85c2c9d38dc91e568f0b3ae17ecec4443e341700eb5eab69eff9`。
+- 安裝包於 APFS 製作，複製回專案磁碟後雜湊一致；再次唯讀掛載並核對版本、主程式與 7 個內附執行元件的 Developer ID、hardened runtime、secure timestamp，以及 22 份 WebUI 資源與授權文件。建置輸入雜湊與封裝前一致。
+- [下載與中英文版本說明](https://github.com/VaderChen/GenMedia/releases/tag/v1.26.1004)。日誌與雜湊紀錄保存於本機 `Outputs/release-1.26.1004/`。
+
+## 1.26.1004 新模型初始整合驗證（2026-10-03）
+
+維持純 Swift／MLX 與既有 UI；實際圖片驗證使用 256×256。以下為整合階段的驗證快照，最終回歸及安裝包結果依上方 1.26.1004 紀錄為準。
+
+| 範圍 | 結果與限制 |
+| --- | --- |
+| Qwen Viggle Turbo v0.3 r128 | 227 組 LoRA 配對、量化投影與專用 6 步時間表通過。256×256／Seed 42 文生圖約 31.01 秒，紅茶壺改藍色約 45.82 秒；已檢視輸出。 |
+| Qwen 一般／Turbo 切換 | Turbo 文生圖、Turbo 編輯後，再以一般模型 2 步完成生成，約 22.60 秒。2 步只檢查流程，不評畫質。 |
+| Qwen PE | T2I／I2I 4-bit 實際下載、安裝器與目錄重新辨識通過。兩個模型均完成原生文字推論；I2I 回覆偶發缺少圖片參照的起始引號，加入限定欄位修補並以實際回覆回放驗證。PE I2I＋Turbo 6 步已實際完成 256×256 改色編輯，包含前處理約 190.56 秒；來源圖片連結與尺寸保持正確。 |
+| H3 LightX2V 4 步 v1.2 | 實際下載及雜湊驗證完成，624 個張量／208 組配對通過基底結構核對，代表性殘差非零且有限。7 項 LoRA 測試通過，涵蓋 v1.2、既有 8 步與 Turbo v4。沒有完整 H3 影片生成或加速倍率實測。 |
+| LTX-2.5 | 43 項 LTX Runtime 測試通過（實際模型測試需另行啟用）。新增 Gemma4 獨立 FP64 純量 oracle，誤差門檻 `3e-5`，含 padding 不變性、BOS／截斷、FF bias、首幀 mask 與 ancestral Euler。27.21 GB 蒸餾模型包通過下載雜湊、安裝及重新辨識；Gemma4 真實 4-bit 權重的 48 層／49 組 hidden states 另已通過載入與有限值檢查。真實音訊／影片解碼器亦已通過雙聲道、9 幀 256×256 與有限值檢查。 |
+| LTX-2.5 影音輸出 | 真實提示詞生成紅色茶壺；封裝修正後重用同一份 latent，確認 H.264 256×256／9 幀／24 FPS、AAC 48 kHz 雙聲道與 0.375 秒長度。首、中、末幀已檢視，茶壺與桌面構圖一致。未驗證長片、高解析度、音訊品質或與官方 BF16 的品質一致性。 |
+| 根套件 | 完整 199 項測試通過，包含目錄、安裝、請求、LoRA、回覆解析、Profile 分頁還原與既有流程；另有 9 項 WebUI 測試通過。 |
+| H3 全套回歸 | 69 項中有 2 項既有時間分段測試失敗；不能宣稱 H3 全套通過。詳見下方說明。 |
+| 本機 Release | `build.command --no-app` 成功，包含 App、MCP、Qwen 2.1 及各獨立 Worker；未製作新 DMG。 |
+
+本次重跑也捕捉到既有 `WarmRuntimeWorker.unload()` 偶發卡在 Foundation `waitUntilExit()`。已移除完成路徑的多餘等待，強制結束則檢查子行程存活狀態，避免進入同步 RunLoop。新增 32 次並行自然退出／強制結束競爭測試，與常駐 Worker 重用、閒置釋放、取消測試一併通過。分頁草稿改為先比對 Profile ID，重開時再以名稱區分一般／Turbo／PE；無法唯一辨識的舊草稿須重新選取，避免默默換錯模型。
+
+LTX 真實模型載入時發現 `upsampler.0` 被扁平權重重建流程誤判成陣列；已改為保留模型原有的字典與陣列結構。新增空間／時間放大器的 safetensors 實際載入及固定輸出測試，兩個案例均通過。 完整去噪後另發現音訊 resampler 的無條件 `squeeze` 移除了單一批次維度，以及左右聲道應堆疊成 `[B,2,T]`；均已修正，補上常數訊號／單一批次回歸，以及真實解碼器的獨立驗證（約 2.98 秒）。 封裝實測另捕捉到較短的 0.33 秒音軌令 FFmpeg `-shortest` 將 9 幀裁成 7 幀；現在補齊／裁切音訊至影片長度，完成事件也回報影片時長。以真實生成 latent 回放解碼，`ffprobe` 確認修正後保留 9 幀；另新增以真實 Worker／FFmpeg 執行的短音軌封裝回歸，約 2.99 秒通過。
+
+H3 失敗位於未修改的 `MiniMaxH3VideoVAETests.swift`：`paddedTokenCount` 期望 12、實際 15；3 個 latent frames 的 `outputFrameCount` 期望 9、實際 6。該 VAE 實作及這兩項測試與任務開始的 `9ba5ea2` 相同，新增加速 LoRA 的測試另已通過。本次保留失敗紀錄，未更改 VAE 演算法或調整期望值來掩蓋問題。
+
+LTX 的初次完整生成至原封裝約 869.92 秒，Worker peak memory footprint 約 13.44 GB；16 GB 測試機出現明顯記憶體壓力，仍建議 32 GB 以上。修正封裝後以相同 latent 回放解碼／封裝約 2.13 秒，**不是 2.13 秒文生影，也不是最終版本單次完整執行的效能量測**。最終樣片為 `ltx25-256/video-4.mp4`，生成紀錄為 `worker-3.log`、修正後回放與媒體核對為 `worker-4.log`／`verification-4.json`。
+
+實跑記錄在本機 `Outputs/new-model-integration-2026-10-03/`，不納入 Git。模型原位於 `Vader Ext3`；驗證途中磁碟離線，LTX 下載中止，改用 `VaderHD` 下的暫存 `Models` 目錄續做驗證。這些暫存路徑不是 App 的預設安裝目錄。
+
+新增可選實測需明確設定環境變數，普通測試不會自動下載數十 GB 權重：
+
+- `GENIMAGE_PE_INSTALL_ROOT`：以正式安裝器驗證 PE T2I／I2I 與 Qwen Turbo。
+- `GENIMAGE_PE_SMOKE_ROOT`、`GENIMAGE_PE_SMOKE_IMAGE`、`GENIMAGE_PE_SMOKE_OUTPUT`：執行原生 PE；可用 `GENIMAGE_PE_SMOKE_KIND=I2I` 選單一模型。
+- `GENIMAGE_PE_REPLAY_OUTPUT`：回放原生 I2I 模型的完整回覆，檢查嚴格 JSON 解析與限定引號修補。
+- `GENIMAGE_QWEN_PE_E2E_ROOT`、`GENIMAGE_QWEN_PE_E2E_MODEL`、`GENIMAGE_QWEN_PE_E2E_WORKER`、`GENIMAGE_QWEN_PE_E2E_IMAGE`、`GENIMAGE_QWEN_PE_E2E_OUTPUT`：測試 PE 釋放後交接原生 Turbo Worker，輸出 256×256 編輯圖。
+- `GENIMAGE_LTX25_INSTALL_ROOT`：安裝及重新辨識蒸餾模型包，不下載 Dev 權重。
+- LTX Worker 套件的 `GENIMAGE_LTX25_MODEL`：實際載入 Gemma4 全部 48 層並檢查 49 組 hidden states，另可執行雙聲道音訊與 9 幀影片的解碼器測試。
+- `GENIMAGE_LTX_DEBUG_LATENTS`：選填的 `.safetensors` 路徑，保留去噪後的影音 latent 供解碼診斷；正常生成不輸出這份檔案。 `GENIMAGE_LTX_DEBUG_LATENTS_INPUT` 可在 LTX-2.5 重用它進行解碼診斷，會檢查 latent 尺寸、幀數與有限值；一般請求仍執行完整文字編碼與去噪。
+- `GENIMAGE_LTX25_WORKER`、`GENIMAGE_LTX25_FFMPEG`、`GENIMAGE_LTX25_FFPROBE`：搭配 `GENIMAGE_LTX25_MODEL` 啟用實際 Worker 封裝回歸，檢查短音軌仍保留 9 幀及完整時長。
+
+## 歷史結果（1.26.1003）
 
 | 範圍 | 結果 | 說明 |
 | --- | --- | --- |

@@ -75,6 +75,7 @@ private enum WorkerFormat: String {
 
 private enum WorkerVariant: String {
     case ltx23 = "ltx-2.3"
+    case ltx25 = "ltx-2.5"
     case ltx096 = "ltx-0.9.6"
 }
 
@@ -168,7 +169,7 @@ private enum WorkerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .usage:
-            "用法：GenImageLTXVideoWorker --request <request.json> --format mlx|gguf --variant ltx-2.3|ltx-0.9.6"
+            "用法：GenImageLTXVideoWorker --request <request.json> --format mlx|gguf --variant ltx-2.5|ltx-2.3|ltx-0.9.6"
         case let .invalidRequest(message):
             "LTX Worker 請求無效：\(message)"
         case let .modelIncomplete(url, missing):
@@ -222,20 +223,30 @@ private enum GenImageLTXVideoWorker {
         switch (format, variant) {
         case (.mlx, .ltx23):
             try await runMLX(request)
+        case (.mlx, .ltx25):
+            try await runMLX(request, variant: .ltx25)
         case (.gguf, .ltx23):
             try await runGGUF(request, variant: .ltx23)
         case (.gguf, .ltx096):
             try await runGGUF(request, variant: .ltx096)
-        case (.mlx, .ltx096):
-            throw WorkerError.invalidRequest("MLX 格式只支援 ltx-2.3。")
+        case (.mlx, .ltx096), (.gguf, .ltx25):
+            throw WorkerError.invalidRequest("LTX 2.5 需使用指定的 MLX 權重。")
         }
     }
 
-    private static func runMLX(_ request: WorkerRequest) async throws {
+    private static func runMLX(_ request: WorkerRequest, variant: WorkerVariant = .ltx23) async throws {
         try validate(request)
+        let ltx25 = variant == .ltx25
+        if ltx25 {
+            Memory.cacheLimit = 256 * 1024 * 1024
+            guard request.stage1Steps == 8, request.stage2Steps == 3, request.loras.isEmpty,
+                  request.width % 64 == 0, request.height % 64 == 0 else {
+                throw WorkerError.invalidRequest("LTX-2.5 Distilled 需固定 8＋3 步、64 倍數尺寸，目前不混用其他 LoRA。")
+            }
+        }
         let modelDirectory = URL(fileURLWithPath: request.modelDirectory, isDirectory: true)
         let outputURL = URL(fileURLWithPath: request.outputPath)
-        let missing = requiredModelFiles(format: .mlx, variant: .ltx23).filter {
+        let missing = requiredModelFiles(format: .mlx, variant: variant).filter {
             !FileManager.default.fileExists(atPath: modelDirectory.appendingPathComponent($0).path)
         }
         guard missing.isEmpty else {
@@ -251,14 +262,14 @@ private enum GenImageLTXVideoWorker {
             throw WorkerError.unsupportedImageConditioning
         }
 
-        let gemmaDirectory = try resolveGemmaDirectory(
+        let gemmaDirectory = ltx25 ? modelDirectory.appendingPathComponent("gemma4-12b-ltx-v1") : try resolveGemmaDirectory(
             request.gemmaDirectory,
             modelDirectory: modelDirectory
         )
         let gemmaMissing = [
             "config.json",
             "tokenizer.json",
-            "model.safetensors.index.json"
+            ltx25 ? "model.safetensors" : "model.safetensors.index.json"
         ].filter {
             !FileManager.default.fileExists(atPath: gemmaDirectory.appendingPathComponent($0).path)
         }
@@ -272,19 +283,32 @@ private enum GenImageLTXVideoWorker {
         )
         emit(.progress(stage: "loadingModel", value: 0.01))
 
-        let textEmbeds = try await encodePrompt(
-            request.prompt,
-            gemmaDirectory: gemmaDirectory,
-            modelDirectory: modelDirectory
-        )
-        emit(.progress(stage: "encodingPrompt", value: 0.08))
-
-        let generated = try runDiffusion(
-            textEmbeds: textEmbeds,
-            request: request,
-            modelDirectory: modelDirectory
-        )
+        let generated: LTXDistilledGenerationResult
+        if let replay = try debugLatents(for: request, ltx25: ltx25) {
+            generated = replay
+        } else {
+            let textEmbeds = try await encodePrompt(
+                request.prompt,
+                gemmaDirectory: gemmaDirectory,
+                modelDirectory: modelDirectory,
+                ltx25: ltx25
+            )
+            Memory.clearCache()
+            emit(.progress(stage: "encodingPrompt", value: 0.08))
+            generated = try runDiffusion(
+                textEmbeds: textEmbeds,
+                request: request,
+                modelDirectory: modelDirectory,
+                ltx25: ltx25
+            )
+        }
+        Memory.clearCache()
         emit(.progress(stage: "denoising", value: 0.76))
+
+        if let path = ProcessInfo.processInfo.environment["GENIMAGE_LTX_DEBUG_LATENTS"], !path.isEmpty {
+            try MLX.save(arrays: ["video": generated.videoLatent, "audio": generated.audioLatent],
+                         url: URL(fileURLWithPath: path))
+        }
 
         let audio = try decodeAudio(generated.audioLatent, modelDirectory: modelDirectory)
         emit(.progress(stage: "audioDecoding", value: 0.84))
@@ -296,7 +320,8 @@ private enum GenImageLTXVideoWorker {
         defer { try? FileManager.default.removeItem(at: temporaryWAV) }
         let audioInfo = try writeWAV(audio, sampleRate: 48_000, to: temporaryWAV)
 
-        let video = try decodeVideo(generated.videoLatent, modelDirectory: modelDirectory)
+        Memory.clearCache()
+        let video = try decodeVideo(generated.videoLatent, modelDirectory: modelDirectory, ltx25: ltx25)
         emit(.progress(stage: "videoDecoding", value: 0.92))
         MLX.eval(video)
         try muxVideo(
@@ -304,6 +329,7 @@ private enum GenImageLTXVideoWorker {
             audioURL: temporaryWAV,
             frameRate: request.frameRate,
             outputURL: outputURL,
+            videoCodec: .h264VideoToolbox,
             progress: { value in
                 emit(.progress(stage: "encoding", value: 0.92 + value * 0.07))
             }
@@ -316,7 +342,7 @@ private enum GenImageLTXVideoWorker {
 
         emit(
             .completed(
-                durationSeconds: audioInfo.durationSeconds,
+                durationSeconds: Double(generated.frames) / Double(request.frameRate),
                 sampleRate: audioInfo.sampleRate,
                 numFrames: generated.frames,
                 pixelWidth: generated.width,
@@ -412,7 +438,7 @@ private enum GenImageLTXVideoWorker {
 
         emit(
             .completed(
-                durationSeconds: audioInfo.durationSeconds,
+                durationSeconds: Double(generated.frames) / Double(request.frameRate),
                 sampleRate: audioInfo.sampleRate,
                 numFrames: generated.frames,
                 pixelWidth: generated.width,
@@ -424,10 +450,22 @@ private enum GenImageLTXVideoWorker {
     private static func encodePrompt(
         _ prompt: String,
         gemmaDirectory: URL,
-        modelDirectory: URL
+        modelDirectory: URL,
+        ltx25: Bool = false
     ) async throws -> (video: MLXArray, audio: MLXArray) {
         let tokenizer = try await AutoTokenizer.from(modelFolder: gemmaDirectory)
         let tokenIDs = tokenizer.encode(text: prompt.trimmingCharacters(in: .whitespacesAndNewlines))
+        if ltx25 {
+            let layout = try LTXGemma4TextEncoder.promptLayout(tokenIDs: tokenIDs, maxLength: gemmaMaxLength)
+            let attentionMask = MLXArray(layout.attentionMask.map(Int32.init), [1, gemmaMaxLength])
+            let stacked = try encodeGemma4(layout: layout, directory: gemmaDirectory)
+            Memory.clearCache()
+            let connector = LTXGemmaTextEncoderConnector(configuration: try LTXGemmaConnectorConfiguration())
+            _ = try LTXGemmaConnectorWeightLoader.load(connector: connector, from: modelDirectory, computeDType: computeDType)
+            let embeds = connector(stacked, attentionMask: attentionMask)
+            eval(embeds.video, embeds.audio)
+            return embeds
+        }
         let padTokenID = tokenizer.convertTokenToId("<pad>") ?? 0
         let layout = try LTXGemmaFeaturePreparation.leftPad(
             tokenIDs: tokenIDs,
@@ -460,6 +498,33 @@ private enum GenImageLTXVideoWorker {
         let embeds = connector(stacked, attentionMask: attentionMask)
         MLX.eval(embeds.video, embeds.audio)
         return embeds
+    }
+
+    /// Opt-in decoder diagnostics; ordinary requests always run prompt encoding and diffusion.
+    private static func debugLatents(for request: WorkerRequest, ltx25: Bool) throws -> LTXDistilledGenerationResult? {
+        guard let path = ProcessInfo.processInfo.environment["GENIMAGE_LTX_DEBUG_LATENTS_INPUT"], !path.isEmpty else { return nil }
+        guard ltx25 else { throw WorkerError.invalidRequest("Latent 回放目前僅供 LTX-2.5 解碼診斷。") }
+        let config = try LTXDistilledGenerationConfiguration(width: request.width, height: request.height,
+            frames: request.frames, frameRate: request.frameRate, seed: request.seed)
+        let tensors = try MLX.loadArrays(url: URL(fileURLWithPath: path))
+        guard let video = tensors["video"], let audio = tensors["audio"],
+              video.shape == [1, 128, config.latentFrameCount, request.height / 32, request.width / 32],
+              audio.shape == [1, 8, config.audioTokenCount, 16],
+              video.dtype.isFloatingPoint, audio.dtype.isFloatingPoint,
+              all(isFinite(video)).item(Bool.self), all(isFinite(audio)).item(Bool.self) else {
+            throw WorkerError.invalidTensor("Latent 回放的尺寸、幀數或數值與請求不符。")
+        }
+        return LTXDistilledGenerationResult(videoLatent: video, audioLatent: audio,
+            width: request.width, height: request.height, frames: request.frames)
+    }
+
+    private static func encodeGemma4(layout: LTXGemmaPromptLayout, directory: URL) throws -> MLXArray {
+        let model = try LTXGemma4TextEncoder(directory: directory)
+        let mask = MLXArray(layout.attentionMask.map(Int32.init), [1, gemmaMaxLength])
+        let hidden = try model.allHiddenStates(tokenIDs: MLXArray(layout.tokenIDs.map(Int32.init), [1, gemmaMaxLength]), attentionMask: mask)
+        let stacked = try LTXGemmaFeaturePreparation.stackForProjection(hidden, attentionMask: mask)
+        eval(stacked)
+        return stacked
     }
 
     private static func encodeGGUFPrompt(
@@ -512,16 +577,20 @@ private enum GenImageLTXVideoWorker {
     private static func runDiffusion(
         textEmbeds: (video: MLXArray, audio: MLXArray),
         request: WorkerRequest,
-        modelDirectory: URL
+        modelDirectory: URL,
+        ltx25: Bool = false
     ) throws -> LTXDistilledGenerationResult {
         let transformerURL = modelDirectory.appendingPathComponent(
-            "transformer-distilled-1.1.safetensors"
+            ltx25 ? "transformer-distilled.safetensors" : "transformer-distilled-1.1.safetensors"
         )
         let transformer = try LTXTransformerWeightLoader.load(
             from: transformerURL,
             modelDirectory: modelDirectory,
             computeDType: computeDType
         ).model
+        guard transformer.configuration.useKeyframesEmbedding == ltx25 else {
+            throw WorkerError.invalidRequest("LTX 模型版本與 Transformer 設定不符。")
+        }
         let adaptedLayers = try LTXLoRALoader.apply(request.loras.map {
             LTXLoRAConfiguration(url: URL(fileURLWithPath: $0.path), scale: Float($0.scale))
         }, to: transformer)
@@ -657,10 +726,14 @@ private enum GenImageLTXVideoWorker {
 
     private static func decodeVideo(
         _ latent: MLXArray,
-        modelDirectory: URL
+        modelDirectory: URL,
+        ltx25: Bool = false
     ) throws -> MLXArray {
         let configuration: LTXVideoVAEConfiguration
-        if FileManager.default.fileExists(
+        if ltx25 {
+            // The selected 2.5 pack ships the unchanged convolutional VAE, not DiffVAE.
+            configuration = try LTXVideoVAEConfiguration()
+        } else if FileManager.default.fileExists(
             atPath: modelDirectory.appendingPathComponent("embedded_config.json").path
         ) {
             configuration = try LTXVideoVAEConfiguration.load(from: modelDirectory)
@@ -859,42 +932,14 @@ private enum GenImageLTXVideoWorker {
         sampleRate: Int,
         to url: URL
     ) throws -> (sampleRate: Int, durationSeconds: Double) {
-        guard audio.ndim == 3, audio.shape[0] == 1, audio.shape[1] > 0, audio.shape[2] > 0 else {
-            throw WorkerError.invalidTensor("音訊應為 [1, channels, samples]，實際為 \(audio.shape)。")
+        let data: Data
+        do {
+            data = try LTXMediaEncoding.wav(audio, sampleRate: sampleRate)
+        } catch let error as LTXMediaEncoding.EncodingError {
+            throw WorkerError.invalidTensor(error.localizedDescription)
         }
-        let channels = audio.shape[1]
-        let sampleCount = audio.shape[2]
-        let values = audio.asType(.float32).asArray(Float.self)
-        guard values.allSatisfy(\.isFinite) else {
-            throw WorkerError.invalidTensor("音訊含有 NaN 或 Inf。")
-        }
-        var pcm = Data(capacity: channels * sampleCount * 2)
-        for sample in 0..<sampleCount {
-            for channel in 0..<channels {
-                let value = min(1, max(-1, values[channel * sampleCount + sample]))
-                let integer = Int16((value * 32_767).rounded(.towardZero))
-                var littleEndian = integer.littleEndian
-                withUnsafeBytes(of: &littleEndian) { pcm.append(contentsOf: $0) }
-            }
-        }
-
-        var data = Data()
-        data.append(contentsOf: Array("RIFF".utf8))
-        appendUInt32LE(&data, UInt32(36 + pcm.count))
-        data.append(contentsOf: Array("WAVE".utf8))
-        data.append(contentsOf: Array("fmt ".utf8))
-        appendUInt32LE(&data, 16)
-        appendUInt16LE(&data, 1)
-        appendUInt16LE(&data, UInt16(channels))
-        appendUInt32LE(&data, UInt32(sampleRate))
-        appendUInt32LE(&data, UInt32(sampleRate * channels * 2))
-        appendUInt16LE(&data, UInt16(channels * 2))
-        appendUInt16LE(&data, 16)
-        data.append(contentsOf: Array("data".utf8))
-        appendUInt32LE(&data, UInt32(pcm.count))
-        data.append(pcm)
         try data.write(to: url, options: .atomic)
-        return (sampleRate, Double(sampleCount) / Double(sampleRate))
+        return (sampleRate, Double(audio.dim(2)) / Double(sampleRate))
     }
 
     private static func muxVideo(
@@ -933,6 +978,10 @@ private enum GenImageLTXVideoWorker {
         ] + videoCodecArguments + [
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
+            // Causal audio decoding can end before the last video frame. Keep every frame
+            // and pad/trim audio to the requested video duration instead of truncating video.
+            "-af", "apad",
+            "-t", String(Double(video.shape[2]) / Double(frameRate)),
             "-shortest",
             "-y",
             outputURL.path
@@ -942,28 +991,7 @@ private enum GenImageLTXVideoWorker {
         process.standardError = FileHandle.standardError
         try process.run()
 
-        let frameCount = video.shape[2]
-        for index in 0..<frameCount {
-            let frame = video[0..., 0..., index, 0..., 0...]
-                .transposed(0, 2, 3, 1)
-                .asType(.float32)
-            let values = frame.asArray(Float.self)
-            var bytes = [UInt8](repeating: 0, count: video.shape[3] * video.shape[4] * 3)
-            for pixel in 0..<video.shape[3] * video.shape[4] {
-                for channel in 0..<3 {
-                    let value = values[pixel * 3 + channel]
-                    guard value.isFinite else {
-                        pipe.fileHandleForWriting.closeFile()
-                        process.terminate()
-                        throw WorkerError.invalidTensor("影片 frame \(index) 含有 NaN 或 Inf。")
-                    }
-                    let normalized = min(255, max(0, ((value + 1) * 127.5).rounded()))
-                    bytes[pixel * 3 + channel] = UInt8(normalized)
-                }
-            }
-            pipe.fileHandleForWriting.write(Data(bytes))
-            progress(Double(index + 1) / Double(frameCount))
-        }
+        try writeVideoFrames(video, to: pipe, process: process, progress: progress)
         pipe.fileHandleForWriting.closeFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
@@ -1000,29 +1028,7 @@ private enum GenImageLTXVideoWorker {
         process.standardError = FileHandle.standardError
         try process.run()
 
-        let frameCount = video.shape[2]
-        for index in 0..<frameCount {
-            let frame = video[0..., 0..., index, 0..., 0...]
-                .transposed(0, 2, 3, 1)
-                .asType(.float32)
-            let values = frame.asArray(Float.self)
-            var bytes = [UInt8](repeating: 0, count: video.shape[3] * video.shape[4] * 3)
-            for pixel in 0..<video.shape[3] * video.shape[4] {
-                for channel in 0..<3 {
-                    let value = values[pixel * 3 + channel]
-                    guard value.isFinite else {
-                        pipe.fileHandleForWriting.closeFile()
-                        process.terminate()
-                        throw WorkerError.invalidTensor("影片 frame \(index) 含有 NaN 或 Inf。")
-                    }
-                    bytes[pixel * 3 + channel] = UInt8(
-                        min(255, max(0, ((value + 1) * 127.5).rounded()))
-                    )
-                }
-            }
-            pipe.fileHandleForWriting.write(Data(bytes))
-            progress(Double(index + 1) / Double(frameCount))
-        }
+        try writeVideoFrames(video, to: pipe, process: process, progress: progress)
         pipe.fileHandleForWriting.closeFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
@@ -1030,6 +1036,34 @@ private enum GenImageLTXVideoWorker {
                 process.terminationStatus,
                 "FFmpeg 未能建立 \(outputURL.lastPathComponent)。"
             )
+        }
+    }
+
+    private static func writeVideoFrames(
+        _ video: MLXArray,
+        to pipe: Pipe,
+        process: Process,
+        progress: (Double) -> Void
+    ) throws {
+        var bytes = Data()
+        let frameCount = video.dim(2)
+        for index in 0..<frameCount {
+            do {
+                let frame = video[0, 0..., index, 0..., 0...].transposed(1, 2, 0)
+                try LTXMediaEncoding.rgb24Frame(frame, into: &bytes)
+                try pipe.fileHandleForWriting.write(contentsOf: bytes)
+            } catch {
+                pipe.fileHandleForWriting.closeFile()
+                if process.isRunning { process.terminate() }
+                if let encodingError = error as? LTXMediaEncoding.EncodingError {
+                    if case .nonFiniteVideo = encodingError {
+                        throw WorkerError.invalidTensor("影片 frame \(index) 含有 NaN 或 Inf。")
+                    }
+                    throw WorkerError.invalidTensor(encodingError.localizedDescription)
+                }
+                throw error
+            }
+            progress(Double(index + 1) / Double(frameCount))
         }
     }
 
@@ -1099,6 +1133,10 @@ private enum GenImageLTXVideoWorker {
         variant: WorkerVariant
     ) -> [String] {
         switch (format, variant) {
+        case (.mlx, .ltx25):
+            return ["config.json", "embedded_config.json", "quantize_config.json", "transformer-distilled.safetensors",
+                    "connector.safetensors", "vae_decoder.safetensors", "vae_encoder.safetensors", "audio_vae.safetensors",
+                    "vocoder.safetensors", "spatial_upscaler_x2_v1_1.safetensors", "spatial_upscaler_x2_v1_1_config.json"]
         case (.mlx, .ltx23):
             return [
                 "config.json",
@@ -1130,7 +1168,7 @@ private enum GenImageLTXVideoWorker {
                 "tokenizer/spiece.model",
                 "LTX-Video-0.9.6-VAE-BF16.safetensors"
             ]
-        case (.mlx, .ltx096):
+        case (.mlx, .ltx096), (.gguf, .ltx25):
             return []
         }
     }
@@ -1181,16 +1219,6 @@ private enum GenImageLTXVideoWorker {
             throw WorkerError.modelIncomplete(bundled, missing)
         }
         return bundled
-    }
-
-    private static func appendUInt16LE(_ data: inout Data, _ value: UInt16) {
-        var littleEndian = value.littleEndian
-        withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
-    }
-
-    private static func appendUInt32LE(_ data: inout Data, _ value: UInt32) {
-        var littleEndian = value.littleEndian
-        withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
     }
 
     private static func invocation(from arguments: [String]) throws -> WorkerInvocation {

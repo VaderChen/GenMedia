@@ -3,6 +3,7 @@ import Foundation
 /// Sampling contracts shared by the catalog, app service and native H3 worker.
 public enum MiniMaxH3Acceleration: String, Codable, CaseIterable, Sendable {
     case lightX2V4Step768 = "lightx2v-fl2va-4step-v1-768p"
+    case lightX2V4StepV12 = "lightx2v-fl2va-4step-v1.2-768p"
     case lightX2V8Step768 = "lightx2v-fl2va-8step-v1-768p"
     case larryV4 = "larry-h3-turbo-v4-600"
 
@@ -18,7 +19,7 @@ public enum MiniMaxH3Acceleration: String, Codable, CaseIterable, Sendable {
     }
     public var allowedSteps: ClosedRange<Int> {
         switch self {
-        case .lightX2V4Step768: 4...4
+        case .lightX2V4Step768, .lightX2V4StepV12: 4...4
         case .lightX2V8Step768: 8...8
         case .larryV4: 4...8
         }
@@ -31,6 +32,7 @@ public enum MiniMaxH3Acceleration: String, Codable, CaseIterable, Sendable {
     public var modelID: String {
         switch self {
         case .lightX2V4Step768: "lightx2v/Minimax-h3-Turbo@fl2v-4step-v1.0-768p"
+        case .lightX2V4StepV12: "lightx2v/Minimax-h3-Turbo@fl2v-4step-v1.2-768p"
         case .lightX2V8Step768: "lightx2v/Minimax-h3-Turbo@fl2v-8step-v1.0-768p"
         case .larryV4: "larryvrh/MiniMax-H3-Turbo-Lora@v4-step600-ema"
         }
@@ -38,9 +40,10 @@ public enum MiniMaxH3Acceleration: String, Codable, CaseIterable, Sendable {
 
     public var entry: LoRACatalog.Entry {
         let isLarry = self == .larryV4
-        let name = isLarry ? "H3 · Turbo v4（4–8 步）" : "H3 · LightX2V \(defaultSteps) 步 768p"
+        let version = self == .lightX2V4StepV12 ? "1.2" : "1.0"
+        let name = isLarry ? "H3 · Turbo v4（4–8 步）" : "H3 · LightX2V \(defaultSteps) 步 768p" + (self == .lightX2V4StepV12 ? " v1.2" : "")
         let filename = isLarry ? "minimax_h3_turbo_v4_step600_ema.safetensors"
-            : "minimax_h3_fl2v_turbo_\(defaultSteps)step_v1.0_768p_comfyui_bf16.safetensors"
+            : "minimax_h3_fl2v_turbo_\(defaultSteps)step_v\(version)_768p_comfyui_bf16.safetensors"
         return LoRACatalog.Entry(
             id: modelID, directoryName: "loras/" + rawValue, filename: filename,
             revision: isLarry ? "43a74557ac3f6539db8e0f2a959d03feb7a81480" : "3ec17a324ced54151364f24f8b5fb6bf7e26414f",

@@ -98,7 +98,7 @@ public actor QwenVLImageDescriptionService: ImageDescribing {
             )
             generationProgressBase += (progressEnd - generationProgressBase) * completedFraction
             receivedText = receivedText || !description.isEmpty
-            if Self.isUsableDescription(description) {
+            if generation.isUsable {
                 progress(1)
                 return description
             }
@@ -161,6 +161,7 @@ public actor QwenVLImageDescriptionService: ImageDescribing {
     private struct DescriptionGenerationResult {
         var text: String
         var chunks: Int
+        var isUsable: Bool
     }
 
     private func generateDescription(
@@ -175,62 +176,28 @@ public actor QwenVLImageDescriptionService: ImageDescribing {
         let stream = try await modelContainer.generate(input: input, parameters: parameters)
         var result = ""
         var chunks = 0
+        var statistics = DescriptionTextStatistics()
 
         for await event in stream {
             try Task.checkCancellation()
             if case let .chunk(text) = event {
                 result += text
+                statistics.append(text)
                 chunks += 1
                 let generationProgress = min(
                     progressBase + progressSpan,
                     progressBase + Double(chunks) / Double(expectedChunks) * progressSpan
                 )
                 progress(generationProgress)
-                if Self.isClearlyDegenerate(result) { break }
+                if statistics.isClearlyDegenerate { break }
             }
         }
 
         return DescriptionGenerationResult(
             text: result.trimmingCharacters(in: .whitespacesAndNewlines),
-            chunks: chunks
+            chunks: chunks,
+            isUsable: statistics.isUsable
         )
-    }
-
-    private static func isUsableDescription(_ text: String) -> Bool {
-        let scalars = Array(text.unicodeScalars.filter {
-            !CharacterSet.whitespacesAndNewlines.contains($0)
-        })
-        guard scalars.count >= 16, !isClearlyDegenerate(text) else { return false }
-
-        let meaningfulCount = scalars.filter {
-            CharacterSet.letters.contains($0) || CharacterSet.decimalDigits.contains($0)
-        }.count
-        return meaningfulCount >= 8 && Double(meaningfulCount) / Double(scalars.count) >= 0.3
-    }
-
-    private static func isClearlyDegenerate(_ text: String) -> Bool {
-        let scalars = Array(text.unicodeScalars.filter {
-            !CharacterSet.whitespacesAndNewlines.contains($0)
-        })
-        guard scalars.count >= 16 else { return false }
-
-        var longestRun = 1
-        var currentRun = 1
-        for index in 1..<scalars.count {
-            if scalars[index] == scalars[index - 1] {
-                currentRun += 1
-                longestRun = max(longestRun, currentRun)
-            } else {
-                currentRun = 1
-            }
-        }
-        if longestRun >= 10 { return true }
-
-        let punctuationAndSymbols = CharacterSet.punctuationCharacters
-            .union(.symbols)
-        let punctuationCount = scalars.filter { punctuationAndSymbols.contains($0) }.count
-        return scalars.count >= 40
-            && Double(punctuationCount) / Double(scalars.count) > 0.5
     }
 
     private func loadContainer(

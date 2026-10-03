@@ -60,7 +60,7 @@ struct MiniMaxH3AccelerationTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["GENIMAGE_H3_LORA_INSTALL_ROOT"] != nil))
     func downloadsAndRediscoversAccelerationAdapters() async throws {
         let root = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["GENIMAGE_H3_LORA_INSTALL_ROOT"]))
-        for acceleration in [MiniMaxH3Acceleration.lightX2V8Step768, .larryV4] {
+        for acceleration in [MiniMaxH3Acceleration.lightX2V8Step768, .lightX2V4StepV12, .larryV4] {
             let entry = acceleration.entry
             let installed = try await HuggingFaceModelInstaller().install(modelID: entry.id, rootURL: root, progress: { _ in })
             #expect(try HuggingFaceModelInstaller.verify(modelID: entry.id, rootURL: root) == installed)

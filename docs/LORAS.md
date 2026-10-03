@@ -1,6 +1,6 @@
 # 文生圖與文生影 LoRA
 
-模型中心新增 11 組可直接下載的 LoRA：4 種 **Z-Image Turbo** 圖像風格、4 種 **LTX-2.3** 鏡頭運動，以及 3 組 **MiniMax H3** 低步數加速。沿用現有的模型中心、LoRA 選單與 Profile 編輯器。
+模型中心新增 13 組可直接下載的 LoRA：4 種 **Z-Image Turbo** 圖像風格、4 種 **LTX-2.3** 鏡頭運動，4 組 **MiniMax H3** 低步數加速，以及 1 組 **Qwen 2.1 Turbo** 文生圖／編輯加速。沿用現有的模型中心、LoRA 選單與 Profile 編輯器。
 
 ## 圖像風格
 
@@ -39,11 +39,12 @@ LTX 目前接受一般 Linear LoRA，可在 Profile 組合多個相容鏡頭 LoR
 |---|---:|---|---:|---|
 | LightX2V 4-step v1.0 768p | 固定 4 | 完整 GGUF、Pruned GGUF | 1.96 GB | [LightX2V](https://huggingface.co/lightx2v/Minimax-h3-Turbo) |
 | LightX2V 8-step v1.0 768p | 固定 8 | 完整 GGUF、Pruned GGUF | 1.96 GB | [LightX2V](https://huggingface.co/lightx2v/Minimax-h3-Turbo) |
+| LightX2V 4 步 v1.2 768p | 4 | 完整／Pruned GGUF | 1.96 GB | [LightX2V v1.2](https://huggingface.co/lightx2v/Minimax-h3-Turbo) |
 | Turbo v4 step600 EMA | 4–8，預設 6 | 完整 GGUF | 780 MB | [Larry](https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora) |
 
-在文生影選擇名稱含「H3 · LightX2V」或「H3 · Turbo v4」的 Profile，下載其相依模型，待就緒後生成。三組共提供 11 個預設，對應 Abiray FL2VA Q4_0／Q4_K_M／Q4_K_S，以及 LightX2V 可使用的 Unsloth FL2VA Pruned Q4_K。預設為 1344×768、124 幀、24 FPS、LoRA 權重 1；測試流程可自行降低尺寸與幀數。主模型、VAE、文字編碼器仍需另行安裝。
+在文生影選擇名稱含「H3 · LightX2V」或「H3 · Turbo v4」的 Profile，下載其相依模型，待就緒後生成。四組共提供 15 個預設，對應 Abiray FL2VA Q4_0／Q4_K_M／Q4_K_S，以及 LightX2V 可使用的 Unsloth FL2VA Pruned Q4_K。預設為 1344×768、124 幀、24 FPS、LoRA 權重 1；測試流程可自行降低尺寸與幀數。主模型、VAE、文字編碼器仍需另行安裝。
 
-選擇 Profile 會帶入對應步數；若更改到不適用的步數，生成前會提示修正。Turbo v4 在 4 步的大幅快速動作可能產生拖影，建議保留 6 步或提高至 8 步。每次只使用一個加速 LoRA；目前提供文生影，未開放加速圖生影或 Ref2VA。三組 LoRA 皆採 Apache-2.0 授權。
+選擇 Profile 後使用「套用 Profile 預設值」帶入對應步數；若更改到不適用的步數，生成前會提示修正。Turbo v4 在 4 步的大幅快速動作可能產生拖影，建議保留 6 步或提高至 8 步。每次只使用一個加速 LoRA；目前提供文生影，未開放加速圖生影或 Ref2VA。四組 LoRA 皆採 Apache-2.0 授權。
 
 LightX2V 768p 版本使用影片 shift 6／音訊 shift 3；Turbo v4 使用 12／3，皆採 Euler、simple 時間網格。程式會依 LoRA 自動設定，無需額外 UI 操作。LightX2V 使用 ComfyUI 格式權重；8 步版必須套用每層的 alpha/rank（1/16），4 步版為 1，不能混用縮放。採樣設定依 [LightX2V 模型規格](https://github.com/ModelTC/Minimax-H3-Turbo#1-model-specs) 與 [Turbo v4 作者說明](https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora)。
 
@@ -56,9 +57,17 @@ Turbo v4 含完整 AdaLN 時間條件權重；本專案尚未移植作者節點�
 
 ## 下載與相容性
 
-十一個下載項目固定到已核對的 Hugging Face revision，保存原始檔名與來源 manifest。下載完成後會驗證檔案，再更新模型中心及 Profile 的就緒狀態。文生影 LoRA 不會混入文生圖的 LoRA 選單。
+十三個下載項目固定到已核對的 Hugging Face revision，保存原始檔名與來源 manifest。下載完成後會驗證檔案，再更新模型中心及 Profile 的就緒狀態。文生影 LoRA 不會混入文生圖的 LoRA 選單。
 
 推論維持純 Swift／MLX。LTX 與 H3 使用低秩殘差套用 LoRA，保留原有量化基底；不相容的層、缺少的 A/B 配對、非有限倍率與條件控制請求會明確失敗。Z-Image 量化模型則使用邏輯輸入維度配對 LoRA，並支援這批風格所需的 AdaLN 權重。
+
+## Qwen-Image 2.1 Viggle Turbo v0.3
+
+[Viggle Turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) 的 r128 版本約 680 MB，提供文生圖及單圖編輯兩個 **6 步** Profile。先安裝 Qwen-Image 2.1 MLX 4-bit 基底與 LoRA，再選擇名稱含「Viggle Turbo」的 Profile，並將步數設為 6；Profile 已包含 LoRA，手動選單可保持「無」。固定使用 LoRA 權重 1、CFG=1；不接受負面提示詞。也能搭配名稱含「提示詞增強」的 Profile 使用，增強模型需另行下載。
+
+這是 Qwen 2.1 專用 LoRA，不適用於 Qwen 2511、Z-Image 或影片模型。保留量化基底，以獨立低秩殘差套用；任意 Qwen LoRA、混合多個 LoRA 及其他步數目前不在支援範圍。權重依 Qwen Research License，限非商業研究／評估。
+
+256×256、Seed 42 的實測完成紅色茶壺文生圖及改為藍色的單圖編輯，並能接續切回一般模型生成。這是限定案例驗證，不代表所有題材、高解析度品質或固定加速倍率。詳見 [Qwen 指南](QWEN_IMAGE_21.md)。
 
 ## 驗證紀錄（2026-10-03）
 
@@ -80,3 +89,9 @@ Turbo v4 含完整 AdaLN 時間條件權重；本專案尚未移植作者節點�
 - GenImage 與 H3 Worker 的 Release 建置通過。紀錄位於 `Outputs/lowstep-loras-2026-10-03/`，不納入 Git。
 
 **本機尚未安裝完整 H3 基底與配套元件，未進行端到端文生影、畫質或實際加速倍率驗證**。三組 Profile 均標記為實驗性；LightX2V 4 步版本次只驗證公開標頭與採樣規格，尚未下載整份權重逐層執行。
+
+### 1.26.1004 補充驗證
+
+- H3 LightX2V v1.2：完成實際下載、雜湊驗證、安裝 manifest 與重新辨識；完整 624 個張量、208 組低秩配對及代表性殘差計算通過。尚未載入完整 H3 基底生成影片。
+- Qwen Turbo：227 組配對全部相容，INT4 投影的增量非零且有限；6 步文生圖／編輯的 256×256 實跑通過。
+- LTX-2.5 為獨立的蒸餾基底；目前不接受這裡的 LTX-2.3 鏡頭 LoRA。

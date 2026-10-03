@@ -18,10 +18,14 @@ public final class LTXTransformer: Module {
 
     @ParameterInfo(key: "scale_shift_table") public var scale_shift_table: MLXArray
     @ParameterInfo(key: "audio_scale_shift_table") public var audio_scale_shift_table: MLXArray
+    @ParameterInfo(key: "keyframes_abs_pos_embedding") public var keyframesAbsPosEmbedding: MLXArray?
     public let configuration: LTXTransformerConfiguration
 
     public init(configuration: LTXTransformerConfiguration) {
         self.configuration = configuration
+        self._keyframesAbsPosEmbedding = ParameterInfo(
+            wrappedValue: configuration.useKeyframesEmbedding ? zeros([1, configuration.videoDim]) : nil,
+            key: "keyframes_abs_pos_embedding")
         self._patchifyProj = ModuleInfo(
             wrappedValue: Linear(configuration.videoPatchChannels, configuration.videoDim),
             key: "patchify_proj"
@@ -147,7 +151,8 @@ public final class LTXTransformer: Module {
         audioAttentionMask: MLXArray? = nil,
         videoCrossAttentionMask: MLXArray? = nil,
         videoTimesteps: MLXArray? = nil,
-        audioTimesteps: MLXArray? = nil
+        audioTimesteps: MLXArray? = nil,
+        videoKeyframeMask: MLXArray? = nil
     ) -> (video: MLXArray, audio: MLXArray) {
         let videoLatent = videoLatent.asType(.bfloat16)
         let audioLatent = audioLatent.asType(.bfloat16)
@@ -156,7 +161,10 @@ public final class LTXTransformer: Module {
         let audioTextEmbeds = audioTextEmbeds?.asType(.bfloat16)
         let videoDType = videoLatent.dtype
         let audioDType = audioLatent.dtype
-        let videoHidden = patchifyProj(videoLatent)
+        var videoHidden = patchifyProj(videoLatent)
+        if let keyframesAbsPosEmbedding, let videoKeyframeMask {
+            videoHidden = videoHidden + videoKeyframeMask.asType(videoHidden.dtype) * keyframesAbsPosEmbedding
+        }
         let audioHidden = audioPatchifyProj(audioLatent)
         let globalTimestep = timestep.asType(videoDType)
         let globalEmbedding = LTXTransformerOps.timestepEmbedding(
@@ -284,7 +292,8 @@ public final class LTXX0Model {
         videoPositions: MLXArray? = nil,
         audioPositions: MLXArray? = nil,
         videoAttentionMask: MLXArray? = nil,
-        audioAttentionMask: MLXArray? = nil
+        audioAttentionMask: MLXArray? = nil,
+        videoKeyframeMask: MLXArray? = nil
     ) -> (video: MLXArray, audio: MLXArray) {
         let velocity = transformer(
             videoLatent: videoLatent,
@@ -295,7 +304,8 @@ public final class LTXX0Model {
             videoPositions: videoPositions,
             audioPositions: audioPositions,
             videoAttentionMask: videoAttentionMask,
-            audioAttentionMask: audioAttentionMask
+            audioAttentionMask: audioAttentionMask,
+            videoKeyframeMask: videoKeyframeMask
         )
         let videoSigma = sigma[0..., .newAxis, .newAxis]
         let audioSigma = sigma[0..., .newAxis, .newAxis]

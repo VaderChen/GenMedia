@@ -22,6 +22,8 @@ public struct LTXTransformerConfiguration: Sendable, Equatable {
     public let positionalEmbeddingMaxPos: [Int]
     public let audioPositionalEmbeddingMaxPos: [Int]
     public let normEps: Float
+    public let videoFFBias: Bool
+    public let useKeyframesEmbedding: Bool
 
     public init(
         numLayers: Int = 48,
@@ -43,7 +45,9 @@ public struct LTXTransformerConfiguration: Sendable, Equatable {
         ropeType: LTXRoPEType = .split,
         positionalEmbeddingMaxPos: [Int] = [20, 2048, 2048],
         audioPositionalEmbeddingMaxPos: [Int] = [20],
-        normEps: Float = 1e-6
+        normEps: Float = 1e-6,
+        videoFFBias: Bool = true,
+        useKeyframesEmbedding: Bool = false
     ) throws {
         guard numLayers > 0,
               videoDim > 0,
@@ -94,6 +98,8 @@ public struct LTXTransformerConfiguration: Sendable, Equatable {
         self.positionalEmbeddingMaxPos = positionalEmbeddingMaxPos
         self.audioPositionalEmbeddingMaxPos = audioPositionalEmbeddingMaxPos
         self.normEps = normEps
+        self.videoFFBias = videoFFBias
+        self.useKeyframesEmbedding = useKeyframesEmbedding
     }
 
     public static func load(from modelDirectory: URL) throws -> Self {
@@ -124,7 +130,9 @@ public struct LTXTransformerConfiguration: Sendable, Equatable {
             ropeType: LTXRoPEType(rawValue: transformer.string("rope_type", default: "split")) ?? .split,
             positionalEmbeddingMaxPos: transformer.ints("positional_embedding_max_pos", default: [20, 2048, 2048]),
             audioPositionalEmbeddingMaxPos: transformer.ints("audio_positional_embedding_max_pos", default: [20]),
-            normEps: transformer.float("norm_eps", default: 1e-6)
+            normEps: transformer.float("norm_eps", default: 1e-6),
+            videoFFBias: transformer.bool("ff_bias", default: true),
+            useKeyframesEmbedding: transformer.bool("use_keyframes_abs_pos_embedding", default: false)
         )
     }
 }
@@ -155,6 +163,11 @@ private indirect enum JSONValue: Decodable {
     func int(_ key: String, default value: Int) -> Int {
         guard case let .number(number) = self[key] else { return value }
         return Int(number)
+    }
+
+    func bool(_ key: String, default value: Bool) -> Bool {
+        guard case let .bool(result) = self[key] else { return value }
+        return result
     }
 
     func float(_ key: String, default value: Float) -> Float {

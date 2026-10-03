@@ -409,11 +409,7 @@ final class LTXVideo096GGUFFile {
         case 30: return MLXArray(raw, tensor.shape, dtype: .bfloat16)
         case 11, 12, 13, 14, 23:
             let values = try decodeQuantized(raw, typeCode: tensor.typeCode, count: count)
-            return MLXArray(
-                Data(bytes: values, count: values.count * MemoryLayout<Float>.stride),
-                tensor.shape,
-                dtype: .float32
-            )
+            return MLXArray(values, tensor.shape)
         default: throw LTXVideo096GGUFError.unsupportedTensorType(tensor.typeCode, tensor.name)
         }
     }

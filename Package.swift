@@ -48,6 +48,7 @@ let package = Package(
     targets: [
         .target(name: "GenImageCore"),
         .target(name: "QwenImage21Runtime", dependencies: [
+            "GenImageCore",
             .product(name: "MLX", package: "mlx-swift"),
             .product(name: "MLXFast", package: "mlx-swift"),
             .product(name: "MLXNN", package: "mlx-swift"),
@@ -129,6 +130,10 @@ let package = Package(
         .testTarget(
             name: "GenImageAppTests",
             dependencies: ["GenImageApp", "GenImageCore"]
+        ),
+        .testTarget(
+            name: "ACEStepSwiftRuntimeTests",
+            dependencies: ["ACEStepSwiftRuntime", .product(name: "MLX", package: "mlx-swift")]
         ),
         .testTarget(
             name: "GenImageCoreTests",

@@ -44,27 +44,42 @@ enum PCM16WaveWriter {
         }
         let sampleCount = audio.shape[1]
         let channelCount = audio.shape[2]
-        let values = audio.asType(.float32).asArray(Float.self)
-        let finiteValues = values.map { $0.isFinite ? $0 : 0 }
-        let sourcePeak = finiteValues.reduce(Float(0)) { max($0, abs($1)) }
-        let appliedGain = sourcePeak > 0 ? min(Float(0.95) / sourcePeak, 1) : 1
-
-        var pcmData = Data(capacity: finiteValues.count * MemoryLayout<Int16>.size)
-        for value in finiteValues {
-            let scaled = max(-1, min(1, value * appliedGain))
-            let integer = Int16((scaled * Float(Int16.max)).rounded())
-            pcmData.appendLittleEndian(integer)
-        }
-        guard pcmData.count <= Int(UInt32.max) - 36 else {
+        guard audio.size <= (Int(UInt32.max) - 36) / MemoryLayout<Int16>.size else {
             throw PCM16WaveError.fileTooLarge
         }
+        let pcmByteCount = audio.size * MemoryLayout<Int16>.size
 
         var waveData = waveHeader(
-            pcmByteCount: pcmData.count,
+            pcmByteCount: pcmByteCount,
             sampleRate: sampleRate,
             channelCount: channelCount
         )
-        waveData.append(pcmData)
+        waveData.count = 44 + pcmByteCount
+        var sourcePeak: Float = 0
+        var appliedGain: Float = 1
+        let values = audio.asType(.float32)
+        withExtendedLifetime(values) {
+            let source = values.asData(access: .noCopyIfContiguous)
+            source.data.withUnsafeBytes { raw in
+                for offset in stride(from: 0, to: raw.count, by: MemoryLayout<Float>.size) {
+                    let value = raw.loadUnaligned(fromByteOffset: offset, as: Float.self)
+                    if value.isFinite { sourcePeak = max(sourcePeak, abs(value)) }
+                }
+                appliedGain = sourcePeak > 0 ? min(Float(0.95) / sourcePeak, 1) : 1
+                waveData.withUnsafeMutableBytes { destination in
+                    for index in 0..<values.size {
+                        let value = raw.loadUnaligned(
+                            fromByteOffset: index * MemoryLayout<Float>.size, as: Float.self
+                        )
+                        let scaled = max(-1, min(1, (value.isFinite ? value : 0) * appliedGain))
+                        let integer = Int16((scaled * Float(Int16.max)).rounded())
+                        destination.storeBytes(
+                            of: integer.littleEndian, toByteOffset: 44 + index * 2, as: Int16.self
+                        )
+                    }
+                }
+            }
+        }
 
         try FileManager.default.createDirectory(
             at: outputURL.deletingLastPathComponent(),
@@ -137,19 +152,17 @@ final class PCM16WaveStreamWriter {
               audio.shape[2] == channelCount else {
             throw PCM16WaveError.invalidShape(audio.shape)
         }
-        var values = audio.asType(.float32).asArray(Float.self)
-        for index in values.indices {
-            if values[index].isFinite {
-                sourcePeak = max(sourcePeak, abs(values[index]))
-            } else {
-                values[index] = 0
+        // Own the staging bytes before sanitizing; never mutate the source tensor.
+        var data = audio.asType(.float32).asData(access: .copy).data
+        data.withUnsafeMutableBytes { raw in
+            for offset in stride(from: 0, to: raw.count, by: MemoryLayout<Float>.size) {
+                let value = raw.loadUnaligned(fromByteOffset: offset, as: Float.self)
+                if value.isFinite {
+                    sourcePeak = max(sourcePeak, abs(value))
+                } else {
+                    raw.storeBytes(of: Float(0), toByteOffset: offset, as: Float.self)
+                }
             }
-        }
-        let data = values.withUnsafeBufferPointer { buffer in
-            Data(
-                bytes: buffer.baseAddress!,
-                count: buffer.count * MemoryLayout<Float>.size
-            )
         }
         try temporaryHandle?.write(contentsOf: data)
         sampleCount += audio.shape[1]
@@ -197,17 +210,19 @@ final class PCM16WaveStreamWriter {
             pending.append(block)
             let usableByteCount = pending.count - pending.count % MemoryLayout<Float>.size
             guard usableByteCount > 0 else { continue }
-            var pcmData = Data(capacity: usableByteCount / 2)
-            let startIndex = pending.startIndex
-            for offset in stride(from: 0, to: usableByteCount, by: MemoryLayout<Float>.size) {
-                let index = startIndex + offset
-                let bitPattern = UInt32(pending[index])
-                    | UInt32(pending[index + 1]) << 8
-                    | UInt32(pending[index + 2]) << 16
-                    | UInt32(pending[index + 3]) << 24
-                let value = Float(bitPattern: bitPattern)
-                let scaled = max(-1, min(1, value * appliedGain))
-                pcmData.appendLittleEndian(Int16((scaled * Float(Int16.max)).rounded()))
+            var pcmData = Data(count: usableByteCount / 2)
+            pending.withUnsafeBytes { source in
+                pcmData.withUnsafeMutableBytes { destination in
+                    for offset in stride(from: 0, to: usableByteCount, by: MemoryLayout<Float>.size) {
+                        let bits = source.loadUnaligned(fromByteOffset: offset, as: UInt32.self)
+                        let value = Float(bitPattern: UInt32(littleEndian: bits))
+                        let scaled = max(-1, min(1, value * appliedGain))
+                        let sample = Int16((scaled * Float(Int16.max)).rounded())
+                        destination.storeBytes(
+                            of: sample.littleEndian, toByteOffset: offset / 2, as: Int16.self
+                        )
+                    }
+                }
             }
             try outputHandle.write(contentsOf: pcmData)
             pending.removeFirst(usableByteCount)

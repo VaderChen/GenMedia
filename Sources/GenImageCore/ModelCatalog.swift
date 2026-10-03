@@ -627,7 +627,7 @@ public enum ModelCatalog {
             licenseName: "BSD-3-Clause",
             sourceURL: URL(string: "https://huggingface.co/mlboydaisuke/Real-ESRGAN-x4-CoreML")
         )
-    ] + [QwenImage21Model.descriptor] + LoRACatalog.entries.map(\.descriptor)
+    ] + [QwenImage21Model.descriptor, LTX25Model.descriptor] + QwenImage21PromptEnhancer.allCases.map(\.descriptor) + LoRACatalog.entries.map(\.descriptor)
 
     public static let builtInProfiles: [InferenceProfile] = [
         InferenceProfile(
@@ -1122,7 +1122,8 @@ public enum ModelCatalog {
             notes: "先以 Real-ESRGAN 4× 修復，再以 Lanczos 縮放為 2×。",
             isBuiltIn: true
         )
-    ] + miniMaxH3GGUFProfiles + QwenImage21Model.profiles + LoRACatalog.videoProfiles
+    ] + miniMaxH3GGUFProfiles + QwenImage21Model.profiles + QwenImage21Acceleration.profiles
+      + QwenImage21PromptEnhancer.profiles + [LTX25Model.profile] + LoRACatalog.videoProfiles
 
     private static var miniMaxH3GGUFProfiles: [InferenceProfile] {
         let variants: [(modelID: String, displayName: String)] = [

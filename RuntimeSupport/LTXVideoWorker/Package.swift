@@ -58,7 +58,8 @@ let package = Package(
             dependencies: [
                 "LTXVideoSwiftRuntime",
                 .product(name: "MLX", package: "mlx-swift")
-            ]
+            ],
+            resources: [.copy("Fixtures")]
         )
     ]
 )

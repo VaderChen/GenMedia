@@ -150,3 +150,107 @@ node --test Tests/WebUI/*.test.mjs
 - `git diff --check` 通過；WebUI、操作參數與模型設定檔均未修改。本次 `.bak`、舊編譯快取備份與大型合成測試檔在驗證後移除。
 
 主要日誌：`test-native-final-build.log`、`tests-targeted.log`、`app-release-build.log`、`qwen-final-build.log`、`tests-final.log`、`tests-runtime.log`，以及兩份 `*-sample.txt`，皆位於前述本機量測目錄。
+
+## 2026-10-03 函式層級最佳化
+
+本輪以開始修改時的工作區內容作為基準，保留先前的新模型整合。UI、操作流程、生成參數與模型精度保持不變。
+
+- `Qwen21Transformer.callAsFunction`：每個去噪步驟先在兩列調制資料上完成 `1 + scale` 與 `tanh`，再展開至 token；所有 Transformer 區塊共用已實體化的結果，省去各層重複相加，並縮小 `tanh` 的運算範圍。步驟相關資料仍於每步重新計算。
+- `LTXGemma4TextEncoder.allHiddenStates`／`PreparedRotary`：同次文字編碼的 Q、K 與各層共用 local／global 兩組位置表，保留 FP32 旋轉及原 dtype 輸出。位置表只存在於單次呼叫中，不跨提示詞保存。
+- `LTXMediaEncoding.wav`／Worker `writeWAV`：直接在最終 WAV 緩衝區寫入 PCM16，合併有限值檢查與取樣轉換。連續的 Float32 輸入借用 MLX 記憶體；非連續輸入仍使用安全的連續副本。保留裁切、朝零截斷、little-endian、聲道交錯及原子寫檔。
+- `rgb24Frame`／`writeVideoFrames`：由 MLX 將非連續影格整理為連續排列，兩條影片輸出路徑共用 byte 轉換，每次封裝重用一個 RGB `Data`。保留原本逐像素取整、非有限值拒絕、影格順序及進度回報；借用的 MLX 資料不會逸出張量生命週期。
+
+### 函式量測
+
+Apple M4、16 GB RAM，Swift Release 編譯。相同輸入先暖機，新舊版本交替量測 9 次，以下為中位數；新版本的位置表準備時間也包含於 RoPE 量測。
+
+| 範圍 | 修改前 | 修改後 |
+| --- | ---: | ---: |
+| 10 秒、48 kHz 雙聲道轉 PCM16 WAV bytes | 11.52 ms | 1.20 ms |
+| 同一 256×256 影格轉 RGB24，重複 9 次 | 9.91 ms | 5.77 ms |
+| 48 層 Q/K RoPE，64 tokens、Q 2 heads／K 1 head | 18.09 ms | 13.85 ms |
+
+上述為函式合成量測，未包含模型去噪、檔案寫入或 FFmpeg；不能換算成整個 App 或文生圖／文生影的加速倍率。RoPE 使用 local 256／global 512 維與原有 partial rotation，未包含 attention 或線性投影。
+
+以 10 秒雙聲道為例，連續 Float32 WAV 路徑省去 3,840,000 bytes 的 Swift 浮點副本與 1,920,000 bytes 的中間 PCM 副本；這是移除的資料容量，不是程序峰值記憶體量測。影格轉換仍需 MLX 的排列緩衝區及最終 RGB 緩衝區，不宣稱零記憶體配置。
+
+### 數值與成品驗證
+
+- 根套件 Debug 測試執行成功，回報 199 項／50 個 suite。LTX 套件 Release 回歸測試執行成功，回報 50 項／7 個 suite，其中 4 個需指定模型環境的案例維持條件略過；真實模型比對另外執行如下。
+- 新增回歸涵蓋 WAV 標頭、PCM16 裁切／截斷／交錯、單聲道、非連續張量、RGB 所有取整邊界、緩衝區重用／保留舊副本、NaN／Inf 拒絕，以及 FP32／BF16／FP16 的完整與部分 RoPE。既有 Qwen 與 Gemma4 獨立數值 oracle 亦通過。
+- 使用 LTX-2.5 真實 Gemma4 4-bit 權重，比較修改前後 48 層、49 組 hidden states；5 個 token 含 2 個左側 padding，轉成 Float32 後逐個位元模式完全相同。
+- Qwen Turbo 6 步、256×256、Seed 42 的 PNG 逐位元組相同，SHA-256 均為 `4154ab965a87529ca02e3fa304708e90aed5cea2115d5e29a83edb0b23871400`。
+- LTX 使用同一份先前實際生成的 latent，分別經新舊 Worker 解碼與封裝。兩份影片都是 256×256、9 幀、24 FPS、AAC 48 kHz 雙聲道、0.375 秒。AVFoundation 逐幀解碼的像素雜湊與時間戳全部相同，AAC 封包也逐位元組相同。MP4 有 2 bytes 的 VideoToolbox SEI 附加資訊差異，因此**不宣稱整份 MP4 檔案逐位元組相同**。
+- `GenImageQwen21Worker`、`GenImageLTXVideoWorker` 的正式 Release 產品均建置成功，`git diff --check` 通過。
+
+本輪沒有重新執行 LTX 完整去噪、長片或高解析度生成，也未打包／發布 Release。成品比對期間另有編譯工作，因此不以這些單次執行時間比較整體推論效能。
+
+量測原始來源、當時工作區基準、9 次交替量測、請求、圖片／影片、逐幀雜湊與日誌保存於本機 `Outputs/function-optimization-2026-10-03/`（Git 忽略）。比對用的臨時測試程式已移出測試目標，永久保留媒體轉換及 RoPE 的回歸測試。本輪 `.bak` 於驗證成功後移除；未同步 GitHub。
+
+
+## 2026-10-03 全專案函式檢查與最佳化
+
+本輪基準為開始時已包含前述模型整合及函式最佳化的工作區，沒有回復到 Git HEAD。檢查涵蓋第一方 Swift、WebUI JavaScript、各 Worker、工具與測試；檔案清單約 328 份，排除 `.build`、第三方套件、模型與產生的成品。宣告掃描僅用於定位函式與呼叫路徑，不代表每個函式都需要改寫。
+
+### 各範圍的處理
+
+| 範圍 | 本輪結果 |
+| --- | --- |
+| Core／App | `WorkflowGraph` 建立首筆 UUID 索引，查找為平均 O(1)，lineage 改為 O(深度)；保留重複 ID 首筆優先、循環保護及值語意。Profile 清單一次建立超過記憶體門檻的模型 ID／本機路徑集合，避免每個 Profile 重掃模型、重複標準化路徑；搜尋字串只 trim 一次。 |
+| WebUI 工作區 | `reconcileWorkspaceTabs` 在一次對帳內共用素材歸屬、分頁與完成工作索引，新增輸出時立即更新歸屬；Shift／多選共用 image ID 集合；lineage 以 append 後 reverse 建立。保持分頁優先順序、選取行為、素材順序及生成輸出的分頁歸屬。HTML、CSS、介面文字與橋接格式未改。 |
+| 圖生文 Runtime | `DescriptionTextStatistics` 只掃描新收到的 Unicode scalars，保留跨 chunk 的重複字元狀態；不再每次重建整段文字的 scalar 陣列。原本的最短字數、標點比例、重複字元、重試與停止時機均保留。 |
+| GGUF／LTX／Music 3 | 三處量化解碼以 Float 陣列直接建立 MLX 張量，移除中間 `Data(bytes:)` 的完整 Float32 複本；量化公式、型別及張量形狀不變。 |
+| MiniMax H3 | LoRA 套用完成後先計算一次文字 refiner，所有去噪步驟共用；在載入 VAE 前結束其作用域。sigma、AdaLN、條件噪音與音／影排程仍逐步計算。 |
+| MiniMax Music 3 | 每個音樂區塊準備一次 RoPE 與無條件輸入，conditional／unconditional 推論共用；既有未提供預先計算的位置表的呼叫仍可使用。WAV 直接寫入最終 PCM 緩衝區，有限值檢查與取樣轉換合併。 |
+| ACE-Step | 完整 WAV 路徑借用可連續讀取的 MLX 浮點資料，省去 Swift 浮點、sanitized 浮點及中間 PCM 副本。串流 append 使用自有 Data 清理非有限值，finish 以定長緩衝區轉換，保持原本暫存檔與 256 KiB 讀取上限。 |
+| Qwen 2.1／Gemma4／LTX 影音 | 保留上一輪已驗證的調制、RoPE 與 RGB/WAV 最佳化；本輪只另改 LTX GGUF 的中間拷貝。 |
+| Qwen 2511／Z-Image | 第一方 Worker 主要為參數驗證、模型生命週期及既有套件呼叫；沒有證據支持再次改動推論公式或跨請求保存 GPU 張量，維持既有實作與釘選依賴。 |
+| MCP、下載、子程序、字幕、媒體服務、建置工具 | 檢查請求處理、日誌讀取、檔案與影音輸出路徑；保留既有範圍讀取、分塊傳輸、縮圖快取及取消處理，避免引入過期的檔案快取。啟動／維護腳本回歸通過。 |
+
+App 的 `sourceImages(for:)` 曾比較只索引所選素材的版本；在 5,000 筆素材、32 個來源的測量中，原版約 0.229 ms，候選版約 0.277 ms，因此保留原本實作。沒有為了增加修改數量而留下未證實有效的改寫。
+
+### 函式基準量測
+
+Apple M4、16 GB RAM；Swift 使用 `-O`，MLX 0.31.6；JavaScript 使用本機 Node。新舊版本先暖機兩輪，再交替測量 9 次，下表為中位數。原版來源取自本輪開始時的快照，兩版使用相同輸入。
+
+| 函式／輸入 | 修改前 | 修改後 |
+| --- | ---: | ---: |
+| 工作區對帳：5,000 筆素材、40 分頁、2,500 個連續操作 | 130.65 ms | 1.68 ms |
+| Shift 範圍選取：5,000 筆素材 | 42.56 ms | 0.55 ms |
+| WorkflowGraph 建立索引與 5,000 層 lineage | 14.47 ms | 1.62 ms |
+| Profile 可見性：83 個 Profile、67 個附本機路徑的模型 | 8.48 ms | 0.030 ms |
+| 串流文字品質檢查：128 chunks／2,176 scalars | 5.19 ms | 0.078 ms |
+| ACE-Step PCM16 WAV：10 秒、48 kHz 雙聲道，含寫檔 | 12.94 ms | 4.48 ms |
+| Music 3 PCM16 WAV：10 秒、48 kHz 雙聲道，含寫檔 | 12.47 ms | 2.33 ms |
+| ACE-Step 串流 WAV：10 個一秒區塊，含暫存檔與輸出 | 21.70 ms | 4.08 ms |
+| 已解碼 GGUF Float 陣列建立 MLX 張量：16 MiB | 0.755 ms | 0.350 ms |
+
+工作區壓力案例不包含瀏覽器繪製與 localStorage 實際 I/O（儲存函式以 stub 代替）；Graph 包含建構索引成本。GGUF 數字不含讀檔、量化解碼或完整模型載入。H3、Music 3 的模型計算只做數值一致性回歸，沒有把小型測試的速度換算成大型模型的生成加速倍率。所有表格數字均為特定函式的測量，不能當作整個 App 或文生影的效能承諾。
+
+### 記憶體與輸出規則
+
+- 16 MiB 的解碼 Float 陣列轉成 MLX 時，省去一份 16 MiB 的中間 Data；原有 Float 陣列和 MLX 張量仍存在。
+- 10 秒／48 kHz／雙聲道 ACE-Step 完整 WAV 路徑，移除兩份各 3,840,000 bytes 的 Swift 浮點陣列與一份 1,920,000 bytes 的中間 PCM Data。最終 WAV 與 MLX 輸入仍需記憶體。
+- Music 3 移除兩次全長浮點陣列拷貝，每次在上述輸入下為 3,840,000 bytes；兩次拷貝並非同時存在，不能將容量相加當成峰值節省。
+- 上述是移除的中間資料容量，未量測整個 App 的峰值 RSS。非 Float32 或非連續張量仍可能需要型別轉換／連續副本。借用資料限定在張量生命週期內；串流清理非有限值使用自有副本，不修改輸入張量。
+- 保留各模型原有 PCM 規則：ACE-Step 非有限值補零及 peak-based gain；Music 3 拒絕非有限值、負滿幅為 -32768；LTX 既有朝零截斷不變。沒有將這些不同規則合併。
+
+### 回歸與驗證界線
+
+- 根套件：205 項／52 suites 通過，涵蓋新的 Graph、Profile、Unicode 串流檢查及 ACE-Step 音訊測試，另含既有 Qwen 數值 oracle。
+- WebUI：14 項測試通過；另以修改前實作做 500 組狀態、6,000 次選取事件的差異比對，結果一致，包含重複 ID、刪除素材與 pending job。
+- Music 3：24 項／2 suites 通過。小型兩層 Transformer 在多個長度、sigma、rotary dimension、conditional／unconditional 輸入下逐位元相同；WAV 裁切、取整、交錯、非連續輸入及錯誤時保留既有檔案均通過。
+- H3：新測試在一般／Pruned 架構、含／不含 LoRA、含／不含音影條件、四個 sigma 下，音影 velocity 的 Float32 位元模式相同。全套 70 項／11 suites 仍回報兩項先前已有的 VAE 測試失敗：`temporalTilingPlan` 的 padded token 預期、`temporalOutputFrameCount` 的輸出幀數預期；本輪未更動相關 VAE 實作或測試預期，不能宣稱 H3 全套通過。
+- LTX：50 項／7 suites 回歸通過；需要另指定真實模型環境的案例維持條件略過。
+- 建置／啟動／維護腳本：12 項回歸通過。
+- `./build.command --no-app` 完整建置通過；主程式、MCP、Doctor、Qwen 2.1 及五個獨立 Worker 共 9 個 Release 執行檔均存在且可執行。最終 App 資源中的兩份工作區 JavaScript 與原始碼 SHA-256 一致，不含本輪暫存備份；`git diff --check` 通過。
+- 音訊基準中的新舊 WAV 逐位元組相同；ACE-Step 串流回歸額外跨越 256 KiB 邊界，確認增益、聲道順序及原始張量不變。
+
+本輪使用小型合成張量與現有回歸測試，未重新執行高解析度、長片或完整大型模型生成。前一節的真實 256×256／9 幀驗證屬於前一輪，不當作本輪新增的實測。
+
+基準來源、差異比對、原始量測與日誌位於本機 `Outputs/project-function-optimization-2026-10-03/`（Git 忽略）。本輪驗證成功後已移除自己的 `.bak` 備份；原始基準快照保留於該目錄。沒有同步 GitHub、建立 commit 或發布 Release。
+
+
+## 1.26.1004 發布整理
+
+以上 2026-10-03 的模型整合、函式最佳化與全專案最佳化一併納入 1.26.1004。各階段的「未同步 GitHub／未發布」為當時狀態；正式版本資訊見[更新紀錄](../UpdateNote.md)，安裝包簽章、公證與驗證範圍見[驗證紀錄](VALIDATION.md)。函式量測不代表整體生成速度，已知 H3 VAE 測試失敗維持揭露。

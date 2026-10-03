@@ -44,14 +44,11 @@ function bindPendingOutputJobs(previousState, nextState) {
   });
 }
 
-function takePendingOutputTab(action, nextState, workspaceID) {
+function takePendingOutputTab(action, completedJobIDs, workspaceID) {
   const now = Date.now();
   for (let index = pendingOutputs.length - 1; index >= 0; index -= 1) {
     if (pendingOutputs[index].expiresAt < now) pendingOutputs.splice(index, 1);
   }
-  const completedJobIDs = new Set(
-    nextState.jobs.filter((job) => job.state === "completed").map((job) => job.id),
-  );
   let index = pendingOutputs.findIndex(
     (pending) => pending.workspaceID === workspaceID
       && pending.action === action
@@ -235,12 +232,14 @@ export function reconcileWorkspaceTabs(ui, previousState, nextState) {
       .filter(isImageAsset)
       .map((asset) => asset.id),
   );
-  const assignedAssetIDs = new Set();
+  const ownerByAssetID = new Map();
+  const tabByID = new Map();
   ui.workspaceTabs.forEach((tab) => {
-    tab.assetIDs = tab.assetIDs.filter((id) => validAssetIDs.has(id) && !assignedAssetIDs.has(id));
-    tab.assetIDs.forEach((id) => assignedAssetIDs.add(id));
+    if (!tabByID.has(tab.id)) tabByID.set(tab.id, tab);
+    tab.assetIDs = tab.assetIDs.filter((id) => validAssetIDs.has(id) && !ownerByAssetID.has(id));
+    tab.assetIDs.forEach((id) => ownerByAssetID.set(id, tab));
     tab.selectedAssetIDs = (tab.selectedAssetIDs || []).filter(
-      (id) => tab.assetIDs.includes(id) && imageAssetIDs.has(id),
+      (id) => ownerByAssetID.get(id) === tab && imageAssetIDs.has(id),
     );
     if (!tab.selectionAnchorID || !tab.selectedAssetIDs.includes(tab.selectionAnchorID)) {
       tab.selectionAnchorID = tab.selectedAssetIDs.at(-1) || null;
@@ -248,33 +247,38 @@ export function reconcileWorkspaceTabs(ui, previousState, nextState) {
   });
 
   const unassignedAssetIDs = new Set(
-    nextState.assets.map((asset) => asset.id).filter((id) => !assignedAssetIDs.has(id)),
+    nextState.assets.map((asset) => asset.id).filter((id) => !ownerByAssetID.has(id)),
   );
   bindPendingOutputJobs(previousState, nextState);
+  const fallbackTab = activeWorkspaceTab(ui);
+  const completedJobIDs = new Set(
+    nextState.jobs.filter((job) => job.state === "completed").map((job) => job.id),
+  );
 
   nextState.operations.forEach((operation) => {
     const outputIDs = operation.outputAssetIDs.filter((id) => unassignedAssetIDs.has(id));
     if (!outputIDs.length) return;
 
-    const parentTab = operation.inputAssetID ? workspaceTabOwningAsset(ui, operation.inputAssetID) : null;
+    const parentTab = operation.inputAssetID ? ownerByAssetID.get(operation.inputAssetID) : null;
     const pendingTabID = takePendingOutputTab(
       operation.action,
-      nextState,
+      completedJobIDs,
       ui.activeWorkspaceID,
     );
-    const targetTab = ui.workspaceTabs.find((tab) => tab.id === pendingTabID)
+    const targetTab = tabByID.get(pendingTabID)
       || parentTab
-      || activeWorkspaceTab(ui);
+      || fallbackTab;
     outputIDs.forEach((id) => {
       targetTab.assetIDs.push(id);
+      ownerByAssetID.set(id, targetTab);
       unassignedAssetIDs.delete(id);
     });
   });
 
-  const fallbackTab = activeWorkspaceTab(ui);
   nextState.assets.forEach((asset) => {
     if (!unassignedAssetIDs.has(asset.id)) return;
     fallbackTab.assetIDs.push(asset.id);
+    ownerByAssetID.set(asset.id, fallbackTab);
     unassignedAssetIDs.delete(asset.id);
   });
 
@@ -285,10 +289,10 @@ export function reconcileWorkspaceTabs(ui, previousState, nextState) {
     }
   }
 
-  const selectedOwner = nextState.selectedAssetID ? workspaceTabOwningAsset(ui, nextState.selectedAssetID) : null;
+  const selectedOwner = nextState.selectedAssetID ? ownerByAssetID.get(nextState.selectedAssetID) : null;
   if (selectedOwner) selectedOwner.selectedAssetID = nextState.selectedAssetID;
   ui.workspaceTabs.forEach((tab) => {
-    if (!tab.selectedAssetID || !tab.assetIDs.includes(tab.selectedAssetID)) {
+    if (!tab.selectedAssetID || ownerByAssetID.get(tab.selectedAssetID) !== tab) {
       tab.selectedAssetID = tab.assetIDs.at(-1) || null;
     }
   });
@@ -345,10 +349,15 @@ export function setActiveTabSelection(ui, state, assetID, event) {
   const isImage = isImageAsset(asset);
   const additive = Boolean(event?.metaKey || event?.ctrlKey);
   const rangeSelection = Boolean(event?.shiftKey && isImage);
-  let selectedAssetIDs = (tab.selectedAssetIDs || []).filter((id) => isImageAssetID(state, id));
+  const imageAssetIDs = rangeSelection || (additive && isImage)
+    ? new Set(state.assets.filter(isImageAsset).map((item) => item.id))
+    : null;
+  let selectedAssetIDs = imageAssetIDs
+    ? (tab.selectedAssetIDs || []).filter((id) => imageAssetIDs.has(id))
+    : [];
 
   if (rangeSelection) {
-    const imageIDs = tab.assetIDs.filter((id) => isImageAssetID(state, id));
+    const imageIDs = tab.assetIDs.filter((id) => imageAssetIDs.has(id));
     const anchorID = imageIDs.includes(tab.selectionAnchorID)
       ? tab.selectionAnchorID
       : imageIDs.includes(tab.selectedAssetID)
@@ -357,11 +366,12 @@ export function setActiveTabSelection(ui, state, assetID, event) {
     const start = imageIDs.indexOf(anchorID);
     const end = imageIDs.indexOf(assetID);
     const rangeIDs = imageIDs.slice(Math.min(start, end), Math.max(start, end) + 1);
+    const selectedIDs = new Set(selectedAssetIDs);
     selectedAssetIDs = additive
-      ? [...selectedAssetIDs, ...rangeIDs.filter((id) => !selectedAssetIDs.includes(id))]
+      ? [...selectedAssetIDs, ...rangeIDs.filter((id) => !selectedIDs.has(id))]
       : rangeIDs;
   } else if (additive && isImage) {
-    if (!selectedAssetIDs.length && isImageAssetID(state, tab.selectedAssetID)) {
+    if (!selectedAssetIDs.length && imageAssetIDs.has(tab.selectedAssetID)) {
       selectedAssetIDs.push(tab.selectedAssetID);
     }
     const index = selectedAssetIDs.indexOf(assetID);

@@ -5,7 +5,7 @@ import Testing
 struct LoRACatalogTests {
     @Test func newAdaptersHavePinnedDownloadsAndResolvableVideoProfiles() {
         let entries = LoRACatalog.entries
-        #expect(entries.count == 11)
+        #expect(entries.count == 13)
         #expect(Set(entries.map(\.id)).count == entries.count)
         #expect(Set(entries.map(\.directoryName)).count == entries.count)
         for entry in entries {
@@ -36,7 +36,7 @@ struct LoRACatalogTests {
         #expect(catalog.loras.count == LoRACatalog.entries.count)
         for entry in LoRACatalog.entries {
             let lora = try #require(catalog.loras.first { $0.displayName == entry.displayName })
-            #expect(lora.compatibleCapabilities == [entry.capability])
+            #expect(lora.compatibleCapabilities == entry.compatibleCapabilities)
             #expect(catalog.models.contains { $0.id == entry.id && $0.localURL == lora.localURL })
         }
     }

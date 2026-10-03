@@ -6,6 +6,7 @@ struct Qwen21Weights {
     let tensors: [String: MLXArray]
     var groupSize = 64
     var bits = 4
+    var lora: Qwen21LoRAAdapter?
 
     init(directory: URL, groupSize: Int = 64, bits: Int = 4) throws {
         tensors = try MLX.loadArrays(url: directory.appendingPathComponent("model.safetensors"))
@@ -38,6 +39,9 @@ struct Qwen21Weights {
             y = matmul(x, weight.T.asType(x.dtype))
         }
         if let bias = tensors[name + ".bias"] { y = y + bias }
+        if let delta = lora?.delta(x, layer: name) {
+            y = (y.asType(.float32) + delta).asType(y.dtype)
+        }
         return y
     }
 }

@@ -11,11 +11,23 @@
 
 **圖像編輯仍屬實驗性**：目前 256×256、20／40 步改色實跑能保留構圖、產生自然的綠蘋果。先前 512×512、40 步曾出現顆粒／金屬感；本輪依需求只做小尺寸驗證，未重跑 512，因此不將該問題標記為已解決，也不宣稱與官方圖片編輯品質一致。
 
-目前採 guidance-free（CFG=1），不接受負面提示詞或 LoRA；送入時會明確報錯，避免參數被默默忽略。目前 App 只提供單張參考圖，尚未開放模型的多圖能力。
+目前採 guidance-free（CFG=1），不接受負面提示詞；LoRA 僅支援下述 Viggle Turbo v0.3 r128，其他 LoRA 會明確報錯。目前 App 只提供單張參考圖，尚未開放模型的多圖能力。
 
 模型約 10.5 GB，建議 32 GB 以上統一記憶體。編碼器、Transformer、VAE 分階段載入；這不代表任意解析度均能在 16 GB 順利完成。尚未加入 VAE tiling 和條件 KV cache，高解析度的時間及記憶體用量較高。
 
 模型權重不包含在 GitHub 原始碼或 Release DMG，請在模型中心另外下載。開發者若已有安裝器驗證過的 `Models/qwen-image-2.1-mlx-4bit`，可將 App 的模型目錄指向該 `Models` 目錄重用。
+
+## Turbo 與提示詞增強（1.26.1004）
+
+**Viggle Turbo v0.3** 提供 6 步文生圖與單圖編輯。選擇對應 Turbo Profile 並下載相依 LoRA（約 680 MB）；將步數設為 6，Profile 已包含權重 1 的 LoRA，手動 LoRA 選單可保持「無」。選擇 Profile 不會覆寫現有輸出設定；文生圖也可使用「套用 Profile 預設值」帶入 6 步。原本 40 步 Profile 仍保留，可直接切換，不會將 LoRA 寫入原始權重。Turbo 使用專用的六段時間表，不能以一般模型的任意 6 步設定替代。
+
+**Qwen PE 提示詞增強** 提供文生圖 T2I 與圖生圖 I2I 兩份獨立 4-bit 模型（每份約 5.97 GB），並各有一般／Turbo Profile。名稱後綴為「＋提示詞增強」；下載該 Profile 的相依模型後使用即可。T2I 將簡短描述展開，I2I 則同時讀取來源圖與編輯指令。
+
+增強結果只用於當次生成，工作區保留原始指令，輸出寬高及 Seed 沿用使用者設定。增強會增加前處理時間；模型在圖片推論前釋放，不與圖片 Worker 同時常駐。若回覆不完整或格式無效，會顯示錯誤，不會用截斷的描述開始生成。這些 Profile 沿用 App 的生成按鈕；未新增 MCP 的提示詞增強參數。
+
+上游：[Viggle Turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo)、[PE T2I](https://huggingface.co/Qwen/Qwen-Image-2.1-PE-T2I)、[PE I2I](https://huggingface.co/Qwen/Qwen-Image-2.1-PE-I2I)。PE 的 MLX 4-bit 轉換來自 prithivMLmods；系統提示詞與授權檔案取自固定版本的官方來源。三者均依原模型授權使用。PE I2I＋Turbo 的 256×256 改色編輯已實跑成功，含提示詞增強約 191 秒；增強前處理不算在單獨 Turbo 推論的耗時內。
+
+小尺寸實測：256×256、Seed 42，Turbo 文生圖約 31 秒，單圖改色約 46 秒；切回一般模型的 2 步流程也能完成。2 步僅驗證切換流程，不作為畫質比較；上述時間包含 Worker 推論，不能據此宣稱對 40 步模型的固定加速倍率。
 
 ## 模型及格式
 

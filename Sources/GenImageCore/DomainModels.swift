@@ -170,6 +170,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
     public var defaults: ProfileDefaults
     public var music: ProfileMusicConfiguration?
     public var loras: [ProfileLoRAConfiguration]
+    public var promptEnhancerModelID: String?
     public var profileRevision: Int
     public var notes: String
     public var isBuiltIn: Bool
@@ -185,6 +186,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         defaults: ProfileDefaults = ProfileDefaults(),
         music: ProfileMusicConfiguration? = nil,
         loras: [ProfileLoRAConfiguration] = [],
+        promptEnhancerModelID: String? = nil,
         profileRevision: Int = 1,
         notes: String = "",
         isBuiltIn: Bool = false,
@@ -199,6 +201,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         self.defaults = defaults
         self.music = music
         self.loras = loras
+        self.promptEnhancerModelID = promptEnhancerModelID
         self.profileRevision = profileRevision
         self.notes = notes
         self.isBuiltIn = isBuiltIn
@@ -209,13 +212,13 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         InferenceProfile(
             name: "\(name) 副本", capability: capability, modelID: modelID,
             modelRevision: modelRevision, architecture: architecture, defaults: defaults,
-            music: music, loras: loras, profileRevision: 1, notes: notes,
+            music: music, loras: loras, promptEnhancerModelID: promptEnhancerModelID, profileRevision: 1, notes: notes,
             isBuiltIn: false, supportsGeneration: supportsGeneration
         )
     }
 
     public var requiredModelIDs: [String] {
-        ([modelID] + loras.map(\.modelID)).reduce(into: []) { result, modelID in
+        ([modelID] + loras.map(\.modelID) + [promptEnhancerModelID].compactMap { $0 }).reduce(into: []) { result, modelID in
             if !result.contains(modelID) { result.append(modelID) }
         }
     }
@@ -230,6 +233,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         case defaults
         case music
         case loras
+        case promptEnhancerModelID
         case profileRevision
         case notes
         case isBuiltIn
@@ -248,6 +252,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
             ?? ProfileDefaults()
         music = try container.decodeIfPresent(ProfileMusicConfiguration.self, forKey: .music)
         loras = try container.decodeIfPresent([ProfileLoRAConfiguration].self, forKey: .loras) ?? []
+        promptEnhancerModelID = try container.decodeIfPresent(String.self, forKey: .promptEnhancerModelID)
         profileRevision = try container.decodeIfPresent(Int.self, forKey: .profileRevision) ?? 1
         notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         isBuiltIn = try container.decodeIfPresent(Bool.self, forKey: .isBuiltIn) ?? false
@@ -265,6 +270,7 @@ public struct InferenceProfile: Identifiable, Codable, Hashable, Sendable {
         try container.encode(defaults, forKey: .defaults)
         try container.encodeIfPresent(music, forKey: .music)
         try container.encode(loras, forKey: .loras)
+        try container.encodeIfPresent(promptEnhancerModelID, forKey: .promptEnhancerModelID)
         try container.encode(profileRevision, forKey: .profileRevision)
         try container.encode(notes, forKey: .notes)
         try container.encode(isBuiltIn, forKey: .isBuiltIn)

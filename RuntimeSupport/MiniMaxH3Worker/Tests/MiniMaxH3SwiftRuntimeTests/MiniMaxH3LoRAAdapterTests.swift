@@ -135,7 +135,7 @@ struct MiniMaxH3LoRAAdapterTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["GENIMAGE_H3_LORA_MODEL_ROOT"] != nil))
     func realAdaptersMatchTheBaseLayoutsAndProduceFiniteResiduals() throws {
         let root = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["GENIMAGE_H3_LORA_MODEL_ROOT"]))
-        for acceleration in [MiniMaxH3Acceleration.lightX2V8Step768, .larryV4] {
+        for acceleration in [MiniMaxH3Acceleration.lightX2V8Step768, .lightX2V4StepV12, .larryV4] {
             try checkInstalledAdapter(acceleration, root: root)
             MLX.Memory.clearCache()
         }

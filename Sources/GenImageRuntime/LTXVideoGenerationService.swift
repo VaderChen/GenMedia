@@ -36,6 +36,9 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
         guard let workerKind = Self.workerKind(for: request.profile.modelID) else {
             throw LTXVideoRuntimeError.unsupportedModel(request.profile.modelID)
         }
+        if workerKind == .mlx25 {
+            try Self.validateLTX25(request.options, capability: request.profile.capability)
+        }
         guard Self.isValidFrameCount(request.options.frameCount) else {
             throw LTXVideoRuntimeError.invalidFrameCount(request.options.frameCount)
         }
@@ -105,7 +108,7 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
                 stage2Steps: 3,
                 imagePaths: sourcePaths,
                 loras: loras,
-                gemmaDirectory: Self.gemmaDirectory()
+                gemmaDirectory: workerKind == .mlx25 ? nil : Self.gemmaDirectory()
             )
             try JSONEncoder().encode(payload).write(to: requestURL, options: .atomic)
 
@@ -236,12 +239,13 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
 
     private enum WorkerKind {
         case mlx
+        case mlx25
         case gguf096
         case gguf23
 
         var formatArgument: String {
             switch self {
-            case .mlx: "mlx"
+            case .mlx, .mlx25: "mlx"
             case .gguf096, .gguf23: "gguf"
             }
         }
@@ -249,6 +253,7 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
         var variantArgument: String {
             switch self {
             case .mlx, .gguf23: "ltx-2.3"
+            case .mlx25: "ltx-2.5"
             case .gguf096: "ltx-0.9.6"
             }
         }
@@ -256,6 +261,8 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
 
     private static func workerKind(for modelID: String) -> WorkerKind? {
         switch modelID.lowercased() {
+        case LTX25Model.id.lowercased():
+            .mlx25
         case "dgrauet/ltx-2.3-mlx-q4":
             .mlx
         case "city96/ltx-video-0.9.6-distilled-gguf@q4_k_m":
@@ -264,6 +271,13 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
             .gguf23
         default:
             nil
+        }
+    }
+
+    static func validateLTX25(_ options: VideoGenerationOptions, capability: ModelCapability) throws {
+        guard capability == .textToVideo, options.steps == 8,
+              options.width % 64 == 0, options.height % 64 == 0 else {
+            throw LTXVideoRuntimeError.invalidLTX25Options
         }
     }
 
@@ -388,6 +402,7 @@ public final class LTXVideoGenerationService: VideoGenerating, Sendable {
 }
 
 public enum LTXVideoRuntimeError: LocalizedError, Sendable {
+    case invalidLTX25Options
     case incompatibleProfile
     case unsupportedArchitecture(InferenceArchitecture)
     case unsupportedModel(String)
@@ -406,6 +421,8 @@ public enum LTXVideoRuntimeError: LocalizedError, Sendable {
 
     public var errorDescription: String? {
         switch self {
+        case .invalidLTX25Options:
+            "LTX-2.5 Distilled 請使用文生影、固定 8 步與 64 倍數尺寸；可套用 Profile 預設值。"
         case .incompatibleProfile:
             "Profile 不是文生影或圖生影類型。"
         case let .unsupportedArchitecture(architecture):

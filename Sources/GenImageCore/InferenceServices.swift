@@ -5,17 +5,23 @@ public struct TextToImageRequest: Sendable, Hashable {
     public var recipe: GenerationRecipe
     public var profile: InferenceProfile
     public var sourceAsset: MediaAsset?
+    public var profileLoRAs: [LoRASelection]
+    public var promptEnhancerURL: URL?
 
     public init(
         projectID: UUID,
         recipe: GenerationRecipe,
         profile: InferenceProfile,
-        sourceAsset: MediaAsset? = nil
+        sourceAsset: MediaAsset? = nil,
+        profileLoRAs: [LoRASelection] = [],
+        promptEnhancerURL: URL? = nil
     ) {
         self.projectID = projectID
         self.recipe = recipe
         self.profile = profile
         self.sourceAsset = sourceAsset
+        self.profileLoRAs = profileLoRAs
+        self.promptEnhancerURL = promptEnhancerURL
     }
 }
 
@@ -42,6 +48,8 @@ public struct ImageToImageRequest: Sendable, Hashable {
     public var profile: InferenceProfile
     public var modelURL: URL
     public var quantization: ModelQuantization
+    public var profileLoRAs: [LoRASelection]
+    public var promptEnhancerURL: URL?
 
     public init(
         projectID: UUID,
@@ -49,7 +57,9 @@ public struct ImageToImageRequest: Sendable, Hashable {
         recipe: GenerationRecipe,
         profile: InferenceProfile,
         modelURL: URL,
-        quantization: ModelQuantization
+        quantization: ModelQuantization,
+        profileLoRAs: [LoRASelection] = [],
+        promptEnhancerURL: URL? = nil
     ) {
         self.projectID = projectID
         self.sourceAsset = sourceAsset
@@ -57,6 +67,8 @@ public struct ImageToImageRequest: Sendable, Hashable {
         self.profile = profile
         self.modelURL = modelURL
         self.quantization = quantization
+        self.profileLoRAs = profileLoRAs
+        self.promptEnhancerURL = promptEnhancerURL
     }
 }
 

@@ -3,6 +3,23 @@ import GenImageCore
 
 // 讀寫 UserDefaults 的設定持久化，以及還原時的驗證。全部是純函式，不碰 AppStore 的狀態。
 extension AppStore {
+    static func profileForWorkspaceAssignment(_ assignment: [String: Any], profiles: [InferenceProfile]) -> InferenceProfile? {
+        guard let raw = assignment["capability"] as? String,
+              let capability = ModelCapability(rawValue: raw) else { return nil }
+        let candidates = profiles.filter { $0.capability == capability }
+        if let rawID = assignment["profileID"] as? String, let id = UUID(uuidString: rawID),
+           let exact = candidates.first(where: { $0.id == id }) { return exact }
+        let name = assignment["profileName"] as? String
+        let architecture = assignment["architecture"] as? String
+        let matches = candidates.filter {
+            $0.modelID == assignment["modelID"] as? String
+                && $0.modelRevision == assignment["modelRevision"] as? String
+                && (architecture == nil || architecture?.isEmpty == true || $0.architecture.rawValue == architecture)
+                && (name == nil || name?.isEmpty == true || $0.name == name)
+        }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
     static func loadRecipeSettings() -> PersistedRecipeSettings? {
         guard let data = UserDefaults.standard.data(forKey: recipeSettingsKey) else { return nil }
         return try? JSONDecoder().decode(PersistedRecipeSettings.self, from: data)
@@ -64,6 +81,7 @@ extension AppStore {
             if discovered.profiles.contains(where: {
                 $0.modelID == profile.modelID && $0.capability == profile.capability
                     && $0.loras == profile.loras
+                    && $0.promptEnhancerModelID == profile.promptEnhancerModelID
             }) {
                 return false
             }

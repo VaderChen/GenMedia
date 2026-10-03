@@ -23,7 +23,7 @@ final class Qwen21Transformer {
     let config: Qwen21TransformerConfiguration
     let weights: Qwen21Weights
 
-    init(directory: URL) throws {
+    init(directory: URL, loraURL: URL? = nil, loraScale: Double = 1) throws {
         config = try readJSON(Qwen21TransformerConfiguration.self, at: directory.appendingPathComponent("config.json"))
         guard config.in_channels == 64, config.out_channels == 64,
               config.axes_dims_rope.count == 3,
@@ -31,8 +31,10 @@ final class Qwen21Transformer {
               config.quantization.mode == "affine", config.quantization.bits == 4 else {
             throw Qwen21Error.invalid("不相容的 Transformer 設定，請使用指定的 MLX 4-bit 權重。")
         }
-        weights = try Qwen21Weights(directory: directory, groupSize: config.quantization.group_size,
+        var loaded = try Qwen21Weights(directory: directory, groupSize: config.quantization.group_size,
                                    bits: config.quantization.bits)
+        if let loraURL { loaded.lora = try Qwen21LoRAAdapter(url: loraURL, base: loaded, scale: loraScale) }
+        weights = loaded
     }
 
     func prepare(conditioning: MLXArray, layout: Qwen21Layout) throws -> PreparedConditioning {
@@ -81,8 +83,12 @@ final class Qwen21Transformer {
                 broadcast(x[0..<1, .newAxis, 0...], to: [1, layout.count - layout.targetStart, d])
             ], axis: 1)
         }
-        let scale1 = rows(chunks[0]), gate1 = tanh(rows(chunks[1]))
-        let scale2 = rows(chunks[2]), gate2 = tanh(rows(chunks[3]))
+        // Apply elementwise modulation before repeating the two rows across tokens.
+        // The resulting scales are shared by every block in this denoising step.
+        let scale1 = rows(1 + chunks[0]), gate1 = rows(tanh(chunks[1]))
+        let scale2 = rows(1 + chunks[2]), gate2 = rows(tanh(chunks[3]))
+        eval(scale1, gate1, scale2, gate2)
+        let attentionScale = 1 / sqrt(Float(hd))
         let cosine = prepared.cosine, sine = prepared.sine
         func rope(_ x: MLXArray) -> MLXArray {
             let pairs = x.asType(.float32).reshaped([1, heads, layout.count, hd / 2, 2])
@@ -93,7 +99,7 @@ final class Qwen21Transformer {
         for i in 0..<config.num_layers {
             try Task.checkCancellation()
             let p = "transformer_blocks.\(i)"
-            let n = MLXFast.layerNorm(hidden, weight: nil, bias: nil, eps: eps) * (1 + scale1)
+            let n = MLXFast.layerNorm(hidden, weight: nil, bias: nil, eps: eps) * scale1
             func projection(_ name: String) throws -> MLXArray {
                 try weights.linear(n, p + ".attn." + name)
                     .reshaped([1, layout.count, heads, hd]).transposed(0, 2, 1, 3)
@@ -108,11 +114,11 @@ final class Qwen21Transformer {
                 let key = k[0..., 0..., ..<end, 0...], value = v[0..., 0..., ..<end, 0...]
                 // MLX's causal mask is bottom-right aligned, including preceding image blocks.
                 attended.append(MLXFast.scaledDotProductAttention(queries: query, keys: key, values: value,
-                    scale: 1 / sqrt(Float(hd)), mask: segment.image ? .none : .causal))
+                    scale: attentionScale, mask: segment.image ? .none : .causal))
             }
             let attention = concatenated(attended, axis: 2).transposed(0, 2, 1, 3).reshaped([1, layout.count, d])
             hidden = hidden + gate1 * (try weights.linear(attention, p + ".attn.to_out.0"))
-            let ff = MLXFast.layerNorm(hidden, weight: nil, bias: nil, eps: eps) * (1 + scale2)
+            let ff = MLXFast.layerNorm(hidden, weight: nil, bias: nil, eps: eps) * scale2
             let feed = try silu(weights.linear(ff, p + ".img_mlp.gate_layer")) * weights.linear(ff, p + ".img_mlp.proj")
             hidden = hidden + gate2 * (try weights.linear(feed, p + ".img_mlp.out"))
             eval(hidden)

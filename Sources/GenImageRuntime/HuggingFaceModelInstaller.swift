@@ -710,6 +710,16 @@ public actor HuggingFaceModelInstaller {
     }
 
     private nonisolated static func plan(for modelID: String) -> InstallPlan? {
+        if let enhancer = QwenImage21PromptEnhancer.model(for: modelID) {
+            return InstallPlan(directoryName: enhancer.directoryName, runtimeRelativePath: "4bit",
+                requiredRuntimeFiles: Set(QwenImage21PromptEnhancer.requiredFiles.map { "4bit/" + $0 }),
+                sources: [
+                    SourcePlan(repository: enhancer.repository, revision: enhancer.revision,
+                        destinationSubdirectory: "", prefixes: ["4bit/"], exactFiles: []),
+                    SourcePlan(repository: enhancer.officialRepository, revision: enhancer.officialRevision,
+                        destinationSubdirectory: "4bit", prefixes: [], exactFiles: ["system_prompt.txt", "LICENSE", "NOTICE"])
+                ])
+        }
         if let entry = LoRACatalog.entry(for: modelID) {
             return InstallPlan(directoryName: entry.directoryName, runtimeRelativePath: entry.filename,
                 sources: [SourcePlan(repository: entry.repository, revision: entry.revision,
@@ -720,6 +730,11 @@ public actor HuggingFaceModelInstaller {
             "processor/", "scheduler/", "text_encoder/", "tokenizer/", "transformer/", "vae/"
         ]
         switch modelID {
+        case LTX25Model.id:
+            return InstallPlan(directoryName: LTX25Model.directoryName, requiredRuntimeFiles: LTX25Model.requiredFiles,
+                sources: [SourcePlan(repository: LTX25Model.repository, revision: LTX25Model.revision,
+                    destinationSubdirectory: "", prefixes: ["gemma4-12b-ltx-v1/"],
+                    exactFiles: LTX25Model.requiredFiles.union(["README.md", "LICENSE.md", "ltx-acceptable-use-policy-snapshot-2026-08-12.pdf"]))])
         case QwenImage21Model.id:
             return InstallPlan(
                 directoryName: QwenImage21Model.directoryName,

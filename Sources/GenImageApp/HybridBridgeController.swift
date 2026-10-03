@@ -645,22 +645,15 @@ final class HybridBridgeController: NSObject, ObservableObject {
             for assignment in assignments {
                 guard let capabilityRaw = assignment["capability"] as? String,
                       let capability = ModelCapability(rawValue: capabilityRaw) else { continue }
-                let profileID = uuid(assignment["profileID"])
-                let modelID = assignment["modelID"] as? String
-                let modelRevision = assignment["modelRevision"] as? String
-                let architecture = (assignment["architecture"] as? String)
-                    .flatMap(InferenceArchitecture.init(rawValue:))
-                let profile = store.profiles.first { profile in
-                    if let profileID, profile.id == profileID, profile.capability == capability {
-                        return true
-                    }
-                    return profile.capability == capability
-                        && profile.modelID == modelID
-                        && profile.modelRevision == modelRevision
-                        && (architecture == nil || profile.architecture == architecture)
-                }
+                let profile = AppStore.profileForWorkspaceAssignment(assignment, profiles: store.profiles)
                 if let profile {
                     store.selectProfile(profile.id, for: capability)
+                }
+                if profile == nil || store.activeProfileIDs[capability] != profile?.id {
+                    store.activeProfileIDs[capability] = nil
+                    if capability == .textToImage { store.recipe.profileID = nil }
+                    AppStore.persistActiveProfiles(store.activeProfileIDs, in: store.profiles)
+                    if profile == nil { store.statusMessage = "儲存的 Profile 無法唯一辨識，請重新選擇「\(capability.title)」的 Profile。" }
                 }
             }
         }

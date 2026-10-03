@@ -83,6 +83,7 @@ extension AppStore {
         guard let executionProfile = runtimeProfile(from: profile) else { return }
 
         let input = linkToSelectedAsset ? selectedAsset : nil
+        guard let profileLoRAs = resolvedImageLoRAs(for: profile) else { return }
         let recipeSnapshot = recipe
         let projectID = selectedProjectID
         let job = GenerationJob(action: .generate, title: "生成 \(recipeSnapshot.outputCount) 張圖片")
@@ -93,7 +94,9 @@ extension AppStore {
             projectID: projectID,
             recipe: recipeSnapshot,
             profile: executionProfile,
-            sourceAsset: input
+            sourceAsset: input,
+            profileLoRAs: profileLoRAs,
+            promptEnhancerURL: resolvedPromptEnhancer(for: profile)
         )
 
         jobTasks[job.id] = Task { @MainActor [weak self] in
@@ -172,6 +175,7 @@ extension AppStore {
             statusMessage = "找不到圖生圖模型的本機安裝路徑。"
             return
         }
+        guard let profileLoRAs = resolvedImageLoRAs(for: profile) else { return }
 
         let recipeSnapshot = recipe
         let projectID = selectedProjectID
@@ -185,7 +189,9 @@ extension AppStore {
             recipe: recipeSnapshot,
             profile: profile,
             modelURL: modelURL,
-            quantization: model.quantization
+            quantization: model.quantization,
+            profileLoRAs: profileLoRAs,
+            promptEnhancerURL: resolvedPromptEnhancer(for: profile)
         )
 
         jobTasks[job.id] = Task { @MainActor [weak self] in

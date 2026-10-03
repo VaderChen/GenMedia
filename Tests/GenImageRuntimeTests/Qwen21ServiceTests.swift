@@ -7,6 +7,28 @@ import UniformTypeIdentifiers
 @testable import GenImageRuntime
 
 struct Qwen21ServiceTests {
+    @Test func turboProfileResolvesOnceAndRequiresCorrectSampling() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".safetensors")
+        try Data([1]).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let profile = QwenImage21Acceleration.profiles[0]
+        let lora = LoRASelection(adapterID: QwenImage21Acceleration.modelID, localURL: url, scale: 1)
+        var recipe = GenerationRecipe(prompt: "cat", modelID: QwenImage21Model.id, width: 256, height: 256, steps: 6)
+        #expect(try Qwen21ImageService.validatedLoRA(recipe: recipe, profile: profile, resolved: [lora]) == lora)
+        recipe.lora = lora
+        #expect(try Qwen21ImageService.validatedLoRA(recipe: recipe, profile: profile, resolved: [lora]) == lora)
+        recipe.steps = 8
+        #expect(throws: Qwen21ImageService.Failure.self) {
+            try Qwen21ImageService.validatedLoRA(recipe: recipe, profile: profile, resolved: [lora])
+        }
+        recipe.steps = 6
+        #expect(throws: Qwen21ImageService.Failure.self) {
+            try Qwen21ImageService.validatedLoRA(recipe: recipe, profile: profile, resolved: [])
+        }
+        recipe.lora = nil; recipe.steps = 40
+        #expect(try Qwen21ImageService.validatedLoRA(recipe: recipe, profile: QwenImage21Model.profiles[0], resolved: []) == nil)
+    }
+
     @Test(arguments: [false, true])
     func workerProtocolPreservesLinksAndCleansFailedBatches(fail: Bool) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

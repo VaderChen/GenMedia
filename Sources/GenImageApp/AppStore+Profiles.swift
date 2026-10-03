@@ -113,6 +113,12 @@ extension AppStore {
         if let error = Self.profileArchitectureCompatibilityError(profile) {
             return error
         }
+        if let id = profile.promptEnhancerModelID {
+            guard profile.modelID == QwenImage21Model.id,
+                  QwenImage21PromptEnhancer.model(for: id)?.capability == profile.capability else {
+                return "提示詞增強 Profile 需要對應的 Qwen-Image 2.1 模型與生成能力。"
+            }
+        }
 
         for configuration in profile.loras {
             if let entry = LoRACatalog.entry(for: configuration.modelID),
@@ -440,6 +446,25 @@ extension AppStore {
             result.append(VideoGenerationLoRA(configuration: configuration, localURL: localURL))
         }
         return result
+    }
+
+    func resolvedImageLoRAs(for profile: InferenceProfile) -> [LoRASelection]? {
+        var result: [LoRASelection] = []
+        for configuration in profile.loras {
+            guard configuration.conditioning == nil,
+                  let localURL = models.first(where: { $0.id == configuration.modelID })?.localURL,
+                  FileManager.default.fileExists(atPath: localURL.path) else {
+                statusMessage = "找不到可用的 Profile LoRA：\(configuration.modelID)"
+                return nil
+            }
+            result.append(.init(adapterID: configuration.modelID, localURL: localURL, scale: configuration.scale))
+        }
+        return result
+    }
+
+    func resolvedPromptEnhancer(for profile: InferenceProfile) -> URL? {
+        guard let id = profile.promptEnhancerModelID else { return nil }
+        return models.first(where: { $0.id == id })?.localURL
     }
 
     func runtimeProfile(from profile: InferenceProfile) -> InferenceProfile? {

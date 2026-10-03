@@ -187,7 +187,8 @@ enum RuntimeProcess {
             forceTerminate(process)
             throw error
         }
-        process.waitUntilExit()
+        // isRunning is already false, so Foundation has collected the exit status.
+        // waitUntilExit can miss its run-loop wakeup when exit races a background task.
         try Task.checkCancellation()
         log.flush()
         return process.terminationStatus
@@ -196,10 +197,16 @@ enum RuntimeProcess {
     /// 先 terminate，還活著就 SIGKILL，並等它真的結束。
     static func forceTerminate(_ process: Process) {
         guard process.isRunning else { return }
+        let pid = process.processIdentifier
         process.terminate()
         if process.isRunning {
-            Darwin.kill(process.processIdentifier, SIGKILL)
+            Darwin.kill(pid, SIGKILL)
         }
-        process.waitUntilExit()
+        // Do not enter Foundation's synchronous run loop on a cooperative executor.
+        // Check OS liveness too: the process may be gone before Foundation notifies us.
+        // Leave reaping and terminationStatus ownership with Foundation.
+        while process.isRunning && Darwin.kill(pid, 0) == 0 {
+            Thread.sleep(forTimeInterval: 0.005)
+        }
     }
 }

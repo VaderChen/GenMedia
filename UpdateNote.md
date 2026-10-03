@@ -6,13 +6,30 @@
 
 尚無新的變更。
 
+## 1.26.1004 — 2026-10-03
+
+本版提供已完成 Apple 公證與 Gatekeeper 驗證的 Apple Silicon 安裝包。
+
+- **6 步生成與編輯圖片**：Qwen 2.1 Turbo（Viggle v0.3）提供文生圖及單圖編輯 Profile，可與原有一般模型切換。
+- **提示詞增強**：Qwen PE 提供文生圖與圖生圖兩種模式，把簡短指令展開為詳細描述，保留原始指令、輸出尺寸與 Seed。
+- **新增有聲影片模型**：LTX-2.5 Distilled Q4 支援文生影與同步立體聲，採 8 步生成及 3 步細化；屬實驗性功能，建議 32 GB 以上記憶體。
+- **更多低步數影片選擇**：加入 H3 LightX2V Turbo v1.2 的 4 步 LoRA，支援完整及 Pruned FL2VA。
+- **大量素材更好操作**：改善工作區分頁、範圍選取及 Profile 篩選速度；音樂 WAV 輸出更快，減少模型載入與生成時的重複運算及暫存記憶體，維持既有 UI、操作與生成設定。
+- **工作接續更可靠**：重新開啟工作區時保留一般／Turbo／提示詞增強 Profile，改善生成結束與資源釋放時的等待問題。
+
+全部沿用本機 Swift／MLX 推論，不需安裝 Python；模型與 LoRA 權重需在模型中心另行下載。提示詞增強會增加前處理時間；低步數 LoRA 不會降低主模型的記憶體需求。
+
+Qwen Turbo 已通過 256×256 生成及改色編輯；LTX-2.5 已確認 256×256、9 幀影音輸出。H3 v1.2 的完整影片效果，以及 LTX-2.5 長片、高解析度和音訊品質仍待驗證。H3 仍有兩項既有 VAE 時間分段測試失敗，詳見驗證紀錄。
+
+[下載與中英文版本說明](https://github.com/VaderChen/GenMedia/releases/tag/v1.26.1004) · [Qwen 指南](docs/QWEN_IMAGE_21.md) · [LoRA 指南](docs/LORAS.md) · [驗證紀錄](docs/VALIDATION.md) · [效能紀錄](docs/PERFORMANCE_CHANGES.md)
+
 ## 1.26.1003 — 2026-10-03
 
 本版提供已完成 Apple 公證與 Gatekeeper 驗證的 Apple Silicon 安裝包。
 
 - **4 種新圖像風格**：Z-Image Turbo 新增鉛筆素描、吉卜力風格、週六早晨卡通與復古彩色電影 LoRA，可從模型中心下載並在既有選單切換。
 - **4 種影片鏡頭運動**：LTX 新增鏡頭推近、拉遠、左移與右移，各提供 MLX Q4／GGUF Q3 文生影 Profile。
-- **3 組低步數文生影 LoRA**：MiniMax H3 新增 LightX2V 4 步、8 步，以及 Turbo v4（預設 6 步，可調整為 4–8 步），共 11 個對應預設。選擇 Profile 會帶入步數與採樣設定，並檢查基底模型與 LoRA 相容性。
+- **3 組低步數文生影 LoRA**：MiniMax H3 新增 LightX2V 4 步、8 步，以及 Turbo v4（預設 6 步，可調整為 4–8 步），共 11 個對應預設。選擇 Profile 後，使用「套用 Profile 預設值」帶入步數；採樣設定由程式處理，並檢查基底模型與 LoRA 相容性。
 - **維持原有操作的效能改善**：減少原圖預覽與音訊資訊讀取的暫存記憶體；Qwen-Image 2.1 重用同次生成的固定資料，減少重複運算。UI、操作方式、生成參數與模型精度保持不變。
 - **純本機生成**：新增 LoRA 維持 Swift／MLX 推論，不需額外 Python 環境；模型與 LoRA 權重另行下載。四語 README 與 LoRA 使用指南同步更新。
 

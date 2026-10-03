@@ -124,6 +124,8 @@ public struct LTXDiffusionScheduler: Sendable {
         videoAttentionMask: MLXArray? = nil,
         audioAttentionMask: MLXArray? = nil,
         sigmas: [Float] = LTXDiffusionScheduler.distilledSigmas,
+        videoKeyframeMask: MLXArray? = nil,
+        ancestralNoiseSeed: UInt64? = nil,
         progress: ((Int, Int) -> Void)? = nil
     ) throws -> (video: MLXArray, audio: MLXArray) {
         guard sigmas.count >= 2, sigmas.allSatisfy({ $0.isFinite && $0 >= 0 }) else {
@@ -133,6 +135,11 @@ public struct LTXDiffusionScheduler: Sendable {
             throw LTXVideoRuntimeError.invalidConfiguration(
                 "LTX 去噪 latent 必須是 [batch, tokens, channels]。"
             )
+        }
+        if model.transformer.configuration.useKeyframesEmbedding {
+            guard videoKeyframeMask?.shape == [videoLatent.shape[0], videoLatent.shape[1], 1] else {
+                throw LTXVideoRuntimeError.invalidConfiguration("LTX-2.5 需要與影片 token 對齊的首幀 mask。")
+            }
         }
         let videoClean = videoCleanLatent ?? videoLatent
         let audioClean = audioCleanLatent ?? audioLatent
@@ -155,6 +162,7 @@ public struct LTXDiffusionScheduler: Sendable {
         var audio = audioLatent
         let totalSteps = sigmas.count - 1
         for step in 0..<totalSteps {
+            try Task.checkCancellation()
             let sigma = sigmas[step]
             let sigmaNext = sigmas[step + 1]
             let timestep = sigmaToTimestep(sigma, dtype: video.dtype)
@@ -167,7 +175,8 @@ public struct LTXDiffusionScheduler: Sendable {
                 videoPositions: videoPositions,
                 audioPositions: audioPositions,
                 videoAttentionMask: videoAttentionMask,
-                audioAttentionMask: audioAttentionMask
+                audioAttentionMask: audioAttentionMask,
+                videoKeyframeMask: videoKeyframeMask
             )
             let videoDenoised = applyDenoiseMask(
                 prediction.video, clean: videoClean, mask: videoMask
@@ -175,18 +184,31 @@ public struct LTXDiffusionScheduler: Sendable {
             let audioDenoised = applyDenoiseMask(
                 prediction.audio, clean: audioClean, mask: audioMask
             )
-            video = eulerStep(
-                sample: video, denoised: videoDenoised,
-                sigma: sigma, sigmaNext: sigmaNext
-            )
-            audio = eulerStep(
-                sample: audio, denoised: audioDenoised,
-                sigma: sigma, sigmaNext: sigmaNext
-            )
+            if let ancestralNoiseSeed {
+                video = ancestralStep(sample: video, denoised: videoDenoised, sigma: sigma, sigmaNext: sigmaNext,
+                    noise: MLXRandom.normal(video.shape, key: MLXRandom.key(ancestralNoiseSeed &+ UInt64(step * 2))))
+                audio = ancestralStep(sample: audio, denoised: audioDenoised, sigma: sigma, sigmaNext: sigmaNext,
+                    noise: MLXRandom.normal(audio.shape, key: MLXRandom.key(ancestralNoiseSeed &+ UInt64(step * 2 + 1))))
+            } else {
+                video = eulerStep(sample: video, denoised: videoDenoised, sigma: sigma, sigmaNext: sigmaNext)
+                audio = eulerStep(sample: audio, denoised: audioDenoised, sigma: sigma, sigmaNext: sigmaNext)
+            }
             MLX.eval(video, audio)
             progress?(step + 1, totalSteps)
         }
         return (video, audio)
+    }
+
+    /// Rectified-flow ancestral Euler, eta=1 and s_noise=1 as trained for LTX-2.5.
+    public static func ancestralStep(sample: MLXArray, denoised: MLXArray, sigma: Float,
+                                     sigmaNext: Float, noise: MLXArray) -> MLXArray {
+        guard sigmaNext > 0, sigma > 0 else { return denoised.asType(sample.dtype) }
+        let sigmaDown = sigmaNext * sigmaNext / sigma
+        let ratio = sigmaDown / sigma
+        let alphaRatio = (1 - sigmaNext) / (1 - sigmaDown)
+        let noiseScale = sqrt(max(0, sigmaNext * sigmaNext - sigmaDown * sigmaDown * alphaRatio * alphaRatio))
+        let next = (sample.asType(.float32) * ratio + denoised.asType(.float32) * (1 - ratio)) * alphaRatio
+        return (next + noise.asType(.float32) * noiseScale).asType(sample.dtype)
     }
 
     private static func applyDenoiseMask(

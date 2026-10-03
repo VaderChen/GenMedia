@@ -1,5 +1,6 @@
 import { invoke, onActivity, onClipboardImage, onState } from "./bridge.js";
 import { mergeActivityState } from "./activity-state.js";
+import { profileAssignment, resolveProfileAssignment } from "./profile-assignment.js";
 import { createAutomaticFlowPlan } from "./automatic-flow.js";
 import {
   refreshModelProgressDOM,
@@ -1557,13 +1558,7 @@ function currentWorkspaceTabDraft() {
         (candidate) => candidate.id === profileID && candidate.capability === capability,
       );
       if (!profile) return null;
-      return {
-        profileID: profile.id,
-        capability: profile.capability,
-        modelID: profile.modelID,
-        modelRevision: profile.modelRevision,
-        architecture: profile.architecture,
-      };
+      return profileAssignment(profile);
     })
     .filter(Boolean);
   return {
@@ -1622,14 +1617,9 @@ function applyActiveWorkspaceTabDraftLocally(targetState) {
   };
   const resolvedProfileIDs = { ...targetState.activeProfileIDs };
   (draft.profileAssignments || []).forEach((assignment) => {
-    const profile = targetState.profiles.find((candidate) =>
-      candidate.capability === assignment.capability
-        && (candidate.id === assignment.profileID
-          || (candidate.modelID === assignment.modelID
-            && candidate.modelRevision === assignment.modelRevision
-            && candidate.architecture === assignment.architecture)),
-    );
+    const profile = resolveProfileAssignment(targetState.profiles, assignment);
     if (profile) resolvedProfileIDs[assignment.capability] = profile.id;
+    else delete resolvedProfileIDs[assignment.capability];
   });
   targetState.activeProfileIDs = resolvedProfileIDs;
 }

@@ -1,6 +1,7 @@
 import Foundation
 import GenImageCore
 import ImageIO
+import MLX
 
 public actor Qwen21ImageService: TextToImageGenerating, ImageToImageGenerating {
     private nonisolated let outputLocation: OutputDirectoryStorage
@@ -18,6 +19,8 @@ public actor Qwen21ImageService: TextToImageGenerating, ImageToImageGenerating {
     public func generate(request: TextToImageRequest, progress: @escaping @Sendable (Double) -> Void) async throws -> [MediaAsset] {
         guard request.profile.capability == .textToImage else { throw Failure.invalid("Profile 不是文生圖。") }
         return try await run(projectID: request.projectID, recipe: request.recipe, profile: request.profile,
+            profileLoRAs: request.profileLoRAs,
+            promptEnhancerURL: request.promptEnhancerURL,
             modelURL: URL(fileURLWithPath: request.profile.modelID), source: nil,
             parentID: request.sourceAsset?.id, progress: progress)
     }
@@ -29,11 +32,15 @@ public actor Qwen21ImageService: TextToImageGenerating, ImageToImageGenerating {
             throw Failure.invalid("請先選取可讀取的本機圖片。")
         }
         return try await run(projectID: request.projectID, recipe: request.recipe, profile: request.profile,
+            profileLoRAs: request.profileLoRAs,
+            promptEnhancerURL: request.promptEnhancerURL,
             modelURL: request.modelURL, source: request.sourceAsset,
             parentID: request.sourceAsset.id, progress: progress)[0]
     }
 
     private func run(projectID: UUID, recipe: GenerationRecipe, profile: InferenceProfile,
+                     profileLoRAs: [LoRASelection],
+                     promptEnhancerURL: URL?,
                      modelURL: URL, source: MediaAsset?, parentID: UUID?,
                      progress: @escaping @Sendable (Double) -> Void) async throws -> [MediaAsset] {
         let directory = outputLocation.url
@@ -44,7 +51,7 @@ public actor Qwen21ImageService: TextToImageGenerating, ImageToImageGenerating {
         guard profile.architecture == .mlxSwift, ImageGenerationRouter.isQwen21(recipe: recipe, profile: profile) else {
             throw Failure.invalid("不相容的模型或 Runtime。")
         }
-        guard recipe.lora == nil else { throw Failure.invalid("Qwen-Image 2.1 尚未支援 LoRA。") }
+        let lora = try Self.validatedLoRA(recipe: recipe, profile: profile, resolved: profileLoRAs)
         guard recipe.negativePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw Failure.invalid("Qwen-Image 2.1 使用 CFG=1，請清空負面提示詞。")
         }
@@ -57,6 +64,14 @@ public actor Qwen21ImageService: TextToImageGenerating, ImageToImageGenerating {
             (try? modelURL.appendingPathComponent($0).resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]))
                 .map { $0.isRegularFile == true && ($0.fileSize ?? 0) > 0 } ?? false
         }) else { throw Failure.invalid("模型尚未完整安裝。") }
+        let enhancer = try Self.validatedEnhancer(profile: profile, modelURL: promptEnhancerURL)
+        var prompt = recipe.prompt
+        if let enhancer, let promptEnhancerURL {
+            defer { Memory.clearCache() }
+            prompt = try await QwenPromptEnhancementService.enhance(prompt: prompt, imageURL: source?.fileURL,
+                modelURL: promptEnhancerURL, kind: enhancer, seed: recipe.seed) { progress($0 * 0.15) }
+        }
+        try Task.checkCancellation()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let outputs = (0..<(source == nil ? recipe.outputCount : 1)).map { _ in
             OutputFileNaming.imageURL(in: directory, pathExtension: "png")
@@ -71,8 +86,10 @@ public actor Qwen21ImageService: TextToImageGenerating, ImageToImageGenerating {
             if !completed { outputs.forEach { try? FileManager.default.removeItem(at: $0) } }
         }
         let payload = Payload(modelDirectory: modelURL.path, outputPaths: outputs.map(\.path),
-            inputPath: source?.fileURL?.path, prompt: recipe.prompt, negativePrompt: recipe.negativePrompt,
-            width: recipe.width, height: recipe.height, steps: recipe.steps, seed: recipe.seed)
+            inputPath: source?.fileURL?.path, prompt: prompt, negativePrompt: recipe.negativePrompt,
+            width: recipe.width, height: recipe.height, steps: recipe.steps, seed: recipe.seed,
+            loraPath: lora?.localURL.path, loraScale: lora?.scale,
+            acceleration: lora == nil ? nil : .viggleV03)
         try JSONEncoder().encode(payload).write(to: requestURL, options: .atomic)
         let log = try RuntimeLog(at: logURL)
         defer { log.close() }
@@ -80,7 +97,8 @@ public actor Qwen21ImageService: TextToImageGenerating, ImageToImageGenerating {
         let status = try await RuntimeProcess.run(executable: configuredWorker ?? Self.workerExecutable(),
             arguments: ["--request", requestURL.path], log: log) {
                 if let value = log.latestProgress(useMaximum: true), value > last {
-                    last = value; progress(min(value, 0.99))
+                    last = value
+                    progress(min(enhancer == nil ? value : 0.15 + value * 0.85, 0.99))
                 }
             }
         try Task.checkCancellation()
@@ -105,6 +123,49 @@ public actor Qwen21ImageService: TextToImageGenerating, ImageToImageGenerating {
     private struct Payload: Encodable {
         let modelDirectory: String; let outputPaths: [String]; let inputPath: String?
         let prompt: String; let negativePrompt: String; let width: Int; let height: Int; let steps: Int; let seed: UInt64
+        let loraPath: String?; let loraScale: Double?; let acceleration: QwenImage21Acceleration?
+    }
+
+    static func validatedLoRA(recipe: GenerationRecipe, profile: InferenceProfile,
+                              resolved: [LoRASelection]) throws -> LoRASelection? {
+        guard profile.loras.count == resolved.count,
+              zip(profile.loras, resolved).allSatisfy({ configuration, selection in
+                  configuration.modelID == QwenImage21Acceleration.modelID &&
+                  selection.adapterID == configuration.modelID && configuration.scale == selection.scale &&
+                  configuration.conditioning == nil
+              }) else {
+            throw Failure.invalid("Qwen 2.1 Profile 的 LoRA 尚未完整解析，或不是支援的 Viggle Turbo。")
+        }
+        var selections = resolved
+        if let manual = recipe.lora {
+            if !selections.contains(where: {
+                $0.localURL.standardizedFileURL == manual.localURL.standardizedFileURL && $0.scale == manual.scale
+            }) { selections.append(manual) }
+        }
+        guard !selections.isEmpty else { return nil }
+        guard selections.count == 1, let selected = selections.first,
+              selected.adapterID == QwenImage21Acceleration.modelID ||
+                selected.localURL.lastPathComponent == QwenImage21Acceleration.filename else {
+            throw Failure.invalid("Qwen 2.1 目前只支援單一 Viggle Turbo v0.3 r128 LoRA。")
+        }
+        guard selected.scale == 1, recipe.steps == QwenImage21Acceleration.viggleV03.steps else {
+            throw Failure.invalid("Viggle Turbo v0.3 請使用 6 步與 LoRA 權重 1；可套用 Turbo Profile 預設值。")
+        }
+        guard let values = try? selected.localURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              values.isRegularFile == true, (values.fileSize ?? 0) > 0 else {
+            throw Failure.invalid("找不到 Viggle Turbo LoRA 檔案。")
+        }
+        return selected
+    }
+
+    static func validatedEnhancer(profile: InferenceProfile, modelURL: URL?) throws -> QwenImage21PromptEnhancer? {
+        guard let id = profile.promptEnhancerModelID else {
+            guard modelURL == nil else { throw Failure.invalid("Profile 未指定提示詞增強模型。") }
+            return nil
+        }
+        guard let kind = QwenImage21PromptEnhancer.model(for: id), kind.capability == profile.capability,
+              modelURL != nil else { throw Failure.invalid("提示詞增強模型與 Profile 不符，或尚未安裝。") }
+        return kind
     }
     enum Failure: LocalizedError {
         case invalid(String)

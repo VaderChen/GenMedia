@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 
@@ -6,6 +7,29 @@ import Testing
 // 這一層是三個 Runtime 服務共用的子行程執行流程，剛好也是整個 Runtime 目錄裡少數不需要模型
 // 權重就能實際執行的部分 —— 用 /bin/sh 就能把成功、失敗、逾時與取消四條路徑都跑過一次。
 struct SubprocessRuntimeTests {
+    @Test(.timeLimit(.minutes(1)))
+    func terminationRacingNaturalExitDoesNotTrapTheExecutor() async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<8 {
+                group.addTask {
+                    for _ in 0..<4 {
+                        let process = Process()
+                        process.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+                        process.standardInput = FileHandle.nullDevice
+                        process.standardOutput = FileHandle.nullDevice
+                        process.standardError = FileHandle.nullDevice
+                        try process.run()
+                        let pid = process.processIdentifier
+                        await Task.yield()
+                        RuntimeProcess.forceTerminate(process)
+                        #expect(Darwin.kill(pid, 0) != 0)
+                    }
+                }
+            }
+            try await group.waitForAll()
+        }
+    }
+
     private func temporaryLogURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("genimage-subprocess-test-\(UUID().uuidString).log")

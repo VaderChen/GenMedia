@@ -1771,10 +1771,10 @@ function buildLineage(assets, start) {
   let current = start;
   while (current && !visited.has(current.id)) {
     visited.add(current.id);
-    result.unshift(current);
+    result.push(current);
     current = current.parentAssetID ? byID.get(current.parentAssetID) : null;
   }
-  return result;
+  return result.reverse();
 }
 
 function emptyState(title, description, icon) {

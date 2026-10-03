@@ -25,7 +25,8 @@ public enum Qwen21Pipeline {
             referenceWidth: reference.map { Int($0.extent.width) / 16 },
             height: request.height / 16, width: request.width / 16)
         let scheduler = try readJSON(Qwen21Scheduler.self, at: root.appendingPathComponent("scheduler/scheduler_config.json"))
-        let sigmas = try scheduler.sigmas(steps: request.steps, imageTokens: request.height * request.width / 256)
+        let sigmas = try scheduler.sigmas(steps: request.steps, imageTokens: request.height * request.width / 256,
+                                         acceleration: request.acceleration)
         for (index, output) in request.outputPaths.enumerated() {
             try Task.checkCancellation()
             let base = 0.2 + 0.8 * Double(index) / Double(request.outputPaths.count)
@@ -49,7 +50,8 @@ public enum Qwen21Pipeline {
     private static func denoise(root: URL, request: Qwen21Request, seed: UInt64,
                                 conditioning: Qwen21Conditioning, reference: MLXArray?, layout: Qwen21Layout,
                                 sigmas: [Float], progress: (Int) -> Void) throws -> MLXArray {
-        let transformer = try Qwen21Transformer(directory: root.appendingPathComponent("transformer"))
+        let transformer = try Qwen21Transformer(directory: root.appendingPathComponent("transformer"),
+            loraURL: request.loraPath.map { URL(fileURLWithPath: $0) }, loraScale: request.loraScale ?? 1)
         let prepared = try transformer.prepare(conditioning: conditioning.hidden, layout: layout)
         var x = MLXRandom.normal([1, request.height * request.width / 256, 64], key: MLXRandom.key(seed)).asType(.bfloat16)
         for step in 0..<request.steps {
